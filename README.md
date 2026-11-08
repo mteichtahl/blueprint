@@ -45,7 +45,7 @@ npm run bmg -- github connect    # CodeConnections link (approve once in the AWS
 npm run bmg -- github protect    # makes the repo public and locks it down
 npm run bmg -- secrets set <name> --env prod
 npm run bmg -- email setup --env prod --test-to you@example.com
-                                 # Gmail SMTP as hello@: stores the app password in Secrets Manager
+                                 # Gmail SMTP as kyra@: stores the app password in Secrets Manager
 npm run bmg -- pipeline deploy   # CodeBuild runner projects
 git push origin main             # pipeline deploys staging, then prod after approval
 npm run bmg -- status

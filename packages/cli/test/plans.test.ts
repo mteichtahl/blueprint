@@ -109,9 +109,9 @@ describe('gmail smtp', () => {
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
-      username: 'hello@blueprintmusic.group',
+      username: 'kyra@blueprintmusic.group',
       password: 'abcdefghijklmnop',
-      from: '"Blueprint Music Group" <hello@blueprintmusic.group>',
+      from: '"Blueprint Music Group" <kyra@blueprintmusic.group>',
     });
   });
   it('uses implicit TLS on 465', () => {
