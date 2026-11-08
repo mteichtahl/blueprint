@@ -8,6 +8,14 @@ import {
   IAMClient,
   UpdateAccountPasswordPolicyCommand,
 } from '@aws-sdk/client-iam';
+import {
+  CloudFormationClient,
+  DeleteStackCommand,
+  DescribeStacksCommand,
+  ListStackResourcesCommand,
+  UpdateTerminationProtectionCommand,
+  waitUntilStackDeleteComplete,
+} from '@aws-sdk/client-cloudformation';
 import { PutPublicAccessBlockCommand, S3ControlClient } from '@aws-sdk/client-s3-control';
 import { assertAccount, isNotFound, readConfig } from '../lib/aws.ts';
 import { accountStacks, deployArgs } from '../lib/plans.ts';
@@ -34,11 +42,22 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
   await assertAccount(cfg);
   const iam = new IAMClient({ region: cfg.account.homeRegion });
   const existing = await detectExistingServices(cfg);
+  const [guardrailsStack, globalStack] = accountStacks(cfg) as [string, string];
+  const homeCfn = new CloudFormationClient({ region: cfg.account.homeRegion });
+  const edgeCfn = new CloudFormationClient({ region: cfg.account.edgeRegion });
+
+  // Services our own stack already manages must not be "skipped", or the
+  // next deploy would delete them. Only skip ones created outside the stack.
+  const owned = await ownedResourceTypes(homeCfn, guardrailsStack);
   const skip = {
-    guardDuty: existing.guardDuty,
-    securityHub: existing.securityHub,
-    config: existing.config,
+    guardDuty: existing.guardDuty && !owned.has('AWS::GuardDuty::Detector'),
+    securityHub: existing.securityHub && !owned.has('AWS::SecurityHub::Hub'),
+    config: existing.config && !owned.has('AWS::Config::ConfigurationRecorder'),
+    accessAnalyzer: existing.accessAnalyzer && !owned.has('AWS::AccessAnalyzer::Analyzer'),
   };
+  const failedFirstAttempts = (
+    await Promise.all([failedCreate(homeCfn, guardrailsStack), failedCreate(edgeCfn, globalStack)])
+  ).filter((x): x is NonNullable<typeof x> => x !== undefined);
   for (const [svc, on] of Object.entries(skip)) {
     if (on)
       warn(`${svc} is already enabled in this account; the guardrails stack will not create it.`);
@@ -50,6 +69,19 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
     .filter(Boolean);
 
   const steps: PlanStep[] = [
+    ...failedFirstAttempts.map(({ client, name, status }): PlanStep => ({
+      description: `Remove ${name} left in ${status} by a failed first deploy (it never held data; retained keys/buckets stay)`,
+      run: async () => {
+        await client.send(
+          new UpdateTerminationProtectionCommand({
+            StackName: name,
+            EnableTerminationProtection: false,
+          }),
+        );
+        await client.send(new DeleteStackCommand({ StackName: name }));
+        await waitUntilStackDeleteComplete({ client, maxWaitTime: 900 }, { StackName: name });
+      },
+    })),
     {
       description: 'Block all S3 public access at the account level',
       run: async () => {
@@ -133,4 +165,45 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
     '\nNext: each admin signs in, sets a new password, registers MFA (passkey or hardware key),\n' +
       `then uses the ${cfg.project}-admin / ${cfg.project}-readonly roles. Root: add hardware MFA and delete any root access keys.`,
   );
+}
+
+/** Resource types already managed by a stack (empty if the stack does not exist). */
+async function ownedResourceTypes(
+  client: CloudFormationClient,
+  stackName: string,
+): Promise<Set<string>> {
+  const types = new Set<string>();
+  try {
+    let NextToken: string | undefined;
+    do {
+      const page = await client.send(
+        new ListStackResourcesCommand({ StackName: stackName, NextToken }),
+      );
+      for (const r of page.StackResourceSummaries ?? []) {
+        if (r.ResourceType && r.ResourceStatus !== 'DELETE_COMPLETE') types.add(r.ResourceType);
+      }
+      NextToken = page.NextToken;
+    } while (NextToken);
+  } catch (err) {
+    if (!/does not exist/.test((err as Error).message)) throw err;
+  }
+  return types;
+}
+
+/**
+ * A stack whose very first create failed sits in ROLLBACK_COMPLETE and can only
+ * be deleted, and termination protection blocks that. Detect it so setup can
+ * clear it before retrying.
+ */
+async function failedCreate(client: CloudFormationClient, name: string) {
+  try {
+    const status = (await client.send(new DescribeStacksCommand({ StackName: name }))).Stacks?.[0]
+      ?.StackStatus;
+    if (status === 'ROLLBACK_COMPLETE' || status === 'ROLLBACK_FAILED') {
+      return { client, name, status };
+    }
+  } catch (err) {
+    if (!/does not exist/.test((err as Error).message)) throw err;
+  }
+  return undefined;
 }

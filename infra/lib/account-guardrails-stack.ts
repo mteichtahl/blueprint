@@ -32,7 +32,12 @@ import { createPermissionBoundary } from './permission-boundary.ts';
 
 export interface AccountGuardrailsStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   /** Skip services already enabled in the account (detected by `bmg account setup`). */
-  readonly skip?: { guardDuty?: boolean; securityHub?: boolean; config?: boolean };
+  readonly skip?: {
+    guardDuty?: boolean;
+    securityHub?: boolean;
+    config?: boolean;
+    accessAnalyzer?: boolean;
+  };
 }
 
 /**
@@ -229,10 +234,13 @@ export class AccountGuardrailsStack extends BmgStack {
       );
     }
 
-    new CfnAnalyzer(this, 'AccessAnalyzer', {
-      type: 'ACCOUNT',
-      analyzerName: `${cfg.project}-account-analyzer`,
-    });
+    // AWS allows one account-level analyzer per region; reuse an existing one.
+    if (!skip.accessAnalyzer) {
+      new CfnAnalyzer(this, 'AccessAnalyzer', {
+        type: 'ACCOUNT',
+        analyzerName: `${cfg.project}-account-analyzer`,
+      });
+    }
 
     // ---- Alerts: high-severity GuardDuty and critical Security Hub findings -------
     new Rule(this, 'GuardDutyHighFindings', {

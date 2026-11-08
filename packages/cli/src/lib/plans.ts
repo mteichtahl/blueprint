@@ -74,6 +74,7 @@ export interface SkipServices {
   guardDuty?: boolean;
   securityHub?: boolean;
   config?: boolean;
+  accessAnalyzer?: boolean;
 }
 
 export function accountStacks(cfg: BmgConfig): string[] {
@@ -85,6 +86,7 @@ export function deployArgs(stacks: string[], skip: SkipServices = {}): string[] 
   if (skip.guardDuty) ctx.push('-c', 'bmg:skipGuardDuty=true');
   if (skip.securityHub) ctx.push('-c', 'bmg:skipSecurityHub=true');
   if (skip.config) ctx.push('-c', 'bmg:skipConfig=true');
+  if (skip.accessAnalyzer) ctx.push('-c', 'bmg:skipAccessAnalyzer=true');
   return ['deploy', ...stacks, '--require-approval', 'broadening', ...ctx];
 }
 

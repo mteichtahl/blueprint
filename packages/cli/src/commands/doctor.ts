@@ -1,3 +1,4 @@
+import { AccessAnalyzerClient, ListAnalyzersCommand } from '@aws-sdk/client-accessanalyzer';
 import { BedrockClient, ListInferenceProfilesCommand } from '@aws-sdk/client-bedrock';
 import {
   BedrockAgentCoreControlClient,
@@ -26,6 +27,7 @@ export interface ExistingServices {
   guardDuty: boolean;
   securityHub: boolean;
   config: boolean;
+  accessAnalyzer: boolean;
 }
 
 /** Detect security services already on in the account, so the guardrails stack can skip them. */
@@ -42,7 +44,11 @@ export async function detectExistingServices(cfg: BmgConfig): Promise<ExistingSe
   const rec = await new ConfigServiceClient({ region }).send(
     new DescribeConfigurationRecordersCommand({}),
   );
+  const analyzers = await new AccessAnalyzerClient({ region }).send(
+    new ListAnalyzersCommand({ type: 'ACCOUNT' }),
+  );
   return {
+    accessAnalyzer: (analyzers.analyzers ?? []).some((a) => a.status === 'ACTIVE'),
     guardDuty: (gd.DetectorIds?.length ?? 0) > 0,
     securityHub,
     config: (rec.ConfigurationRecorders?.length ?? 0) > 0,

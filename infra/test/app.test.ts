@@ -86,11 +86,14 @@ describe('account guardrails', () => {
 
   it('can skip services that already exist in the account', () => {
     const app = new App();
-    const s = buildApp(app, cfg, { skip: { guardDuty: true, securityHub: true, config: true } });
+    const s = buildApp(app, cfg, {
+      skip: { guardDuty: true, securityHub: true, config: true, accessAnalyzer: true },
+    });
     const tt = Template.fromStack(s.guardrails);
     tt.resourceCountIs('AWS::GuardDuty::Detector', 0);
     tt.resourceCountIs('AWS::SecurityHub::Hub', 0);
     tt.resourceCountIs('AWS::Config::ConfigurationRecorder', 0);
+    tt.resourceCountIs('AWS::AccessAnalyzer::Analyzer', 0);
   });
 });
 

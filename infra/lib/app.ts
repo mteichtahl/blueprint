@@ -9,7 +9,7 @@ import { ToolingStack } from './tooling-stack.ts';
 export interface BuildAppOptions {
   /** Include the tooling stack (needs github.connectionArn). Default: when the ARN is set. */
   includeTooling?: boolean;
-  skip?: { guardDuty?: boolean; securityHub?: boolean; config?: boolean };
+  skip?: { guardDuty?: boolean; securityHub?: boolean; config?: boolean; accessAnalyzer?: boolean };
   version?: string;
 }
 

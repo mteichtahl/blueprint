@@ -18,6 +18,7 @@ const skip = {
   guardDuty: app.node.tryGetContext('bmg:skipGuardDuty') === 'true',
   securityHub: app.node.tryGetContext('bmg:skipSecurityHub') === 'true',
   config: app.node.tryGetContext('bmg:skipConfig') === 'true',
+  accessAnalyzer: app.node.tryGetContext('bmg:skipAccessAnalyzer') === 'true',
 };
 buildApp(app, cfg, { skip, version: process.env.BMG_VERSION ?? process.env.GITHUB_SHA ?? 'local' });
 app.synth();

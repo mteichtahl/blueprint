@@ -15,6 +15,7 @@
     "@types/nodemailer": "^8.0.2"
   },
   "dependencies": {
+    "@aws-sdk/client-accessanalyzer": "^3.1164.0",
     "@aws-sdk/client-bedrock": "^3.1164.0",
     "@aws-sdk/client-bedrock-agentcore-control": "^3.1164.0",
     "@aws-sdk/client-cloudformation": "^3.1164.0",
