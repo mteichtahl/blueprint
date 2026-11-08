@@ -77,6 +77,40 @@ export interface SkipServices {
   accessAnalyzer?: boolean;
 }
 
+export interface ExistingServiceIds {
+  guardDuty: string[];
+  securityHub: string[];
+  config: string[];
+  accessAnalyzer: string[];
+}
+
+/** CloudFormation resource statuses that mean the stack really manages the resource. */
+export function isLiveResourceStatus(status: string | undefined): boolean {
+  return (
+    !!status &&
+    /(CREATE|UPDATE|IMPORT)_COMPLETE$|UPDATE_IN_PROGRESS$|UPDATE_FAILED$/.test(status) &&
+    !status.startsWith('DELETE')
+  );
+}
+
+/**
+ * A service is "external" (skip creating it) when an instance exists that our
+ * stack does not own. AWS allows one detector / hub / recorder / account
+ * analyzer per region, so creating another would fail.
+ */
+export function externalServices(
+  existing: ExistingServiceIds,
+  owned: Set<string>,
+): Required<SkipServices> {
+  const external = (ids: string[]) => ids.some((id) => !owned.has(id));
+  return {
+    guardDuty: external(existing.guardDuty),
+    securityHub: external(existing.securityHub),
+    config: external(existing.config),
+    accessAnalyzer: external(existing.accessAnalyzer),
+  };
+}
+
 export function accountStacks(cfg: BmgConfig): string[] {
   return [names.stack(cfg, 'account-guardrails'), names.stack(cfg, 'account-global')];
 }

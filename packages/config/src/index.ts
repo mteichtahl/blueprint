@@ -39,6 +39,19 @@ export const BmgConfigSchema = z.object({
     edgeRegion: z.literal('us-east-1').default('us-east-1'),
     /** Backup copies stay in Australia. */
     backupRegion: awsRegion.default('ap-southeast-4'),
+    /**
+     * Account-level security services that already existed before BMG (one per
+     * region is allowed). Written by `bmg account setup`; the guardrails stack
+     * reuses these instead of creating its own, however it is deployed.
+     */
+    existingServices: z
+      .object({
+        guardDuty: z.boolean().default(false),
+        securityHub: z.boolean().default(false),
+        config: z.boolean().default(false),
+        accessAnalyzer: z.boolean().default(false),
+      })
+      .default({ guardDuty: false, securityHub: false, config: false, accessAnalyzer: false }),
   }),
   toolingQualifier: qualifier.default('bmgtool'),
   environments: z.object({
