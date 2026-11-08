@@ -14,6 +14,7 @@ import {
   smtpSecretPayload,
   toolingBootstrap,
   toolingRetainedResources,
+  partitionAlarms,
 } from '../src/lib/plans.ts';
 import { redact } from '../src/lib/runtime.ts';
 
@@ -228,5 +229,20 @@ describe('isAbandonedCreate', () => {
     ]) {
       expect(isAbandonedCreate(st)).toBe(false);
     }
+  });
+});
+
+describe('partitionAlarms', () => {
+  it('only counts alarms named for this project', () => {
+    const { ours, others } = partitionAlarms(
+      [
+        { name: 'bmg-prod-api-5xx' },
+        { name: 'TargetTracking-table/test-AlarmLow-3c0d' },
+        { name: 'bmgx-other' },
+      ],
+      'bmg',
+    );
+    expect(ours.map((a) => a.name)).toEqual(['bmg-prod-api-5xx']);
+    expect(others).toHaveLength(2);
   });
 });
