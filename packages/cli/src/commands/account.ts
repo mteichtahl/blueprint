@@ -18,9 +18,11 @@ import {
 } from '@aws-sdk/client-cloudformation';
 import { PutPublicAccessBlockCommand, S3ControlClient } from '@aws-sdk/client-s3-control';
 import { assertAccount, isNotFound, readConfig } from '../lib/aws.ts';
-import { accountStacks, deployArgs } from '../lib/plans.ts';
+import { configPath, saveConfig } from '@bmg/config';
+import { accountStacks, deployArgs, externalServices, isLiveResourceStatus } from '../lib/plans.ts';
 import {
   cdk,
+  REPO_ROOT,
   executePlan,
   log,
   ok,
@@ -28,6 +30,7 @@ import {
   type GlobalOptions,
   type PlanStep,
 } from '../lib/runtime.ts';
+import { deployWithDiagnostics } from '../lib/stacks.ts';
 import { envBootstrapSteps } from './bootstrap.ts';
 import { detectExistingServices } from './doctor.ts';
 
@@ -46,15 +49,18 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
   const homeCfn = new CloudFormationClient({ region: cfg.account.homeRegion });
   const edgeCfn = new CloudFormationClient({ region: cfg.account.edgeRegion });
 
-  // Services our own stack already manages must not be "skipped", or the
-  // next deploy would delete them. Only skip ones created outside the stack.
-  const owned = await ownedResourceTypes(homeCfn, guardrailsStack);
-  const skip = {
-    guardDuty: existing.guardDuty && !owned.has('AWS::GuardDuty::Detector'),
-    securityHub: existing.securityHub && !owned.has('AWS::SecurityHub::Hub'),
-    config: existing.config && !owned.has('AWS::Config::ConfigurationRecorder'),
-    accessAnalyzer: existing.accessAnalyzer && !owned.has('AWS::AccessAnalyzer::Analyzer'),
-  };
+  // Skip only services whose existing instance is NOT one our stack created:
+  // skipping our own would make the next deploy delete it.
+  const owned = await ownedPhysicalIds(homeCfn, guardrailsStack);
+  const skip = externalServices(existing, owned);
+  // Persist, so any deploy of the app (CLI, cdk, pipeline) reuses them.
+  if (JSON.stringify(skip) !== JSON.stringify(cfg.account.existingServices)) {
+    saveConfig(
+      { ...cfg, account: { ...cfg.account, existingServices: skip } },
+      configPath(REPO_ROOT),
+    );
+    ok('Recorded already-enabled services in bmg.config.json (commit it).');
+  }
   const failedFirstAttempts = (
     await Promise.all([failedCreate(homeCfn, guardrailsStack), failedCreate(edgeCfn, globalStack)])
   ).filter((x): x is NonNullable<typeof x> => x !== undefined);
@@ -127,7 +133,13 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
     {
       description: `Deploy ${accountStacks(cfg).join(' and ')} (boundary, CloudTrail, GuardDuty, Security Hub, Config, admin roles, root alarm, budget)`,
       run: async () => {
-        await cdk(deployArgs(accountStacks(cfg), skip));
+        await deployWithDiagnostics(
+          [
+            { name: guardrailsStack, region: cfg.account.homeRegion },
+            { name: globalStack, region: cfg.account.edgeRegion },
+          ],
+          () => cdk(deployArgs(accountStacks(cfg), skip)),
+        );
       },
     },
     ...envBootstrapSteps(cfg),
@@ -167,12 +179,15 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
   );
 }
 
-/** Resource types already managed by a stack (empty if the stack does not exist). */
-async function ownedResourceTypes(
+/**
+ * Physical ids of resources a stack really manages. Failed or deleted entries
+ * (left behind by an earlier failed deploy) do not count.
+ */
+export async function ownedPhysicalIds(
   client: CloudFormationClient,
   stackName: string,
 ): Promise<Set<string>> {
-  const types = new Set<string>();
+  const ids = new Set<string>();
   try {
     let NextToken: string | undefined;
     do {
@@ -180,14 +195,16 @@ async function ownedResourceTypes(
         new ListStackResourcesCommand({ StackName: stackName, NextToken }),
       );
       for (const r of page.StackResourceSummaries ?? []) {
-        if (r.ResourceType && r.ResourceStatus !== 'DELETE_COMPLETE') types.add(r.ResourceType);
+        if (r.PhysicalResourceId && isLiveResourceStatus(r.ResourceStatus)) {
+          ids.add(r.PhysicalResourceId);
+        }
       }
       NextToken = page.NextToken;
     } while (NextToken);
   } catch (err) {
     if (!/does not exist/.test((err as Error).message)) throw err;
   }
-  return types;
+  return ids;
 }
 
 /**

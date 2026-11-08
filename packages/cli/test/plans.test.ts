@@ -158,3 +158,41 @@ describe('helpers', () => {
     expect(redact('commit d23441a48e516b6c34aea4fa41551a30e30af803')).toContain('d23441a4');
   });
 });
+
+describe('stack status', () => {
+  it('treats any *_IN_PROGRESS status as busy', async () => {
+    const { isBusy } = await import('../src/lib/stacks.ts');
+    expect(isBusy('UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS')).toBe(true);
+    expect(isBusy('UPDATE_IN_PROGRESS')).toBe(true);
+    expect(isBusy('UPDATE_ROLLBACK_COMPLETE')).toBe(false);
+    expect(isBusy(undefined)).toBe(false);
+  });
+});
+
+describe('existing security services', () => {
+  it('skips services that exist outside our stack, but never ones our stack owns', async () => {
+    const { externalServices } = await import('../src/lib/plans.ts');
+    const existing = {
+      guardDuty: ['det-external'],
+      securityHub: ['arn:hub'],
+      config: [],
+      accessAnalyzer: ['arn:analyzer/ours'],
+    };
+    const owned = new Set(['arn:hub', 'arn:analyzer/ours']);
+    expect(externalServices(existing, owned)).toEqual({
+      guardDuty: true,
+      securityHub: false,
+      config: false,
+      accessAnalyzer: false,
+    });
+  });
+
+  it('ignores failed and deleted stack resources when deciding ownership', async () => {
+    const { isLiveResourceStatus } = await import('../src/lib/plans.ts');
+    expect(isLiveResourceStatus('CREATE_COMPLETE')).toBe(true);
+    expect(isLiveResourceStatus('UPDATE_COMPLETE')).toBe(true);
+    expect(isLiveResourceStatus('CREATE_FAILED')).toBe(false);
+    expect(isLiveResourceStatus('DELETE_COMPLETE')).toBe(false);
+    expect(isLiveResourceStatus(undefined)).toBe(false);
+  });
+});

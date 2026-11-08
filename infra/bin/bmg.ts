@@ -14,11 +14,13 @@ const configFile = resolve(
 const cfg = loadConfig(configFile);
 
 const app = new App();
+const ctx = (key: string) => app.node.tryGetContext(key) === 'true';
+const existing = cfg.account.existingServices;
 const skip = {
-  guardDuty: app.node.tryGetContext('bmg:skipGuardDuty') === 'true',
-  securityHub: app.node.tryGetContext('bmg:skipSecurityHub') === 'true',
-  config: app.node.tryGetContext('bmg:skipConfig') === 'true',
-  accessAnalyzer: app.node.tryGetContext('bmg:skipAccessAnalyzer') === 'true',
+  guardDuty: existing.guardDuty || ctx('bmg:skipGuardDuty'),
+  securityHub: existing.securityHub || ctx('bmg:skipSecurityHub'),
+  config: existing.config || ctx('bmg:skipConfig'),
+  accessAnalyzer: existing.accessAnalyzer || ctx('bmg:skipAccessAnalyzer'),
 };
 buildApp(app, cfg, { skip, version: process.env.BMG_VERSION ?? process.env.GITHUB_SHA ?? 'local' });
 app.synth();

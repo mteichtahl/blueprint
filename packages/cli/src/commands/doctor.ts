@@ -23,21 +23,22 @@ export interface Check {
   run: (cfg: BmgConfig) => Promise<{ ok: boolean; detail: string }>;
 }
 
+/** Physical ids of account-level security services found in the home region. */
 export interface ExistingServices {
-  guardDuty: boolean;
-  securityHub: boolean;
-  config: boolean;
-  accessAnalyzer: boolean;
+  guardDuty: string[];
+  securityHub: string[];
+  config: string[];
+  accessAnalyzer: string[];
 }
 
 /** Detect security services already on in the account, so the guardrails stack can skip them. */
 export async function detectExistingServices(cfg: BmgConfig): Promise<ExistingServices> {
   const region = cfg.account.homeRegion;
   const gd = await new GuardDutyClient({ region }).send(new ListDetectorsCommand({}));
-  let securityHub = false;
+  const securityHub: string[] = [];
   try {
-    await new SecurityHubClient({ region }).send(new DescribeHubCommand({}));
-    securityHub = true;
+    const hub = await new SecurityHubClient({ region }).send(new DescribeHubCommand({}));
+    if (hub.HubArn) securityHub.push(hub.HubArn);
   } catch (err) {
     if (!/InvalidAccess|NotFound/.test((err as Error).name)) throw err;
   }
@@ -48,10 +49,10 @@ export async function detectExistingServices(cfg: BmgConfig): Promise<ExistingSe
     new ListAnalyzersCommand({ type: 'ACCOUNT' }),
   );
   return {
-    accessAnalyzer: (analyzers.analyzers ?? []).some((a) => a.status === 'ACTIVE'),
-    guardDuty: (gd.DetectorIds?.length ?? 0) > 0,
+    accessAnalyzer: (analyzers.analyzers ?? []).flatMap((a) => (a.arn ? [a.arn] : [])),
+    guardDuty: gd.DetectorIds ?? [],
     securityHub,
-    config: (rec.ConfigurationRecorders?.length ?? 0) > 0,
+    config: (rec.ConfigurationRecorders ?? []).flatMap((r) => (r.name ? [r.name] : [])),
   };
 }
 
@@ -167,7 +168,7 @@ const checks: Check[] = [
     run: async (cfg) => {
       const e = await detectExistingServices(cfg);
       const on = Object.entries(e)
-        .filter(([, v]) => v)
+        .filter(([, v]) => (v as string[]).length > 0)
         .map(([k]) => k);
       return { ok: true, detail: on.length ? `already on: ${on.join(', ')}` : 'none yet' };
     },
