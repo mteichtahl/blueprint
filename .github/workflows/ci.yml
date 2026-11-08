@@ -69,7 +69,11 @@ jobs:
         run: npm run typecheck
       - name: Unit tests (incl. CDK assertions and cdk-nag)
         run: npm test
+      - name: Build web app
+        run: npm run build -w @bmg/web
       - name: Synthesize CDK app (cdk-nag must pass)
+        env:
+          BMG_REQUIRE_WEB_BUILD: '1'
         run: |
           if [ ! -f bmg.config.json ]; then
             echo "bmg.config.json not committed yet; synthesizing with the example config"

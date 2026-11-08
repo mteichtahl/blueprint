@@ -9,7 +9,7 @@ import {
   RequestAuthorizer,
   RestApi,
 } from 'aws-cdk-lib/aws-apigateway';
-import type { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import type { IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
 import type { IEventBus } from 'aws-cdk-lib/aws-events';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
@@ -27,7 +27,6 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly envName: EnvironmentName;
   readonly platformKey: IKey;
   readonly userPool: IUserPool;
-  readonly webClient: IUserPoolClient;
   readonly mainTable: ITable;
   readonly consentTable: ITable;
   readonly sessionsTable: ITable;
@@ -81,7 +80,7 @@ export class ApiStack extends BmgStack {
 
     const authorizerFn = fn('Authorizer', 'authorizer', 'verify tokens and step-up', {
       USER_POOL_ID: props.userPool.userPoolId,
-      WEB_CLIENT_ID: props.webClient.userPoolClientId,
+      WEB_CLIENT_ID_PARAM: names.ssm(cfg, env, 'web/client-id'),
     });
     const me = fn('Me', 'me', 'GET /me');
     const consent = fn('Consent', 'consent', 'consent ledger');
@@ -102,6 +101,14 @@ export class ApiStack extends BmgStack {
       allow(f, 'PublishEvents', ['events:PutEvents'], [props.bus.eventBusArn]);
 
     allow(authorizerFn, 'ReadStepUpSessions', ['dynamodb:GetItem'], [sessions]);
+    allow(
+      authorizerFn,
+      'ReadWebClientId',
+      ['ssm:GetParameter'],
+      [
+        `arn:aws:ssm:${this.region}:${this.account}:parameter${names.ssm(cfg, env, 'web/client-id')}`,
+      ],
+    );
     allow(me, 'ReadOwnConsent', ['dynamodb:Query'], [consentTable]);
     // The consent ledger is append-only: Put and Query, never Update or Delete.
     allow(consent, 'AppendConsent', ['dynamodb:PutItem', 'dynamodb:Query'], [consentTable]);

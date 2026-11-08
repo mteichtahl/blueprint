@@ -119,6 +119,7 @@ export const ENV_STACK_SUFFIXES = [
   'keys',
   'audit',
   'api',
+  'web',
 ] as const;
 
 export function accountStacks(cfg: BmgConfig): string[] {

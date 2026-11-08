@@ -1,0 +1,37 @@
+@import 'tailwindcss';
+@import '@fontsource/archivo-narrow/400.css';
+@import '@fontsource/archivo-narrow/600.css';
+@import '@fontsource/archivo-narrow/700.css';
+@import '@fontsource/league-spartan/700.css';
+@import '@fontsource/lexend-exa/400.css';
+
+/* BMG tokens on shadcn variable names (design: BMG_UI_shadcn_Tailwind). */
+@theme {
+  --color-background: #f1f4f7;
+  --color-foreground: #011935;
+  --color-card: #ffffff;
+  --color-primary: #011935;
+  --color-primary-foreground: #f1f4f7;
+  --color-secondary: #e6e9ed;
+  --color-muted: #e6e9ed;
+  --color-muted-foreground: #5c6775;
+  --color-accent: #d9534f;
+  --color-destructive: #b5403c;
+  --color-border: #dde2e8;
+  --color-input: #d3d8de;
+  --color-cta: #b5403c;
+  --color-cta-hover: #9c3532;
+  --font-logo: 'Lexend Exa', sans-serif;
+  --font-title: 'League Spartan', sans-serif;
+  --font-sans: 'Archivo Narrow', sans-serif;
+  --shadow-2xs: 0 1px 0 rgba(1, 25, 53, 0.05);
+  --shadow-xs: 0 1px 2px rgba(1, 25, 53, 0.05);
+  --shadow-md: 0 4px 10px -2px rgba(1, 25, 53, 0.08), 0 2px 4px -2px rgba(1, 25, 53, 0.05);
+}
+
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}

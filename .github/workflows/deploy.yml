@@ -41,10 +41,13 @@ jobs:
         run: |
           test -f bmg.config.json || { echo "::error::Run 'npm run bmg -- init' and commit bmg.config.json"; exit 1; }
       - run: npm ci --no-audit --no-fund
+      - name: Build web app
+        run: npm run build -w @bmg/web
       - name: cdk deploy (staging)
         working-directory: infra
         env:
           BMG_VERSION: ${{ github.sha }}
+          BMG_REQUIRE_WEB_BUILD: '1'
         run: npx cdk deploy 'bmg-staging-*' --require-approval never --progress events --outputs-file ../cdk-outputs.json
       - name: Smoke test
         run: |
@@ -65,10 +68,13 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Build web app
+        run: npm run build -w @bmg/web
       - name: cdk deploy (prod)
         working-directory: infra
         env:
           BMG_VERSION: ${{ github.sha }}
+          BMG_REQUIRE_WEB_BUILD: '1'
         run: npx cdk deploy 'bmg-prod-*' --require-approval never --progress events --outputs-file ../cdk-outputs.json
       - name: Smoke test
         run: |
