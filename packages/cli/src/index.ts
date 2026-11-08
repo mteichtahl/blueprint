@@ -9,6 +9,7 @@ import { githubConnect, githubProtect } from './commands/github.ts';
 import { init } from './commands/init.ts';
 import { pipelineDeploy } from './commands/pipeline.ts';
 import { secretsSet } from './commands/secrets.ts';
+import { stacksRepair } from './commands/stacks.ts';
 import { status } from './commands/status.ts';
 import { verifyIsolation } from './commands/verify.ts';
 import { fail, type GlobalOptions } from './lib/runtime.ts';
@@ -100,6 +101,13 @@ admin
   .option('--email <email>', 'admin email address')
   .option('--env <env>', 'staging or prod', 'prod')
   .action(wrap((o: { email?: string; env: 'staging' | 'prod' }) => adminCreate({ ...g(), ...o })));
+
+program
+  .command('stacks')
+  .description('stack maintenance')
+  .command('repair')
+  .description('remove BMG stacks whose first create failed, so the next deploy can run')
+  .action(wrap(() => stacksRepair(g())));
 
 const verify = program.command('verify').description('live security checks');
 verify
