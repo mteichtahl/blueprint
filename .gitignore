@@ -1,0 +1,12 @@
+node_modules/
+dist/
+cdk.out/
+.turbo/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+# Local CLI logs (secrets are redacted, but keep them out of git anyway)
+.bmg/
