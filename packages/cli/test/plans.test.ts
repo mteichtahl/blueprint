@@ -158,3 +158,13 @@ describe('helpers', () => {
     expect(redact('commit d23441a48e516b6c34aea4fa41551a30e30af803')).toContain('d23441a4');
   });
 });
+
+describe('stack status', () => {
+  it('treats any *_IN_PROGRESS status as busy', async () => {
+    const { isBusy } = await import('../src/lib/stacks.ts');
+    expect(isBusy('UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS')).toBe(true);
+    expect(isBusy('UPDATE_IN_PROGRESS')).toBe(true);
+    expect(isBusy('UPDATE_ROLLBACK_COMPLETE')).toBe(false);
+    expect(isBusy(undefined)).toBe(false);
+  });
+});

@@ -1,6 +1,7 @@
 import { names } from '@bmg/config';
 import { assertAccount, readConfig } from '../lib/aws.ts';
 import { deployArgs } from '../lib/plans.ts';
+import { deployWithDiagnostics } from '../lib/stacks.ts';
 import { cdk, executePlan, log, type GlobalOptions } from '../lib/runtime.ts';
 
 /** `bmg pipeline deploy`: deploy the CodeBuild runner projects. After this, GitHub drives every change. */
@@ -21,7 +22,9 @@ export async function pipelineDeploy(opts: GlobalOptions): Promise<void> {
             ', ',
           )} (webhooks limited to GitHub user ids ${cfg.github.allowedActorIds.join(', ')}), agent ECR repo`,
         run: async () => {
-          await cdk(deployArgs([stack]));
+          await deployWithDiagnostics([{ name: stack, region: cfg.account.homeRegion }], () =>
+            cdk(deployArgs([stack])),
+          );
         },
       },
     ],

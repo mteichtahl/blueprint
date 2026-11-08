@@ -28,6 +28,7 @@ import {
   type GlobalOptions,
   type PlanStep,
 } from '../lib/runtime.ts';
+import { deployWithDiagnostics } from '../lib/stacks.ts';
 import { envBootstrapSteps } from './bootstrap.ts';
 import { detectExistingServices } from './doctor.ts';
 
@@ -127,7 +128,13 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
     {
       description: `Deploy ${accountStacks(cfg).join(' and ')} (boundary, CloudTrail, GuardDuty, Security Hub, Config, admin roles, root alarm, budget)`,
       run: async () => {
-        await cdk(deployArgs(accountStacks(cfg), skip));
+        await deployWithDiagnostics(
+          [
+            { name: guardrailsStack, region: cfg.account.homeRegion },
+            { name: globalStack, region: cfg.account.edgeRegion },
+          ],
+          () => cdk(deployArgs(accountStacks(cfg), skip)),
+        );
       },
     },
     ...envBootstrapSteps(cfg),
