@@ -13,12 +13,22 @@ export function assertArtistId(value: unknown): string {
 }
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+/** Largest multiple of the alphabet size below 256: bytes at or above it are discarded. */
+export const UNBIASED_LIMIT = 256 - (256 % ALPHABET.length);
 
-/** A new random artist id with 16 characters of entropy (~82 bits). */
-export function newArtistId(): string {
-  const bytes = randomBytes(16);
+/**
+ * A new random artist id: 16 characters drawn uniformly from [a-z0-9]
+ * (~82 bits). Rejection sampling keeps every character equally likely.
+ */
+export function newArtistId(random: (size: number) => Uint8Array = randomBytes): string {
   let id = 'art_';
-  for (const b of bytes) id += ALPHABET[b % ALPHABET.length];
+  while (id.length < 4 + 16) {
+    for (const b of random(32)) {
+      if (b >= UNBIASED_LIMIT) continue;
+      id += ALPHABET[b % ALPHABET.length];
+      if (id.length === 4 + 16) break;
+    }
+  }
   return id;
 }
 
