@@ -33,19 +33,11 @@
     "owner": "mteichtahl",
     "repo": "blueprint",
     "connectionArn": "arn:aws:codeconnections:ap-southeast-2:346073464284:connection/4da9e1c0-8206-4e53-a9c0-c968a924635e",
-    "allowedActorIds": [
-      "1817657",
-      "49699333"
-    ],
-    "productionReviewers": [
-      "mteichtahl"
-    ]
+    "allowedActorIds": ["1817657", "49699333"],
+    "productionReviewers": ["mteichtahl"]
   },
   "alerts": {
-    "emails": [
-      "marc@teichtahl.com",
-      "kyra@blueprintmusic.group"
-    ]
+    "emails": ["marc@teichtahl.com", "kyra@blueprintmusic.group"]
   },
   "budget": {
     "monthlyUsd": 400
