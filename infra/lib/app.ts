@@ -1,6 +1,6 @@
 import { App, Validations } from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
-import type { BmgConfig } from '@bmg/config';
+import { names, type BmgConfig } from '@bmg/config';
 import { AccountGlobalStack } from './account-global-stack.ts';
 import { ApiStack } from './api-stack.ts';
 import { AuditStack } from './audit-stack.ts';
@@ -9,6 +9,7 @@ import { DataStack } from './data-stack.ts';
 import { EnvFoundationStack } from './env-foundation-stack.ts';
 import { IdentityStack } from './identity-stack.ts';
 import { KeysStack } from './keys-stack.ts';
+import { WebStack } from './web-stack.ts';
 import { ToolingStack } from './tooling-stack.ts';
 
 export interface BuildAppOptions {
@@ -29,6 +30,7 @@ export interface BuildAppOptions {
  *   bmg-<env>-keys          home region  pipeline-deployed (per-artist KMS, onboarding, isolation gate)
  *   bmg-<env>-audit         home region  pipeline-deployed (event bus, Object Lock audit archive)
  *   bmg-<env>-api           home region  pipeline-deployed (REST API, authorizer, WAF)
+ *   bmg-<env>-web           home region  pipeline-deployed (web app on CloudFront, web client)
  * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
  */
 export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
@@ -103,7 +105,6 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       envName,
       platformKey: foundation.platformKey,
       userPool: identity.userPool,
-      webClient: identity.webClient,
       mainTable: data.tables.main,
       consentTable: data.tables.consent,
       sessionsTable: data.tables.sessions,
@@ -111,7 +112,16 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       onboarding: keys.onboarding,
       description: `BMG ${envName} REST API: authorizer, consent, step-up, invites`,
     });
-    return { foundation, data, identity, keys, audit, api };
+    const web = new WebStack(app, `${cfg.project}-${envName}-web`, {
+      config: cfg,
+      env: home,
+      envName,
+      userPool: identity.userPool,
+      loginDomain: `${names.cognitoDomainPrefix(cfg, envName)}.auth.${cfg.account.homeRegion}.amazoncognito.com`,
+      restApiId: api.api.restApiId,
+      description: `BMG ${envName} web app: CloudFront, site bucket, web client`,
+    });
+    return { foundation, data, identity, keys, audit, api, web };
   });
 
   Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));

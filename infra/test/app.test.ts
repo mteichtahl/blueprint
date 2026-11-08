@@ -449,3 +449,38 @@ describe('environment API', () => {
     prod!.resourceCountIs('AWS::ApiGateway::Account', 0);
   });
 });
+
+describe('environment web app', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.web));
+
+  it('serves the site privately through CloudFront with the API on the same origin', () => {
+    prod!.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        DefaultCacheBehavior: Match.objectLike({ ViewerProtocolPolicy: 'redirect-to-https' }),
+        CacheBehaviors: Match.arrayWith([
+          Match.objectLike({ PathPattern: '/v1/*', ViewerProtocolPolicy: 'https-only' }),
+        ]),
+      }),
+    });
+    prod!.hasResourceProperties('AWS::CloudFront::OriginAccessControl', Match.anyValue());
+  });
+
+  it('sends a strict content security policy', () => {
+    const policy = Object.values(prod!.findResources('AWS::CloudFront::ResponseHeadersPolicy'))[0]!;
+    const csp: string =
+      policy.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig.ContentSecurityPolicy
+        .ContentSecurityPolicy;
+    expect(JSON.stringify(csp)).toContain("frame-ancestors 'none'");
+    expect(JSON.stringify(csp)).not.toContain('unsafe-inline');
+  });
+
+  it('owns the web client, with localhost callbacks only in staging', () => {
+    const urls = (t: Template) =>
+      JSON.stringify(
+        Object.values(t.findResources('AWS::Cognito::UserPoolClient'))[0]!.Properties.CallbackURLs,
+      );
+    expect(urls(staging!)).toContain('http://localhost:5173/auth/callback');
+    expect(urls(prod!)).not.toContain('localhost');
+    prod!.hasResourceProperties('AWS::Cognito::UserPoolClient', { GenerateSecret: false });
+  });
+});

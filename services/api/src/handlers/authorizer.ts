@@ -1,3 +1,4 @@
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import type { APIGatewayAuthorizerResult, APIGatewayRequestAuthorizerEvent } from 'aws-lambda';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
@@ -10,11 +11,35 @@ import {
   type TokenClaims,
 } from '../session.ts';
 
-const verifier = CognitoJwtVerifier.create({
-  userPoolId: env('USER_POOL_ID'),
-  clientId: env('WEB_CLIENT_ID'),
-  tokenUse: 'access',
-});
+/**
+ * The web client lives in the web stack (its callback URL is the CloudFront
+ * address, which exists only after the API). Its id is read from SSM once
+ * per container instead of being passed in, which would make a cycle.
+ */
+let verifierPromise: Promise<ReturnType<typeof makeVerifier>> | undefined;
+
+function makeVerifier(clientId: string) {
+  return CognitoJwtVerifier.create({
+    userPoolId: env('USER_POOL_ID'),
+    clientId,
+    tokenUse: 'access',
+  });
+}
+
+function getVerifier() {
+  verifierPromise ??= new SSMClient({})
+    .send(new GetParameterCommand({ Name: env('WEB_CLIENT_ID_PARAM') }))
+    .then((res) => {
+      const id = res.Parameter?.Value;
+      if (!id) throw new Error('Web client id parameter is empty');
+      return makeVerifier(id);
+    })
+    .catch((err) => {
+      verifierPromise = undefined; // retry on the next call
+      throw err;
+    });
+  return verifierPromise;
+}
 
 function deny(): APIGatewayAuthorizerResult {
   // Unauthorized → API Gateway answers 401 without calling the handler.
@@ -35,7 +60,7 @@ export const handler = async (
 
   let claims: TokenClaims;
   try {
-    claims = (await verifier.verify(token)) as unknown as TokenClaims;
+    claims = (await (await getVerifier()).verify(token)) as unknown as TokenClaims;
   } catch {
     return deny();
   }

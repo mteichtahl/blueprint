@@ -210,6 +210,10 @@ export class IdentityStack extends BmgStack {
         stringValue: value,
       });
     }
+    // The API used to import this client's id. Keep the export for one release
+    // so deploying this stack first doesn't fail while the API still imports it;
+    // remove this line (and the client) once the API reads the web stack's client.
+    this.exportValue(this.webClient.userPoolClientId);
     new CfnOutput(this, 'UserPoolId', { value: this.userPool.userPoolId });
     new CfnOutput(this, 'LoginDomain', { value: loginHost });
 

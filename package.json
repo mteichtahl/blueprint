@@ -8,6 +8,7 @@
   },
   "packageManager": "npm@10.9.9",
   "workspaces": [
+    "apps/*",
     "packages/*",
     "services/*",
     "infra"

@@ -1,0 +1,7 @@
+{
+  "loginDomain": "",
+  "clientId": "",
+  "region": "ap-southeast-2",
+  "userPoolId": "",
+  "apiBase": "/v1"
+}
