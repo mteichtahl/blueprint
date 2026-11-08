@@ -13,7 +13,8 @@ export interface StackRef {
   region: string;
 }
 
-async function stackStatus(
+/** Current status of a stack, or undefined if it does not exist. */
+export async function stackStatus(
   client: CloudFormationClient,
   name: string,
 ): Promise<string | undefined> {

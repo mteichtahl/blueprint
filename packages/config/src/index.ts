@@ -152,6 +152,9 @@ export const names = {
   ) => `cdk-${qualifierValue}-${kind}-role-${cfg.account.id}-${cfg.account.homeRegion}`,
   runnerProject: (cfg: BmgConfig, kind: 'ci' | 'deploy-staging' | 'deploy-prod') =>
     `${cfg.project}-${kind}`,
+  runnerLogGroup: (cfg: BmgConfig, kind: 'ci' | 'deploy-staging' | 'deploy-prod') =>
+    `/aws/codebuild/${cfg.project}-${kind}`,
+  agentRepository: (cfg: BmgConfig) => `${cfg.project}-agent`,
   mailerRole: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}-${env}-mailer`,
   /** Secrets Manager id of the Gmail SMTP credentials for an environment. */
   smtpSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/gmail-smtp`,

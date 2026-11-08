@@ -77,7 +77,7 @@ export class ToolingStack extends BmgStack {
 
     // Agent container image for AgentCore Runtime (built in Phase 5).
     new Repository(this, 'AgentImages', {
-      repositoryName: `${cfg.project}-agent`,
+      repositoryName: names.agentRepository(cfg),
       imageTagMutability: TagMutability.IMMUTABLE,
       imageScanOnPush: true,
       encryptionKey: key,
@@ -93,7 +93,7 @@ export class ToolingStack extends BmgStack {
     const id = spec.kind.replace(/(^|-)(\w)/g, (_m, _d, c: string) => c.toUpperCase());
 
     const logGroup = new LogGroup(this, `${id}Logs`, {
-      logGroupName: `/aws/codebuild/${projectName}`,
+      logGroupName: names.runnerLogGroup(cfg, spec.kind),
       retention: RetentionDays.THREE_MONTHS,
       encryptionKey: key,
       removalPolicy: RemovalPolicy.RETAIN,
