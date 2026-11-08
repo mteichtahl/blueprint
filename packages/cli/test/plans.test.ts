@@ -1,0 +1,155 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { parseConfig } from '@bmg/config';
+import {
+  deployArgs,
+  envBootstrap,
+  evaluateMailDns,
+  githubProtectionRequests,
+  googleSetupCommands,
+  nodeVersionOk,
+  REQUIRED_CHECKS,
+  secretId,
+  toolingBootstrap,
+} from '../src/lib/plans.ts';
+import { redact } from '../src/lib/runtime.ts';
+
+const cfg = parseConfig(
+  JSON.parse(
+    readFileSync(resolve(import.meta.dirname, '../../../bmg.config.example.json'), 'utf8'),
+  ),
+);
+
+describe('bootstrap plans', () => {
+  it('bootstraps tooling in Sydney and us-east-1 without a boundary', () => {
+    const b = toolingBootstrap(cfg);
+    expect(b.args).toContain('aws://111111111111/ap-southeast-2');
+    expect(b.args).toContain('aws://111111111111/us-east-1');
+    expect(b.args).not.toContain('--custom-permissions-boundary');
+    expect(b.args).toEqual(
+      expect.arrayContaining(['--qualifier', 'bmgtool', '--tags', 'bmg:env=tooling']),
+    );
+  });
+
+  it('bootstraps each environment with its own qualifier, tag and the boundary', () => {
+    const prod = envBootstrap(cfg, 'prod');
+    expect(prod.args).toEqual(
+      expect.arrayContaining([
+        '--qualifier',
+        'bmgprd',
+        '--tags',
+        'bmg:env=prod',
+        '--custom-permissions-boundary',
+        'bmg-permission-boundary',
+        '--toolkit-stack-name',
+        'CDKToolkit-bmgprd',
+      ]),
+    );
+    expect(envBootstrap(cfg, 'staging').args).toContain('bmg:env=staging');
+  });
+});
+
+describe('deploy args', () => {
+  it('passes skip flags as CDK context', () => {
+    expect(deployArgs(['a'], { guardDuty: true, config: true })).toEqual([
+      'deploy',
+      'a',
+      '--require-approval',
+      'broadening',
+      '-c',
+      'bmg:skipGuardDuty=true',
+      '-c',
+      'bmg:skipConfig=true',
+    ]);
+  });
+});
+
+describe('github protection', () => {
+  const reqs = githubProtectionRequests(cfg, [42]);
+  const find = (p: string) => reqs.find((r) => r.path.endsWith(p));
+
+  it('requires approval for all external contributors before workflows run', () => {
+    expect(find('/fork-pr-contributor-approval')?.body).toEqual({
+      approval_policy: 'all_external_contributors',
+    });
+  });
+
+  it('protects main with the CI checks and blocks force pushes', () => {
+    const body = find('/branches/main/protection')?.body as Record<string, unknown>;
+    expect((body.required_status_checks as { contexts: string[] }).contexts).toEqual(
+      REQUIRED_CHECKS,
+    );
+    expect(body.allow_force_pushes).toBe(false);
+    expect(body.required_linear_history).toBe(true);
+  });
+
+  it('gates production on the configured reviewers', () => {
+    expect(find('/environments/production')?.body).toMatchObject({
+      reviewers: [{ type: 'User', id: 42 }],
+    });
+  });
+
+  it('makes the repo public (decision O6)', () => {
+    expect(reqs[0]?.body).toMatchObject({ visibility: 'public' });
+  });
+
+  it('restricts actions and requires SHA pinning', () => {
+    expect(find('/actions/permissions')?.body).toMatchObject({
+      allowed_actions: 'selected',
+      sha_pinning_required: true,
+    });
+  });
+});
+
+describe('google setup', () => {
+  const cmds = googleSetupCommands(cfg, '123456');
+  it('never creates a service account key', () => {
+    expect(cmds.some((c) => c.args.includes('keys'))).toBe(false);
+  });
+  it('limits the AWS trust to the two mailer roles', () => {
+    const provider = cmds.find((c) => c.args.includes('create-aws'))!;
+    const cond = provider.args[provider.args.indexOf('--attribute-condition') + 1];
+    expect(cond).toBe("attribute.aws_role in ['bmg-staging-mailer', 'bmg-prod-mailer']");
+    expect(provider.args).toContain('111111111111');
+  });
+  it('binds both mailer roles with workloadIdentityUser and tokenCreator', () => {
+    const bindings = cmds.filter((c) => c.args.includes('add-iam-policy-binding'));
+    expect(bindings).toHaveLength(4);
+    expect(bindings[0]!.args.join(' ')).toContain(
+      'projects/123456/locations/global/workloadIdentityPools/bmg-aws/attribute.aws_role/bmg-staging-mailer',
+    );
+  });
+  it('evaluates mail DNS records', () => {
+    expect(
+      evaluateMailDns(
+        ['v=spf1 include:_spf.google.com ~all'],
+        ['v=DKIM1; k=rsa; p=abc'],
+        ['v=DMARC1; p=quarantine'],
+      ),
+    ).toEqual({ spf: true, dkim: true, dmarc: true });
+    expect(evaluateMailDns(['v=spf1 -all'], [], [])).toEqual({
+      spf: false,
+      dkim: false,
+      dmarc: false,
+    });
+  });
+});
+
+describe('helpers', () => {
+  it('checks the Node version', () => {
+    expect(nodeVersionOk('v22.12.0')).toBe(true);
+    expect(nodeVersionOk('v22.11.9')).toBe(false);
+    expect(nodeVersionOk('v24.0.0')).toBe(true);
+  });
+  it('validates secret names', () => {
+    expect(secretId(cfg, 'prod', 'mailchimp-api-key')).toBe('bmg/prod/mailchimp-api-key');
+    expect(() => secretId(cfg, 'prod', 'Bad Name')).toThrow();
+  });
+  it('redacts credentials but not git SHAs', () => {
+    expect(redact('key AKIAABCDEFGHIJKLMNOP x')).toBe('key **** x');
+    expect(redact('token: ghp_abcdefghijklmnopqrstuvwxyz0123456789')).not.toContain('ghp_');
+    expect(redact('password=hunter2')).toBe('password=****');
+    expect(redact('commit d23441a48e516b6c34aea4fa41551a30e30af803')).toContain('d23441a4');
+  });
+});

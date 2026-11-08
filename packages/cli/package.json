@@ -1,0 +1,37 @@
+{
+  "name": "@bmg/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "bmg — one-time setup CLI for the BMG platform (design section 17)",
+  "bin": {
+    "bmg": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock": "^3.1164.0",
+    "@aws-sdk/client-bedrock-agentcore-control": "^3.1164.0",
+    "@aws-sdk/client-cloudformation": "^3.1164.0",
+    "@aws-sdk/client-cloudwatch": "^3.1164.0",
+    "@aws-sdk/client-codebuild": "^3.1164.0",
+    "@aws-sdk/client-codeconnections": "^3.1164.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1164.0",
+    "@aws-sdk/client-config-service": "^3.1164.0",
+    "@aws-sdk/client-ec2": "^3.1164.0",
+    "@aws-sdk/client-guardduty": "^3.1164.0",
+    "@aws-sdk/client-iam": "^3.1164.0",
+    "@aws-sdk/client-s3-control": "^3.1164.0",
+    "@aws-sdk/client-s3vectors": "^3.1164.0",
+    "@aws-sdk/client-secrets-manager": "^3.1164.0",
+    "@aws-sdk/client-securityhub": "^3.1164.0",
+    "@aws-sdk/client-service-quotas": "^3.1164.0",
+    "@aws-sdk/client-ssm": "^3.1164.0",
+    "@aws-sdk/client-sts": "^3.1164.0",
+    "@bmg/config": "*",
+    "@inquirer/prompts": "^8.7.5",
+    "commander": "^15.1.0"
+  }
+}
