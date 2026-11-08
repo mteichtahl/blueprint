@@ -1,0 +1,17 @@
+{
+  "name": "@bmg/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Schema and loader for bmg.config.json, shared by the CLI and the CDK app",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

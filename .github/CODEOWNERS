@@ -1,0 +1,6 @@
+# Workflows, infrastructure and setup code need the maintainer's review.
+*                 @mteichtahl
+/.github/         @mteichtahl
+/infra/           @mteichtahl
+/packages/cli/    @mteichtahl
+/bmg.config.json  @mteichtahl

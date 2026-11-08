@@ -1,0 +1,76 @@
+name: Deploy
+
+# main → checks → staging (bmg-deploy-staging runner) → approval → prod
+# (bmg-deploy-prod runner). AWS credentials come only from each CodeBuild
+# project's IAM role; no AWS secret is stored in GitHub (design 16).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      security-events: write
+
+  deploy-staging:
+    name: Deploy staging
+    needs: checks
+    runs-on: codebuild-bmg-deploy-staging-${{ github.run_id }}-${{ github.run_attempt }}
+    environment: staging
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Require committed bmg.config.json
+        run: |
+          test -f bmg.config.json || { echo "::error::Run 'npm run bmg -- init' and commit bmg.config.json"; exit 1; }
+      - run: npm ci --no-audit --no-fund
+      - name: cdk deploy (staging)
+        working-directory: infra
+        env:
+          BMG_VERSION: ${{ github.sha }}
+        run: npx cdk deploy 'bmg-staging-*' --require-approval never --progress events --outputs-file ../cdk-outputs.json
+      - name: Smoke test
+        run: |
+          deployed=$(node -p "require('./cdk-outputs.json')['bmg-staging-foundation'].DeployedVersion")
+          test "$deployed" = "$GITHUB_SHA" || { echo "::error::staging reports $deployed, expected $GITHUB_SHA"; exit 1; }
+
+  deploy-prod:
+    name: Deploy production
+    needs: deploy-staging
+    runs-on: codebuild-bmg-deploy-prod-${{ github.run_id }}-${{ github.run_attempt }}
+    environment: production
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: cdk deploy (prod)
+        working-directory: infra
+        env:
+          BMG_VERSION: ${{ github.sha }}
+        run: npx cdk deploy 'bmg-prod-*' --require-approval never --progress events --outputs-file ../cdk-outputs.json
+      - name: Smoke test
+        run: |
+          deployed=$(node -p "require('./cdk-outputs.json')['bmg-prod-foundation'].DeployedVersion")
+          test "$deployed" = "$GITHUB_SHA" || { echo "::error::prod reports $deployed, expected $GITHUB_SHA"; exit 1; }

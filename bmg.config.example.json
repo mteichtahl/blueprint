@@ -1,0 +1,37 @@
+{
+  "$schemaVersion": 1,
+  "project": "bmg",
+  "account": {
+    "id": "111111111111",
+    "homeRegion": "ap-southeast-2",
+    "edgeRegion": "us-east-1",
+    "backupRegion": "ap-southeast-4"
+  },
+  "toolingQualifier": "bmgtool",
+  "environments": {
+    "staging": { "qualifier": "bmgstg", "subdomain": "staging", "cognitoPlan": "ESSENTIALS" },
+    "prod": { "qualifier": "bmgprd", "subdomain": "", "cognitoPlan": "PLUS" }
+  },
+  "domain": { "root": "blueprintmusic.group" },
+  "github": {
+    "owner": "mteichtahl",
+    "repo": "blueprint",
+    "connectionArn": "arn:aws:codeconnections:ap-southeast-2:111111111111:connection/00000000-0000-0000-0000-000000000000",
+    "allowedActorIds": ["1000001", "49699333"],
+    "productionReviewers": ["mteichtahl"]
+  },
+  "alerts": { "emails": ["alerts@example.com"] },
+  "budget": { "monthlyUsd": 400 },
+  "audit": { "objectLockMode": "GOVERNANCE", "retentionDays": 2555 },
+  "email": {
+    "senderAddress": "hello@blueprintmusic.group",
+    "senderName": "Blueprint Music Group",
+    "domain": "blueprintmusic.group",
+    "smtpHost": "smtp.gmail.com",
+    "smtpPort": 587
+  },
+  "ai": {
+    "assistantModelProfile": "au.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "summaryModelProfile": "au.anthropic.claude-haiku-4-5-20251001-v1:0"
+  }
+}

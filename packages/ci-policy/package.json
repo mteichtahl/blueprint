@@ -1,0 +1,18 @@
+{
+  "name": "@bmg/ci-policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fails CI if any GitHub workflow could run on a GitHub-hosted runner or uses unsafe triggers",
+  "exports": {
+    ".": "./src/policy.ts"
+  },
+  "scripts": {
+    "check": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
+}
