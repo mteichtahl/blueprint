@@ -8,7 +8,7 @@ import {
 import { password } from '@inquirer/prompts';
 import nodemailer from 'nodemailer';
 import { EnvironmentName, names } from '@bmg/config';
-import { assertAccount, isNotFound, readConfig } from '../lib/aws.ts';
+import { assertAccount, assertPlatformKey, isNotFound, readConfig } from '../lib/aws.ts';
 import { evaluateMailDns, smtpSecretPayload, type SmtpSecret } from '../lib/plans.ts';
 import { executePlan, fail, heading, log, ok, type GlobalOptions } from '../lib/runtime.ts';
 
@@ -78,6 +78,7 @@ export async function emailSetup(opts: EmailSetupOptions): Promise<void> {
   await assertAccount(cfg);
   const env = EnvironmentName.parse(opts.env);
   const secretId = names.smtpSecret(cfg, env);
+  const keyAlias = await assertPlatformKey(cfg, env);
 
   log(
     `Sender: ${cfg.email.senderAddress}. Before continuing, sign in to Gmail as that account and:\n` +
@@ -106,7 +107,7 @@ export async function emailSetup(opts: EmailSetupOptions): Promise<void> {
     `Gmail SMTP for ${env}`,
     [
       {
-        description: `${exists ? 'Update' : 'Create'} ${secretId} (host, port, sender, app password) under alias/${cfg.project}/${env}/platform`,
+        description: `${exists ? 'Update' : 'Create'} ${secretId} (host, port, sender, app password) under ${keyAlias}`,
         run: async () => {
           const value = JSON.stringify(secret);
           if (exists) {
@@ -118,7 +119,7 @@ export async function emailSetup(opts: EmailSetupOptions): Promise<void> {
               new CreateSecretCommand({
                 Name: secretId,
                 SecretString: value,
-                KmsKeyId: `alias/${cfg.project}/${env}/platform`,
+                KmsKeyId: keyAlias,
                 Description: `Gmail SMTP credentials for BMG ${env} app email`,
                 Tags: [{ Key: 'bmg:env', Value: env }],
               }),

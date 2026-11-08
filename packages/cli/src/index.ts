@@ -17,7 +17,7 @@ const program = new Command()
   .description(
     'One-time setup for the BMG platform. First run, in order:\n' +
       '  init → doctor → bootstrap → account setup → github connect → github protect\n' +
-      '  → secrets set → email setup → pipeline deploy → (push to main) → admin create',
+      '  → pipeline deploy → (push to main; wait for Deploy) → secrets set → email setup → admin create',
   )
   .option('-y, --yes', 'apply without asking for confirmation')
   .option('--dry-run', 'show what would change, change nothing');
