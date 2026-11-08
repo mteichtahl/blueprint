@@ -61,7 +61,8 @@ export class AccountGlobalStack extends BmgStack {
 
     new CfnBudget(this, 'MonthlyBudget', {
       budget: {
-        budgetName: `${cfg.project}-monthly`,
+        // No fixed name: CloudFormation generates a unique one, so a budget left
+        // behind by an earlier failed deploy can never block this one.
         budgetType: 'COST',
         timeUnit: 'MONTHLY',
         budgetLimit: { amount: cfg.budget.monthlyUsd, unit: 'USD' },
