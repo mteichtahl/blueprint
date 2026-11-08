@@ -112,7 +112,7 @@ export function externalServices(
 }
 
 /** Pipeline-deployed stacks per environment, in deploy order. */
-export const ENV_STACK_SUFFIXES = ['foundation', 'data', 'identity'] as const;
+export const ENV_STACK_SUFFIXES = ['foundation', 'data', 'identity', 'keys'] as const;
 
 export function accountStacks(cfg: BmgConfig): string[] {
   return [names.stack(cfg, 'account-guardrails'), names.stack(cfg, 'account-global')];

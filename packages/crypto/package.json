@@ -1,0 +1,20 @@
+{
+  "name": "@bmg/crypto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Per-artist encryption: key names, encryption context, tagged data-access sessions, envelope encryption",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-crypto/client-node": "^5.0.2",
+    "@aws-sdk/client-kms": "^3.1164.0",
+    "@aws-sdk/client-sts": "^3.1164.0",
+    "@aws-sdk/types": "^3.975.0"
+  }
+}

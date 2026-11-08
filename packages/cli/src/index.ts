@@ -10,6 +10,7 @@ import { init } from './commands/init.ts';
 import { pipelineDeploy } from './commands/pipeline.ts';
 import { secretsSet } from './commands/secrets.ts';
 import { status } from './commands/status.ts';
+import { verifyIsolation } from './commands/verify.ts';
 import { fail, type GlobalOptions } from './lib/runtime.ts';
 
 const program = new Command()
@@ -99,6 +100,13 @@ admin
   .option('--email <email>', 'admin email address')
   .option('--env <env>', 'staging or prod', 'prod')
   .action(wrap((o: { email?: string; env: 'staging' | 'prod' }) => adminCreate({ ...g(), ...o })));
+
+const verify = program.command('verify').description('live security checks');
+verify
+  .command('isolation')
+  .description('prove KMS refuses cross-artist and private-item access (Phase 2 gate)')
+  .option('--env <env>', 'only staging has the gate', 'staging')
+  .action(wrap((o: { env: 'staging' }) => verifyIsolation(o)));
 
 program
   .command('status')
