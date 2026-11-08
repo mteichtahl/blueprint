@@ -8,8 +8,8 @@ import {
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { names } from '@bmg/config';
 import { isNotFound, readConfig } from '../lib/aws.ts';
-import { ENVIRONMENTS, accountStacks } from '../lib/plans.ts';
-import { fail, heading, ok, warn } from '../lib/runtime.ts';
+import { ENVIRONMENTS, accountStacks, partitionAlarms } from '../lib/plans.ts';
+import { fail, heading, log, ok, warn } from '../lib/runtime.ts';
 
 /** `bmg status`: read-only overview of stacks, runners, alarms and deployed versions. */
 export async function status(): Promise<void> {
@@ -78,12 +78,23 @@ export async function status(): Promise<void> {
   }
 
   heading('Alarms');
-  const alarms =
-    (
-      await new CloudWatchClient({ region }).send(
-        new DescribeAlarmsCommand({ StateValue: 'ALARM' }),
-      )
-    ).MetricAlarms ?? [];
-  if (alarms.length === 0) ok('No alarms firing');
-  for (const a of alarms) fail(`${a.AlarmName}: ${a.StateReason}`);
+  // Only BMG's own alarms (named `<project>-…`) count; other workloads in the
+  // account (e.g. auto-scaling "AlarmLow" alarms on unrelated tables) are noted, not failed.
+  for (const r of [cfg.account.homeRegion, cfg.account.edgeRegion]) {
+    const firing =
+      (
+        await new CloudWatchClient({ region: r }).send(
+          new DescribeAlarmsCommand({ StateValue: 'ALARM' }),
+        )
+      ).MetricAlarms ?? [];
+    const { ours, others } = partitionAlarms(
+      firing.map((a) => ({ name: a.AlarmName ?? '', reason: a.StateReason ?? '' })),
+      cfg.project,
+    );
+    if (ours.length === 0) ok(`${r}: no BMG alarms firing`);
+    for (const a of ours) fail(`${r}: ${a.name}: ${a.reason}`);
+    if (others.length > 0) {
+      log(`    (${others.length} alarm(s) from other workloads in ${r} ignored)`);
+    }
+  }
 }
