@@ -47,6 +47,7 @@ export async function assertPlatformKey(cfg: BmgConfig, env: EnvironmentName): P
         'which the pipeline deploys. First run `bmg pipeline deploy`, then push to main and let the ' +
         `Deploy workflow finish${env === 'prod' ? ' (including the production approval)' : ' for staging'}. ` +
         'Then re-run this command.',
+      { cause: err },
     );
   }
 }
