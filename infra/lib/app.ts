@@ -6,6 +6,7 @@ import { AccountGuardrailsStack } from './account-guardrails-stack.ts';
 import { DataStack } from './data-stack.ts';
 import { EnvFoundationStack } from './env-foundation-stack.ts';
 import { IdentityStack } from './identity-stack.ts';
+import { KeysStack } from './keys-stack.ts';
 import { ToolingStack } from './tooling-stack.ts';
 
 export interface BuildAppOptions {
@@ -23,6 +24,7 @@ export interface BuildAppOptions {
  *   bmg-<env>-foundation    home region  pipeline-deployed (platform key, alarms)
  *   bmg-<env>-data          home region  pipeline-deployed (DynamoDB tables)
  *   bmg-<env>-identity      home region  pipeline-deployed (Cognito, triggers)
+ *   bmg-<env>-keys          home region  pipeline-deployed (per-artist KMS, onboarding, isolation gate)
  * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
  */
 export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
@@ -75,7 +77,16 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       mainTable: data.tables.main,
       description: `BMG ${envName} identity: Cognito user pool, web client, triggers`,
     });
-    return { foundation, data, identity };
+    const keys = new KeysStack(app, `${cfg.project}-${envName}-keys`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      mainTable: data.tables.main,
+      description: `BMG ${envName} per-artist keys: key-admin and data-access roles, onboarding`,
+      ...(opts.version ? { version: opts.version } : {}),
+    });
+    return { foundation, data, identity, keys };
   });
 
   Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));

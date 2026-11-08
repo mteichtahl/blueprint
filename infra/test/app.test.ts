@@ -291,3 +291,77 @@ describe('environment identity (Cognito)', () => {
     }
   });
 });
+
+describe('environment keys (per-artist KMS)', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.keys));
+
+  it('only lets tagged sessions from the gate and API roles assume the data-access role', () => {
+    prod!.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'bmg-prod-data-access',
+      AssumeRolePolicyDocument: {
+        Statement: [
+          Match.objectLike({
+            Action: ['sts:AssumeRole', 'sts:TagSession'],
+            Condition: Match.objectLike({
+              ArnLike: {
+                'aws:PrincipalArn': [
+                  `arn:aws:iam::${cfg.account.id}:role/bmg-prod-isolation-gate`,
+                  `arn:aws:iam::${cfg.account.id}:role/bmg-prod-api-*`,
+                ],
+              },
+              Null: { 'aws:RequestTag/artistId': 'false', 'aws:RequestTag/role': 'false' },
+              'ForAllValues:StringEquals': { 'aws:TagKeys': ['artistId', 'role'] },
+            }),
+          }),
+        ],
+      },
+    });
+  });
+
+  it('limits data-access KMS use to the key and context of the tagged artist', () => {
+    prod!.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'UseOnlyTheTaggedArtistsKey',
+            Condition: {
+              StringEquals: {
+                'aws:ResourceTag/artistId': '${aws:PrincipalTag/artistId}',
+                'kms:EncryptionContext:artistId': '${aws:PrincipalTag/artistId}',
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('only creates keys tagged for its own environment', () => {
+    staging!.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'CreateArtistKeysForThisEnvironment',
+            Condition: Match.objectLike({ StringEquals: { 'aws:RequestTag/bmg:env': 'staging' } }),
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('runs the isolation gate on every staging deploy, and not in prod', () => {
+    staging!.resourceCountIs('Custom::BmgIsolationGate', 1);
+    staging!.hasResource('Custom::BmgIsolationGate', {
+      Properties: Match.objectLike({ version: 'test' }),
+    });
+    prod!.resourceCountIs('Custom::BmgIsolationGate', 0);
+  });
+
+  it('logs and traces the onboarding workflow', () => {
+    prod!.hasResourceProperties('AWS::StepFunctions::StateMachine', {
+      StateMachineName: 'bmg-prod-artist-onboarding',
+      TracingConfiguration: { Enabled: true },
+      LoggingConfiguration: Match.objectLike({ Level: 'ALL', IncludeExecutionData: false }),
+    });
+  });
+});

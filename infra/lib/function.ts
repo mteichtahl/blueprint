@@ -18,6 +18,8 @@ export interface BmgFunctionProps {
   readonly memorySize?: number;
   /** Production keeps logs longer. */
   readonly prod: boolean;
+  /** Fixed role name, for roles other policies refer to by ARN (key policies, trust policies). */
+  readonly roleName?: string;
 }
 
 /**
@@ -37,6 +39,7 @@ export class BmgFunction extends NodejsFunction {
     const role = new Role(scope, `${id}Role`, {
       assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
       description: props.description,
+      ...(props.roleName ? { roleName: props.roleName } : {}),
     });
     role.addToPolicy(
       new PolicyStatement({
