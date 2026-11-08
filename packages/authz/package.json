@@ -1,0 +1,14 @@
+{
+  "name": "@bmg/authz",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared authorisation checks (design 6.3), used by every API handler",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  }
+}

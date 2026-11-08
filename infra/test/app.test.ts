@@ -365,3 +365,80 @@ describe('environment keys (per-artist KMS)', () => {
     });
   });
 });
+
+describe('environment audit trail', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.audit));
+
+  it('archives audit events in an Object Lock bucket', () => {
+    prod!.hasResourceProperties('AWS::S3::Bucket', {
+      ObjectLockEnabled: true,
+      ObjectLockConfiguration: Match.objectLike({
+        Rule: { DefaultRetention: Match.objectLike({ Mode: cfg.audit.objectLockMode }) },
+      }),
+    });
+    prod!.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: { source: ['bmg.audit'] },
+      Targets: [Match.objectLike({ DeadLetterConfig: Match.anyValue() })],
+    });
+  });
+
+  it('lets the writer add objects but never read or delete them', () => {
+    const json = JSON.stringify(staging!.toJSON());
+    expect(json).toContain('WriteAuditObjectsOnly');
+    expect(json).not.toMatch(
+      /"s3:(DeleteObject|GetObject|PutObjectRetention|BypassGovernanceRetention)/,
+    );
+  });
+});
+
+describe('environment API', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.api));
+
+  it('protects every route with the token authorizer', () => {
+    const methods = prod!.findResources('AWS::ApiGateway::Method');
+    const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
+    expect(routed.length).toBe(6);
+    for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
+  });
+
+  it('puts a regional WAF with rate limiting in front', () => {
+    prod!.hasResourceProperties('AWS::WAFv2::WebACL', {
+      Scope: 'REGIONAL',
+      Rules: Match.arrayWith([
+        Match.objectLike({ Name: 'RateLimitPerIp', Action: { Block: {} } }),
+        Match.objectLike({ Name: 'AWSManagedRulesCommonRuleSet' }),
+      ]),
+    });
+    prod!.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
+  });
+
+  it('names API roles so the data-access role can trust them', () => {
+    const names = Object.values(prod!.findResources('AWS::IAM::Role'))
+      .map((r) => r.Properties.RoleName)
+      .filter(Boolean);
+    expect(names).toEqual(
+      expect.arrayContaining(['bmg-prod-api-authorizer', 'bmg-prod-api-artists']),
+    );
+  });
+
+  it('keeps the consent ledger append-only', () => {
+    const json = JSON.stringify(prod!.toJSON());
+    expect(json).toContain('AppendConsent');
+    const policies = Object.values(prod!.findResources('AWS::IAM::Policy'));
+    for (const policy of policies) {
+      for (const st of policy.Properties.PolicyDocument.Statement as Array<{
+        Sid?: string;
+        Action: string | string[];
+      }>) {
+        if (st.Sid === 'AppendConsent') {
+          expect(st.Action).toEqual(['dynamodb:PutItem', 'dynamodb:Query']);
+        }
+      }
+    }
+  });
+
+  it('owns the account-level API Gateway logging role in staging only', () => {
+    staging!.resourceCountIs('AWS::ApiGateway::Account', 1);
+    prod!.resourceCountIs('AWS::ApiGateway::Account', 0);
+  });
+});
