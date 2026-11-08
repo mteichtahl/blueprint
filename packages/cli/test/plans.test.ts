@@ -167,6 +167,8 @@ describe('stack status', () => {
     expect(isBusy('UPDATE_IN_PROGRESS')).toBe(true);
     expect(isBusy('UPDATE_ROLLBACK_COMPLETE')).toBe(false);
     expect(isBusy(undefined)).toBe(false);
+    // A change set that failed early validation leaves this forever; never wait on it.
+    expect(isBusy('REVIEW_IN_PROGRESS')).toBe(false);
   });
 });
 
@@ -206,5 +208,22 @@ describe('toolingRetainedResources', () => {
         (k) => `/aws/codebuild/${names.runnerProject(cfg, k as 'ci')}`,
       ),
     });
+  });
+});
+
+describe('isAbandonedCreate', () => {
+  it('treats failed and never-executed first creates as removable', async () => {
+    const { isAbandonedCreate } = await import('../src/lib/stacks.ts');
+    for (const st of ['ROLLBACK_COMPLETE', 'ROLLBACK_FAILED', 'REVIEW_IN_PROGRESS']) {
+      expect(isAbandonedCreate(st)).toBe(true);
+    }
+    for (const st of [
+      'CREATE_COMPLETE',
+      'UPDATE_ROLLBACK_COMPLETE',
+      'UPDATE_COMPLETE',
+      undefined,
+    ]) {
+      expect(isAbandonedCreate(st)).toBe(false);
+    }
   });
 });
