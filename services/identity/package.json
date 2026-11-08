@@ -1,0 +1,21 @@
+{
+  "name": "@bmg/identity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Identity service: Cognito Lambda triggers (invite-only sign-up, profile record, token claims)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1164.0",
+    "@aws-sdk/lib-dynamodb": "^3.1164.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.150"
+  }
+}

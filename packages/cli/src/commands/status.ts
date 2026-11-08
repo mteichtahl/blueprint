@@ -8,7 +8,7 @@ import {
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { names } from '@bmg/config';
 import { isNotFound, readConfig } from '../lib/aws.ts';
-import { ENVIRONMENTS, accountStacks } from '../lib/plans.ts';
+import { ENVIRONMENTS, ENV_STACK_SUFFIXES, accountStacks } from '../lib/plans.ts';
 import { fail, heading, ok, warn } from '../lib/runtime.ts';
 
 /** `bmg status`: read-only overview of stacks, runners, alarms and deployed versions. */
@@ -23,10 +23,12 @@ export async function status(): Promise<void> {
     [accountStacks(cfg)[0]!, cfn],
     [accountStacks(cfg)[1]!, cfnEdge],
     [names.stack(cfg, 'tooling'), cfn],
-    ...ENVIRONMENTS.map((env): [string, CloudFormationClient] => [
-      names.envStack(cfg, env, 'foundation'),
-      cfn,
-    ]),
+    ...ENVIRONMENTS.flatMap((env) =>
+      ENV_STACK_SUFFIXES.map((suffix): [string, CloudFormationClient] => [
+        names.envStack(cfg, env, suffix),
+        cfn,
+      ]),
+    ),
   ];
   for (const [name, client] of stacks) {
     try {

@@ -3,7 +3,9 @@ import { AwsSolutionsChecks } from 'cdk-nag';
 import type { BmgConfig } from '@bmg/config';
 import { AccountGlobalStack } from './account-global-stack.ts';
 import { AccountGuardrailsStack } from './account-guardrails-stack.ts';
+import { DataStack } from './data-stack.ts';
 import { EnvFoundationStack } from './env-foundation-stack.ts';
+import { IdentityStack } from './identity-stack.ts';
 import { ToolingStack } from './tooling-stack.ts';
 
 export interface BuildAppOptions {
@@ -18,8 +20,10 @@ export interface BuildAppOptions {
  *   bmg-account-guardrails  home region  admin-deployed (`bmg account setup`)
  *   bmg-account-global      us-east-1    admin-deployed (root alarm, budget)
  *   bmg-tooling             home region  admin-deployed (`bmg pipeline deploy`)
- *   bmg-staging-foundation  home region  pipeline-deployed (bmg-deploy-staging)
- *   bmg-prod-foundation     home region  pipeline-deployed (bmg-deploy-prod)
+ *   bmg-<env>-foundation    home region  pipeline-deployed (platform key, alarms)
+ *   bmg-<env>-data          home region  pipeline-deployed (DynamoDB tables)
+ *   bmg-<env>-identity      home region  pipeline-deployed (Cognito, triggers)
+ * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
  */
 export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
   const home = { account: cfg.account.id, region: cfg.account.homeRegion };
@@ -48,16 +52,31 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
     : undefined;
   tooling?.addStackDependency(guardrails);
 
-  const environments = (['staging', 'prod'] as const).map(
-    (envName) =>
-      new EnvFoundationStack(app, `${cfg.project}-${envName}-foundation`, {
-        config: cfg,
-        env: home,
-        envName,
-        description: `BMG ${envName} foundation`,
-        ...(opts.version ? { version: opts.version } : {}),
-      }),
-  );
+  const environments = (['staging', 'prod'] as const).map((envName) => {
+    const foundation = new EnvFoundationStack(app, `${cfg.project}-${envName}-foundation`, {
+      config: cfg,
+      env: home,
+      envName,
+      description: `BMG ${envName} foundation`,
+      ...(opts.version ? { version: opts.version } : {}),
+    });
+    const data = new DataStack(app, `${cfg.project}-${envName}-data`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      description: `BMG ${envName} DynamoDB tables`,
+    });
+    const identity = new IdentityStack(app, `${cfg.project}-${envName}-identity`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      mainTable: data.tables.main,
+      description: `BMG ${envName} identity: Cognito user pool, web client, triggers`,
+    });
+    return { foundation, data, identity };
+  });
 
   Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));
   return { guardrails, global, tooling, environments };

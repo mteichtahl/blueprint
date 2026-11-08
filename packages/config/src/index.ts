@@ -159,7 +159,27 @@ export const names = {
   /** Secrets Manager id of the Gmail SMTP credentials for an environment. */
   smtpSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/gmail-smtp`,
   ssm: (cfg: BmgConfig, env: EnvironmentName, key: string) => `/${cfg.project}/${env}/${key}`,
+  /** DynamoDB table names (design 8.1). */
+  table: (cfg: BmgConfig, env: EnvironmentName, kind: TableKind) => `${cfg.project}-${env}-${kind}`,
+  /** Public host name in an environment, e.g. app.blueprintmusic.group / app.staging.blueprintmusic.group. */
+  host: (cfg: BmgConfig, env: EnvironmentName, sub: 'app' | 'api' | 'files' | 'join' | 'auth') => {
+    const envPart = cfg.environments[env].subdomain;
+    return [sub, envPart, cfg.domain.root].filter(Boolean).join('.');
+  },
+  /**
+   * Cognito managed-login prefix domain (<prefix>.auth.<region>.amazoncognito.com).
+   * Globally unique, so it includes the account id.
+   */
+  cognitoDomainPrefix: (cfg: BmgConfig, env: EnvironmentName) =>
+    `${cfg.project}-${env}-${cfg.account.id}`,
 };
+
+export const TABLE_KINDS = ['main', 'consent', 'sessions', 'idempotency'] as const;
+export type TableKind = (typeof TABLE_KINDS)[number];
+
+/** Cognito groups (design 6.1). Membership is set only by the API or the CLI. */
+export const USER_GROUPS = ['bmg-admin', 'bmg-staff', 'artist'] as const;
+export type UserGroup = (typeof USER_GROUPS)[number];
 
 export const TAG_ENV = 'bmg:env';
 export const TAG_ROLE = 'bmg:role';
