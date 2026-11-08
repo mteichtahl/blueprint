@@ -1,0 +1,85 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildClaims,
+  ClaimsError,
+  inviteKey,
+  roleFromGroups,
+  signUpAllowed,
+} from '../src/claims.ts';
+
+describe('roleFromGroups', () => {
+  it('picks the highest-privilege group', () => {
+    expect(roleFromGroups(['artist', 'bmg-staff'])).toBe('bmg-staff');
+    expect(roleFromGroups(['bmg-admin', 'artist'])).toBe('bmg-admin');
+    expect(roleFromGroups(['artist'])).toBe('artist');
+    expect(roleFromGroups(['other'])).toBeUndefined();
+  });
+});
+
+describe('buildClaims', () => {
+  it('gives artists their artistId and Cognito MFA level', () => {
+    expect(buildClaims({ groups: ['artist'], artistId: 'art_0123456789ab' })).toEqual({
+      role: 'artist',
+      mfa_level: 'cognito',
+      artistId: 'art_0123456789ab',
+    });
+  });
+
+  it('marks federated sign-ins so the API can require step-up', () => {
+    const claims = buildClaims({
+      groups: ['artist'],
+      artistId: 'art_0123456789ab',
+      identities: '[{"providerName":"Google"}]',
+    });
+    expect(claims.mfa_level).toBe('federated');
+  });
+
+  it('refuses an artist without a valid artistId', () => {
+    expect(() => buildClaims({ groups: ['artist'] })).toThrow(ClaimsError);
+    expect(() => buildClaims({ groups: ['artist'], artistId: '../other' })).toThrow(ClaimsError);
+  });
+
+  it('refuses accounts with no BMG group', () => {
+    expect(() => buildClaims({ groups: [] })).toThrow(ClaimsError);
+  });
+
+  it('never gives staff an artistId claim', () => {
+    expect(buildClaims({ groups: ['bmg-staff'], artistId: 'art_0123456789ab' })).toEqual({
+      role: 'bmg-staff',
+      mfa_level: 'cognito',
+    });
+  });
+});
+
+describe('signUpAllowed (invite-only)', () => {
+  const now = 1_800_000_000;
+  const pending = { status: 'pending' as const, expiresAt: now + 60 };
+
+  it('allows users created by the invite flow', () => {
+    expect(signUpAllowed('PreSignUp_AdminCreateUser', undefined, now)).toBe(true);
+  });
+
+  it('allows a first social sign-in only with a pending, unexpired invite', () => {
+    expect(signUpAllowed('PreSignUp_ExternalProvider', pending, now)).toBe(true);
+    expect(signUpAllowed('PreSignUp_ExternalProvider', undefined, now)).toBe(false);
+    expect(
+      signUpAllowed('PreSignUp_ExternalProvider', { ...pending, expiresAt: now - 1 }, now),
+    ).toBe(false);
+    expect(
+      signUpAllowed('PreSignUp_ExternalProvider', { ...pending, status: 'revoked' }, now),
+    ).toBe(false);
+  });
+
+  it('refuses self sign-up', () => {
+    expect(signUpAllowed('PreSignUp_SignUp', pending, now)).toBe(false);
+  });
+});
+
+describe('keys', () => {
+  it('matches invites case-insensitively', () => {
+    expect(inviteKey(' Kyra@BlueprintMusic.Group ')).toEqual({
+      PK: 'INVITE#kyra@blueprintmusic.group',
+      SK: 'INVITE',
+    });
+  });
+});

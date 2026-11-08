@@ -1,7 +1,7 @@
 {
   "name": "blueprint",
   "private": true,
-  "description": "BMG App — Blueprint Music Group platform (AWS, TypeScript, CDK)",
+  "description": "BMG App \u2014 Blueprint Music Group platform (AWS, TypeScript, CDK)",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.12.0"
@@ -9,6 +9,7 @@
   "packageManager": "npm@10.9.9",
   "workspaces": [
     "packages/*",
+    "services/*",
     "infra"
   ],
   "scripts": {

@@ -38,3 +38,17 @@ describe('bmg config', () => {
     expect(names.runnerProject(cfg, 'deploy-prod')).toBe('bmg-deploy-prod');
   });
 });
+
+describe('names', () => {
+  const cfg = parseConfig(example);
+  it('puts staging hosts under the staging subdomain and prod at the root', () => {
+    expect(names.host(cfg, 'prod', 'app')).toBe(`app.${cfg.domain.root}`);
+    expect(names.host(cfg, 'staging', 'auth')).toBe(`auth.staging.${cfg.domain.root}`);
+  });
+  it('names tables per environment', () => {
+    expect(names.table(cfg, 'staging', 'consent')).toBe('bmg-staging-consent');
+  });
+  it('makes a globally unique Cognito domain prefix', () => {
+    expect(names.cognitoDomainPrefix(cfg, 'prod')).toBe(`bmg-prod-${cfg.account.id}`);
+  });
+});

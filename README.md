@@ -3,7 +3,7 @@
 The platform for **Blueprint Music Group**: a web app (installable as a PWA) for BMG staff and the artists they develop. It runs on AWS in Sydney and is built entirely in TypeScript with AWS CDK.
 
 - **Design:** [BMG App — Solution Design (AWS)](https://claude.ai/artifact/N3KZsLiPgrwHmjRrBMkZm1). Its decisions are summarised in [`docs/decisions.md`](docs/decisions.md).
-- **Status:** Phase 1 (foundations) — setup CLI, account guardrails and CI/CD.
+- **Status:** Phase 1 (foundations) is live. Phase 2 (identity and keys) is in progress: Cognito and the DynamoDB tables are in.
 
 ## Repository layout
 
@@ -12,6 +12,7 @@ The platform for **Blueprint Music Group**: a web app (installable as a PWA) for
 | `packages/cli`       | `bmg` setup CLI: first-time account, GitHub, Google and pipeline setup       |
 | `packages/config`    | Schema and loader for `bmg.config.json`, shared by the CLI and CDK           |
 | `packages/ci-policy` | Workflow policy: fails CI if any job could run on a GitHub-hosted runner     |
+| `services/identity`  | Cognito triggers: invite-only sign-up, profile record, token claims          |
 | `infra`              | CDK app: account guardrails, CI/CD tooling, per-environment stacks           |
 | `.github/workflows`  | CI, deploy and nightly workflows. Every job runs on CodeBuild runners in AWS |
 
@@ -50,6 +51,8 @@ git push origin main             # pipeline deploys staging, then prod after app
 npm run bmg -- secrets set <name> --env prod
 npm run bmg -- email setup --env prod --test-to you@example.com
                                  # Gmail SMTP as kyra@: stores the app password in Secrets Manager
+npm run bmg -- admin create --env staging --email kyra@blueprintmusic.group
+                                 # first bmg-admin; Cognito emails a temporary password
 npm run bmg -- status
 ```
 

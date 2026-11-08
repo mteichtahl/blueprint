@@ -191,7 +191,7 @@ describe('tooling (CodeBuild runners)', () => {
 
 describe('environment foundations', () => {
   it('uses a separate bootstrap qualifier per environment and tags resources', () => {
-    const [staging, prod] = stacks.environments;
+    const [staging, prod] = stacks.environments.map((e) => e.foundation);
     expect(JSON.stringify(Template.fromStack(staging!).toJSON())).toContain(
       '/cdk-bootstrap/bmgstg/version',
     );
@@ -202,5 +202,92 @@ describe('environment foundations', () => {
       EnableKeyRotation: true,
       Tags: Match.arrayWith([{ Key: 'bmg:env', Value: 'prod' }]),
     });
+  });
+});
+
+describe('environment data (DynamoDB)', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.data));
+
+  it('creates the four tables with KMS encryption and point-in-time recovery', () => {
+    for (const t of [staging!, prod!]) {
+      t.resourceCountIs('AWS::DynamoDB::Table', 4);
+      t.allResourcesProperties('AWS::DynamoDB::Table', {
+        SSESpecification: Match.objectLike({ SSEEnabled: true, SSEType: 'KMS' }),
+        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+      });
+    }
+  });
+
+  it('protects prod tables from deletion', () => {
+    prod!.allResourcesProperties('AWS::DynamoDB::Table', { DeletionProtectionEnabled: true });
+  });
+
+  it('never grants update or delete on the consent ledger', () => {
+    for (const e of stacks.environments) {
+      for (const stack of [e.foundation, e.data, e.identity]) {
+        const json = JSON.stringify(Template.fromStack(stack).toJSON());
+        expect(json).not.toMatch(/consent[^"]*"[^}]*dynamodb:(UpdateItem|DeleteItem)/);
+      }
+    }
+  });
+});
+
+describe('environment identity (Cognito)', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.identity));
+
+  it('is invite-only with required MFA and passkeys that count as two factors', () => {
+    for (const t of [staging!, prod!]) {
+      t.hasResourceProperties('AWS::Cognito::UserPool', {
+        AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }),
+        MfaConfiguration: 'ON',
+        EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
+        WebAuthnFactorConfiguration: 'MULTI_FACTOR_WITH_USER_VERIFICATION',
+        WebAuthnUserVerification: 'required',
+        Policies: Match.objectLike({
+          PasswordPolicy: Match.objectLike({ MinimumLength: 12 }),
+          SignInPolicy: { AllowedFirstAuthFactors: ['PASSWORD', 'WEB_AUTHN'] },
+        }),
+      });
+    }
+  });
+
+  it('uses Plus with threat protection in prod and Essentials in staging (D3)', () => {
+    prod!.hasResourceProperties('AWS::Cognito::UserPool', {
+      UserPoolTier: 'PLUS',
+      UserPoolAddOns: { AdvancedSecurityMode: 'ENFORCED' },
+    });
+    staging!.hasResourceProperties('AWS::Cognito::UserPool', { UserPoolTier: 'ESSENTIALS' });
+  });
+
+  it('has a public PKCE web client with short-lived tokens and rotation', () => {
+    prod!.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      GenerateSecret: false,
+      AllowedOAuthFlows: ['code'],
+      AccessTokenValidity: 15,
+      IdTokenValidity: 15,
+      TokenValidityUnits: Match.objectLike({ AccessToken: 'minutes' }),
+      EnableTokenRevocation: true,
+      PreventUserExistenceErrors: 'ENABLED',
+      RefreshTokenRotation: Match.objectLike({ Feature: 'ENABLED' }),
+      CallbackURLs: [`https://app.${cfg.domain.root}/auth/callback`],
+      WriteAttributes: ['email'],
+    });
+  });
+
+  it('creates the three groups and wires pre token generation V2', () => {
+    prod!.resourceCountIs('AWS::Cognito::UserPoolGroup', 3);
+    prod!.hasResourceProperties('AWS::Cognito::UserPool', {
+      LambdaConfig: Match.objectLike({
+        PreTokenGenerationConfig: Match.objectLike({ LambdaVersion: 'V2_0' }),
+      }),
+    });
+  });
+
+  it('puts the permission boundary on every trigger role', () => {
+    const roles = prod!.findResources('AWS::IAM::Role');
+    expect(Object.keys(roles).length).toBeGreaterThanOrEqual(3);
+    for (const role of Object.values(roles)) {
+      expect(role.Properties.PermissionsBoundary).toBeDefined();
+    }
   });
 });
