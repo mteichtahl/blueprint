@@ -126,7 +126,9 @@ export class IdentityStack extends BmgStack {
         tempPasswordValidity: Duration.days(7),
       },
       signInPolicy: { allowedFirstAuthFactors: { password: true, passkey: true } },
-      passkeyRelyingPartyId: loginHost,
+      // No explicit relying party id: Cognito binds passkeys to the pool's own
+      // login domain. Naming the prefix domain here fails, because the domain
+      // is created after the pool.
       passkeyUserVerification: PasskeyUserVerification.REQUIRED,
       accountRecovery: AccountRecovery.EMAIL_ONLY,
       deletionProtection: prod,

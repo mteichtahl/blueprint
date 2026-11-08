@@ -58,6 +58,7 @@ npm run bmg -- email setup --env prod --test-to you@example.com
 npm run bmg -- admin create --env staging --email kyra@blueprintmusic.group
                                  # first bmg-admin; Cognito emails a temporary password
 npm run bmg -- verify isolation  # staging: proves KMS refuses cross-artist access
+npm run bmg -- stacks repair     # removes stacks whose first create failed, so deploys can run
 npm run bmg -- status
 ```
 

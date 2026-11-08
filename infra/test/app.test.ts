@@ -251,6 +251,13 @@ describe('environment identity (Cognito)', () => {
     }
   });
 
+  it("leaves the passkey relying party to Cognito (the login domain doesn't exist at pool creation)", () => {
+    for (const t of [staging!, prod!]) {
+      const pool = Object.values(t.findResources('AWS::Cognito::UserPool'))[0]!;
+      expect(pool.Properties.WebAuthnRelyingPartyID).toBeUndefined();
+    }
+  });
+
   it('uses Plus with threat protection in prod and Essentials in staging (D3)', () => {
     prod!.hasResourceProperties('AWS::Cognito::UserPool', {
       UserPoolTier: 'PLUS',
