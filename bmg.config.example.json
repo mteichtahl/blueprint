@@ -24,7 +24,7 @@
   "budget": { "monthlyUsd": 400 },
   "audit": { "objectLockMode": "GOVERNANCE", "retentionDays": 2555 },
   "email": {
-    "senderAddress": "hello@blueprintmusic.group",
+    "senderAddress": "kyra@blueprintmusic.group",
     "senderName": "Blueprint Music Group",
     "domain": "blueprintmusic.group",
     "smtpHost": "smtp.gmail.com",
