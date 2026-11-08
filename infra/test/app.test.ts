@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
-import { parseConfig } from '@bmg/config';
+import { names, parseConfig } from '@bmg/config';
 import { buildApp } from '../lib/app.ts';
 
 const cfg = parseConfig(
@@ -165,6 +165,15 @@ describe('tooling (CodeBuild runners)', () => {
       'codeconnections:UseConnection',
     ]) {
       expect(policies).toContain(action);
+    }
+  });
+
+  it('names its retained resources the way the CLI cleanup expects', () => {
+    t.hasResourceProperties('AWS::ECR::Repository', { RepositoryName: names.agentRepository(cfg) });
+    for (const kind of ['ci', 'deploy-staging', 'deploy-prod'] as const) {
+      t.hasResourceProperties('AWS::Logs::LogGroup', {
+        LogGroupName: names.runnerLogGroup(cfg, kind),
+      });
     }
   });
 

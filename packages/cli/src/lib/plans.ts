@@ -315,3 +315,17 @@ export function secretId(cfg: BmgConfig, env: EnvironmentName, name: string): st
   }
   return `${cfg.project}/${env}/${name}`;
 }
+
+export const RUNNER_KINDS = ['ci', 'deploy-staging', 'deploy-prod'] as const;
+
+/**
+ * Named resources in the tooling stack that CloudFormation keeps when the stack
+ * is deleted (RemovalPolicy.RETAIN). After a failed first deploy they are left
+ * behind and block the next create, so `pipeline deploy` removes them.
+ */
+export function toolingRetainedResources(cfg: BmgConfig) {
+  return {
+    repository: names.agentRepository(cfg),
+    logGroups: RUNNER_KINDS.map((k) => names.runnerLogGroup(cfg, k)),
+  };
+}

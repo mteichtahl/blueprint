@@ -13,6 +13,7 @@ import {
   secretId,
   smtpSecretPayload,
   toolingBootstrap,
+  toolingRetainedResources,
 } from '../src/lib/plans.ts';
 import { redact } from '../src/lib/runtime.ts';
 
@@ -194,5 +195,16 @@ describe('existing security services', () => {
     expect(isLiveResourceStatus('CREATE_FAILED')).toBe(false);
     expect(isLiveResourceStatus('DELETE_COMPLETE')).toBe(false);
     expect(isLiveResourceStatus(undefined)).toBe(false);
+  });
+});
+
+describe('toolingRetainedResources', () => {
+  it('names exactly the retained resources the tooling stack creates', () => {
+    expect(toolingRetainedResources(cfg)).toEqual({
+      repository: `${cfg.project}-agent`,
+      logGroups: ['ci', 'deploy-staging', 'deploy-prod'].map(
+        (k) => `/aws/codebuild/${names.runnerProject(cfg, k as 'ci')}`,
+      ),
+    });
   });
 });

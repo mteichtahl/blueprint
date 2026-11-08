@@ -3,7 +3,13 @@ import { CodeConnectionsClient, GetConnectionCommand } from '@aws-sdk/client-cod
 import { names } from '@bmg/config';
 import { assertAccount, readConfig } from '../lib/aws.ts';
 import { deployArgs } from '../lib/plans.ts';
-import { deployWithDiagnostics, failedCreate, removeFailedCreate } from '../lib/stacks.ts';
+import { toolingOrphanCleanup } from '../lib/orphans.ts';
+import {
+  deployWithDiagnostics,
+  failedCreate,
+  removeFailedCreate,
+  stackStatus,
+} from '../lib/stacks.ts';
 import { cdk, executePlan, log, ok, type GlobalOptions, type PlanStep } from '../lib/runtime.ts';
 
 /** `bmg pipeline deploy`: deploy the CodeBuild runner projects. After this, GitHub drives every change. */
@@ -39,6 +45,11 @@ export async function pipelineDeploy(opts: GlobalOptions): Promise<void> {
         },
       ]
     : [];
+  // Resources the stack keeps on delete outlive a failed create and block the
+  // next one. Only look for them when no live stack can own them.
+  if (failed || (await stackStatus(cfn, stack)) === undefined) {
+    cleanup.push(...(await toolingOrphanCleanup(cfg)));
+  }
   await executePlan(
     'CI/CD tooling',
     [
