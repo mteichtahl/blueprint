@@ -3,7 +3,7 @@
 The platform for **Blueprint Music Group**: a web app (installable as a PWA) for BMG staff and the artists they develop. It runs on AWS in Sydney and is built entirely in TypeScript with AWS CDK.
 
 - **Design:** [BMG App — Solution Design (AWS)](https://claude.ai/artifact/N3KZsLiPgrwHmjRrBMkZm1). Its decisions are summarised in [`docs/decisions.md`](docs/decisions.md).
-- **Status:** Phase 1 (foundations) is live. Phase 2 (identity and keys) is in progress: Cognito, the DynamoDB tables and per-artist KMS keys are in.
+- **Status:** Phase 1 (foundations) is live. Phase 2 (identity and keys): Cognito, the DynamoDB tables, per-artist KMS keys, the API with authorisation, consent and step-up, and the audit archive.
 
 ## Repository layout
 
@@ -12,8 +12,10 @@ The platform for **Blueprint Music Group**: a web app (installable as a PWA) for
 | `packages/cli`       | `bmg` setup CLI: first-time account, GitHub, Google and pipeline setup         |
 | `packages/config`    | Schema and loader for `bmg.config.json`, shared by the CLI and CDK             |
 | `packages/ci-policy` | Workflow policy: fails CI if any job could run on a GitHub-hosted runner       |
+| `packages/authz`     | Shared authorisation checks (design 6.3) and the full access matrix tests      |
 | `packages/crypto`    | Per-artist encryption: key names, tagged data-access sessions, envelope crypto |
 | `services/identity`  | Cognito triggers: invite-only sign-up, profile record, token claims            |
+| `services/api`       | API handlers: authorizer, /me, consent ledger, MFA step-up, artist invites     |
 | `services/keys`      | Artist key policy, onboarding task, isolation gate                             |
 | `infra`              | CDK app: account guardrails, CI/CD tooling, per-environment stacks             |
 | `.github/workflows`  | CI, deploy and nightly workflows. Every job runs on CodeBuild runners in AWS   |

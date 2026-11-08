@@ -2,6 +2,8 @@ import { App, Validations } from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import type { BmgConfig } from '@bmg/config';
 import { AccountGlobalStack } from './account-global-stack.ts';
+import { ApiStack } from './api-stack.ts';
+import { AuditStack } from './audit-stack.ts';
 import { AccountGuardrailsStack } from './account-guardrails-stack.ts';
 import { DataStack } from './data-stack.ts';
 import { EnvFoundationStack } from './env-foundation-stack.ts';
@@ -25,6 +27,8 @@ export interface BuildAppOptions {
  *   bmg-<env>-data          home region  pipeline-deployed (DynamoDB tables)
  *   bmg-<env>-identity      home region  pipeline-deployed (Cognito, triggers)
  *   bmg-<env>-keys          home region  pipeline-deployed (per-artist KMS, onboarding, isolation gate)
+ *   bmg-<env>-audit         home region  pipeline-deployed (event bus, Object Lock audit archive)
+ *   bmg-<env>-api           home region  pipeline-deployed (REST API, authorizer, WAF)
  * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
  */
 export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
@@ -86,7 +90,28 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       description: `BMG ${envName} per-artist keys: key-admin and data-access roles, onboarding`,
       ...(opts.version ? { version: opts.version } : {}),
     });
-    return { foundation, data, identity, keys };
+    const audit = new AuditStack(app, `${cfg.project}-${envName}-audit`, {
+      config: cfg,
+      env: home,
+      envName,
+      alarmTopic: foundation.alarmTopic,
+      description: `BMG ${envName} event bus and Object Lock audit archive`,
+    });
+    const api = new ApiStack(app, `${cfg.project}-${envName}-api`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      userPool: identity.userPool,
+      webClient: identity.webClient,
+      mainTable: data.tables.main,
+      consentTable: data.tables.consent,
+      sessionsTable: data.tables.sessions,
+      bus: audit.bus,
+      onboarding: keys.onboarding,
+      description: `BMG ${envName} REST API: authorizer, consent, step-up, invites`,
+    });
+    return { foundation, data, identity, keys, audit, api };
   });
 
   Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));

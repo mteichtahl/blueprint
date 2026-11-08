@@ -1,0 +1,28 @@
+{
+  "name": "@bmg/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API handlers: authorizer, me, consent ledger, MFA step-up, artist invites",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1164.0",
+    "@aws-sdk/client-dynamodb": "^3.1164.0",
+    "@aws-sdk/client-eventbridge": "^3.1164.0",
+    "@aws-sdk/client-kms": "^3.1164.0",
+    "@aws-sdk/client-s3": "^3.1164.0",
+    "@aws-sdk/client-sfn": "^3.1164.0",
+    "@aws-sdk/lib-dynamodb": "^3.1164.0",
+    "@bmg/authz": "*",
+    "@bmg/crypto": "*",
+    "aws-jwt-verify": "^5.2.1",
+    "otpauth": "^9.6.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164"
+  }
+}
