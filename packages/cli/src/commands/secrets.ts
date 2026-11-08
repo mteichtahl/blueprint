@@ -7,7 +7,7 @@ import {
 } from '@aws-sdk/client-secrets-manager';
 import { password } from '@inquirer/prompts';
 import { EnvironmentName } from '@bmg/config';
-import { assertAccount, isNotFound, readConfig } from '../lib/aws.ts';
+import { assertAccount, assertPlatformKey, isNotFound, readConfig } from '../lib/aws.ts';
 import { secretId } from '../lib/plans.ts';
 import { executePlan, type GlobalOptions } from '../lib/runtime.ts';
 
@@ -26,6 +26,7 @@ export async function secretsSet(name: string, opts: SecretsSetOptions): Promise
   await assertAccount(cfg);
   const env = EnvironmentName.parse(opts.env);
   const id = secretId(cfg, env, name);
+  const keyAlias = await assertPlatformKey(cfg, env);
   const value = opts.fromFile
     ? readFileSync(opts.fromFile, 'utf8').trim()
     : await password({ message: `Value for ${id}`, mask: '*' });
@@ -44,7 +45,7 @@ export async function secretsSet(name: string, opts: SecretsSetOptions): Promise
     'Secrets Manager',
     [
       {
-        description: `${exists ? 'Update' : 'Create'} secret ${id} (KMS: alias/${cfg.project}/${env}/platform)`,
+        description: `${exists ? 'Update' : 'Create'} secret ${id} (KMS: ${keyAlias})`,
         run: async () => {
           if (exists) {
             await client.send(new PutSecretValueCommand({ SecretId: id, SecretString: value }));
@@ -53,7 +54,7 @@ export async function secretsSet(name: string, opts: SecretsSetOptions): Promise
               new CreateSecretCommand({
                 Name: id,
                 SecretString: value,
-                KmsKeyId: `alias/${cfg.project}/${env}/platform`,
+                KmsKeyId: keyAlias,
                 Tags: [{ Key: 'bmg:env', Value: env }],
               }),
             );

@@ -43,11 +43,13 @@ npm run bmg -- account setup --users marc,kyra
                                  # guardrail stacks, staging/prod bootstraps, admin users
 npm run bmg -- github connect    # CodeConnections link (approve once in the AWS console)
 npm run bmg -- github protect    # makes the repo public and locks it down
+npm run bmg -- pipeline deploy   # CodeBuild runner projects
+git push origin main             # pipeline deploys staging, then prod after approval
+                                 # (creates each environment's platform KMS key)
+# After the Deploy workflow has finished for an environment:
 npm run bmg -- secrets set <name> --env prod
 npm run bmg -- email setup --env prod --test-to you@example.com
                                  # Gmail SMTP as kyra@: stores the app password in Secrets Manager
-npm run bmg -- pipeline deploy   # CodeBuild runner projects
-git push origin main             # pipeline deploys staging, then prod after approval
 npm run bmg -- status
 ```
 
