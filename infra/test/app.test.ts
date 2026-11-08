@@ -105,6 +105,12 @@ describe('global stack', () => {
       Budget: Match.objectLike({ BudgetLimit: { Amount: 400, Unit: 'USD' } }),
     });
   });
+  it('lets CloudFormation name the budget (no clash with leftovers)', () => {
+    const budgets = t.findResources('AWS::Budgets::Budget');
+    for (const b of Object.values(budgets)) {
+      expect(b.Properties.Budget.BudgetName).toBeUndefined();
+    }
+  });
   it('alarms on root sign-in', () => {
     t.hasResourceProperties('AWS::Events::Rule', {
       EventPattern: Match.objectLike({ detail: { userIdentity: { type: ['Root'] } } }),
