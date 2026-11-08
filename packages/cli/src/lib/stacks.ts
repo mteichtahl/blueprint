@@ -1,7 +1,10 @@
 import {
   CloudFormationClient,
+  DeleteStackCommand,
   DescribeStackEventsCommand,
   DescribeStacksCommand,
+  UpdateTerminationProtectionCommand,
+  waitUntilStackDeleteComplete,
 } from '@aws-sdk/client-cloudformation';
 import { fail, log, sleep } from './runtime.ts';
 
@@ -87,4 +90,34 @@ export async function deployWithDiagnostics(
     await printFailureReasons(stacks);
     throw err;
   }
+}
+
+/**
+ * A stack whose very first create failed sits in ROLLBACK_COMPLETE and can only
+ * be deleted, and termination protection blocks that. Detect it so setup can
+ * clear it before retrying.
+ */
+export async function failedCreate(client: CloudFormationClient, name: string) {
+  try {
+    const status = (await client.send(new DescribeStacksCommand({ StackName: name }))).Stacks?.[0]
+      ?.StackStatus;
+    if (status === 'ROLLBACK_COMPLETE' || status === 'ROLLBACK_FAILED') {
+      return { client, name, status };
+    }
+  } catch (err) {
+    if (!/does not exist/.test((err as Error).message)) throw err;
+  }
+  return undefined;
+}
+
+/** Turn off termination protection and delete a stack left by a failed first create. */
+export async function removeFailedCreate(
+  client: CloudFormationClient,
+  name: string,
+): Promise<void> {
+  await client.send(
+    new UpdateTerminationProtectionCommand({ StackName: name, EnableTerminationProtection: false }),
+  );
+  await client.send(new DeleteStackCommand({ StackName: name }));
+  await waitUntilStackDeleteComplete({ client, maxWaitTime: 900 }, { StackName: name });
 }

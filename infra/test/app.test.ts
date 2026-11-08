@@ -157,6 +157,17 @@ describe('tooling (CodeBuild runners)', () => {
     expect(prodPolicies[0]).toContain('DeployProdRole');
   });
 
+  it('gives runner roles the connection permissions CodeBuild checks at project creation', () => {
+    const policies = JSON.stringify(t.findResources('AWS::IAM::Policy'));
+    for (const action of [
+      'codeconnections:GetConnection',
+      'codeconnections:GetConnectionToken',
+      'codeconnections:UseConnection',
+    ]) {
+      expect(policies).toContain(action);
+    }
+  });
+
   it('tags runner roles with their deploy target for the boundary', () => {
     t.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'bmg-deploy-prod-runner',

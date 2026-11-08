@@ -120,9 +120,14 @@ export class ToolingStack extends BmgStack {
     role.addToPolicy(
       new PolicyStatement({
         sid: 'UseGitHubConnection',
+        // CodeBuild checks these on the service role when it creates a project
+        // with CODECONNECTIONS source auth; both IAM prefixes are evaluated.
         actions: [
-          'codeconnections:UseConnection',
+          'codeconnections:GetConnection',
           'codeconnections:GetConnectionToken',
+          'codeconnections:UseConnection',
+          'codestar-connections:GetConnection',
+          'codestar-connections:GetConnectionToken',
           'codestar-connections:UseConnection',
         ],
         resources: [connectionArn],

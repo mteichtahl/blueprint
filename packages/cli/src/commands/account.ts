@@ -8,14 +8,7 @@ import {
   IAMClient,
   UpdateAccountPasswordPolicyCommand,
 } from '@aws-sdk/client-iam';
-import {
-  CloudFormationClient,
-  DeleteStackCommand,
-  DescribeStacksCommand,
-  ListStackResourcesCommand,
-  UpdateTerminationProtectionCommand,
-  waitUntilStackDeleteComplete,
-} from '@aws-sdk/client-cloudformation';
+import { CloudFormationClient, ListStackResourcesCommand } from '@aws-sdk/client-cloudformation';
 import { PutPublicAccessBlockCommand, S3ControlClient } from '@aws-sdk/client-s3-control';
 import { assertAccount, isNotFound, readConfig } from '../lib/aws.ts';
 import { configPath, saveConfig } from '@bmg/config';
@@ -30,7 +23,7 @@ import {
   type GlobalOptions,
   type PlanStep,
 } from '../lib/runtime.ts';
-import { deployWithDiagnostics } from '../lib/stacks.ts';
+import { deployWithDiagnostics, failedCreate, removeFailedCreate } from '../lib/stacks.ts';
 import { envBootstrapSteps } from './bootstrap.ts';
 import { detectExistingServices } from './doctor.ts';
 
@@ -77,16 +70,7 @@ export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
   const steps: PlanStep[] = [
     ...failedFirstAttempts.map(({ client, name, status }): PlanStep => ({
       description: `Remove ${name} left in ${status} by a failed first deploy (it never held data; retained keys/buckets stay)`,
-      run: async () => {
-        await client.send(
-          new UpdateTerminationProtectionCommand({
-            StackName: name,
-            EnableTerminationProtection: false,
-          }),
-        );
-        await client.send(new DeleteStackCommand({ StackName: name }));
-        await waitUntilStackDeleteComplete({ client, maxWaitTime: 900 }, { StackName: name });
-      },
+      run: () => removeFailedCreate(client, name),
     })),
     {
       description: 'Block all S3 public access at the account level',
@@ -205,22 +189,4 @@ export async function ownedPhysicalIds(
     if (!/does not exist/.test((err as Error).message)) throw err;
   }
   return ids;
-}
-
-/**
- * A stack whose very first create failed sits in ROLLBACK_COMPLETE and can only
- * be deleted, and termination protection blocks that. Detect it so setup can
- * clear it before retrying.
- */
-async function failedCreate(client: CloudFormationClient, name: string) {
-  try {
-    const status = (await client.send(new DescribeStacksCommand({ StackName: name }))).Stacks?.[0]
-      ?.StackStatus;
-    if (status === 'ROLLBACK_COMPLETE' || status === 'ROLLBACK_FAILED') {
-      return { client, name, status };
-    }
-  } catch (err) {
-    if (!/does not exist/.test((err as Error).message)) throw err;
-  }
-  return undefined;
 }
