@@ -85,14 +85,6 @@ const checks: Check[] = [
     },
   },
   {
-    name: 'Google Cloud CLI (gcloud) for `bmg google setup`',
-    required: false,
-    run: async () => ({
-      ok: await commandExists('gcloud'),
-      detail: 'needed only for the email setup step',
-    }),
-  },
-  {
     name: 'Bedrock: Australia-only inference profiles for the configured models',
     required: true,
     run: async (cfg) => {

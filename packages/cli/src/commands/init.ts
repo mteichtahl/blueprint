@@ -100,12 +100,8 @@ export async function init(opts: GlobalOptions): Promise<void> {
     await input({ message: 'Monthly AWS budget (USD)', default: String(base.budget.monthlyUsd) }),
   );
   const sender = await input({
-    message: 'Google Workspace sender address',
-    default: base.google.senderAddress,
-  });
-  const gcpProject = await input({
-    message: 'Google Cloud project id for the mailer',
-    default: base.google.gcpProjectId,
+    message: 'Gmail address that sends app email (Gmail SMTP)',
+    default: base.email.senderAddress,
   });
 
   const next: BmgConfig = parseConfig({
@@ -123,11 +119,10 @@ export async function init(opts: GlobalOptions): Promise<void> {
     },
     alerts: { emails },
     budget: { monthlyUsd: budget },
-    google: {
-      ...base.google,
+    email: {
+      ...base.email,
       senderAddress: sender,
-      workspaceDomain: sender.split('@')[1] ?? base.google.workspaceDomain,
-      gcpProjectId: gcpProject,
+      domain: sender.split('@')[1] ?? base.email.domain,
     },
   });
   saveConfig(next, path);

@@ -4,8 +4,8 @@ import { accountSetup } from './commands/account.ts';
 import { adminCreate } from './commands/admin.ts';
 import { bootstrap } from './commands/bootstrap.ts';
 import { doctor } from './commands/doctor.ts';
+import { emailSetup } from './commands/email.ts';
 import { githubConnect, githubProtect } from './commands/github.ts';
-import { googleSetup } from './commands/google.ts';
 import { init } from './commands/init.ts';
 import { pipelineDeploy } from './commands/pipeline.ts';
 import { secretsSet } from './commands/secrets.ts';
@@ -17,7 +17,7 @@ const program = new Command()
   .description(
     'One-time setup for the BMG platform. First run, in order:\n' +
       '  init → doctor → bootstrap → account setup → github connect → github protect\n' +
-      '  → secrets set → google setup → pipeline deploy → (push to main) → admin create',
+      '  → secrets set → email setup → pipeline deploy → (push to main) → admin create',
   )
   .option('-y, --yes', 'apply without asking for confirmation')
   .option('--dry-run', 'show what would change, change nothing');
@@ -78,11 +78,13 @@ secrets
     ),
   );
 
-const google = program.command('google').description('Google Workspace email');
-google
+const email = program.command('email').description('app email through Gmail SMTP');
+email
   .command('setup')
-  .description('keyless Gmail send-only setup (Workload Identity Federation)')
-  .action(wrap(() => googleSetup(g())));
+  .description('store and verify the Gmail app password for the sender (no Google Cloud)')
+  .option('--env <env>', 'staging or prod', 'prod')
+  .option('--test-to <address>', 'send a test email after verifying the login')
+  .action(wrap((o: { env: string; testTo?: string }) => emailSetup({ ...g(), ...o })));
 
 const pipeline = program.command('pipeline').description('CI/CD');
 pipeline

@@ -32,7 +32,6 @@ Prerequisites:
 - Node 22.12+.
 - AWS CLI credentials for the BMG account (an admin user with MFA).
 - The GitHub CLI (`gh auth login`).
-- `gcloud`, for the email step only.
 
 ```bash
 npm ci
@@ -45,7 +44,8 @@ npm run bmg -- account setup --users marc,kyra
 npm run bmg -- github connect    # CodeConnections link (approve once in the AWS console)
 npm run bmg -- github protect    # makes the repo public and locks it down
 npm run bmg -- secrets set <name> --env prod
-npm run bmg -- google setup      # keyless Gmail send-only as hello@ (Kyra approves delegation once)
+npm run bmg -- email setup --env prod --test-to you@example.com
+                                 # Gmail SMTP as hello@: stores the app password in Secrets Manager
 npm run bmg -- pipeline deploy   # CodeBuild runner projects
 git push origin main             # pipeline deploys staging, then prod after approval
 npm run bmg -- status

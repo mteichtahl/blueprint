@@ -23,11 +23,12 @@
   "alerts": { "emails": ["alerts@example.com"] },
   "budget": { "monthlyUsd": 400 },
   "audit": { "objectLockMode": "GOVERNANCE", "retentionDays": 2555 },
-  "google": {
-    "workspaceDomain": "blueprintmusic.group",
+  "email": {
     "senderAddress": "hello@blueprintmusic.group",
-    "gcpProjectId": "bmg-app-mailer",
-    "serviceAccountName": "bmg-mailer"
+    "senderName": "Blueprint Music Group",
+    "domain": "blueprintmusic.group",
+    "smtpHost": "smtp.gmail.com",
+    "smtpPort": 587
   },
   "ai": {
     "assistantModelProfile": "au.anthropic.claude-sonnet-4-5-20250929-v1:0",

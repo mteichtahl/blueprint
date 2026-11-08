@@ -205,128 +205,39 @@ export function githubProtectionRequests(cfg: BmgConfig, reviewerIds: number[]):
   ];
 }
 
-// ---- Google Workspace mail sending (design 7.4) -----------------------------------------
+// ---- Gmail SMTP (design 7.4) -----------------------------------------------------------
 
-export const WIF_POOL = 'bmg-aws';
-export const WIF_PROVIDER = 'bmg-aws-account';
-export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-
-export function serviceAccountEmail(cfg: BmgConfig): string {
-  return `${cfg.google.serviceAccountName}@${cfg.google.gcpProjectId}.iam.gserviceaccount.com`;
+export interface SmtpSecret {
+  host: string;
+  port: number;
+  /** true for 465 (implicit TLS); 587 upgrades with STARTTLS. */
+  secure: boolean;
+  username: string;
+  password: string;
+  from: string;
 }
 
-export function mailerRoles(cfg: BmgConfig): string[] {
-  return ENVIRONMENTS.map((env) => names.mailerRole(cfg, env));
+/**
+ * Gmail app passwords are 16 letters, shown in four groups of four.
+ * Normalise what the user pastes and reject anything else early.
+ */
+export function normaliseAppPassword(raw: string): string {
+  const pw = raw.replace(/\s+/g, '').toLowerCase();
+  if (!/^[a-z]{16}$/.test(pw)) {
+    throw new Error('A Gmail app password is 16 letters (e.g. "abcd efgh ijkl mnop").');
+  }
+  return pw;
 }
 
-/** gcloud commands, in order. `projectNumber` is resolved after the project exists. */
-export function googleSetupCommands(
-  cfg: BmgConfig,
-  projectNumber: string,
-): { description: string; args: string[] }[] {
-  const p = cfg.google.gcpProjectId;
-  const sa = serviceAccountEmail(cfg);
-  const roles = mailerRoles(cfg);
-  const principal = (role: string) =>
-    `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${WIF_POOL}/attribute.aws_role/${role}`;
-
-  return [
-    {
-      description: 'Enable the IAM, STS and Gmail APIs',
-      args: [
-        'services',
-        'enable',
-        'iam.googleapis.com',
-        'iamcredentials.googleapis.com',
-        'sts.googleapis.com',
-        'gmail.googleapis.com',
-        '--project',
-        p,
-      ],
-    },
-    {
-      description: `Create service account ${sa} (no keys are ever created)`,
-      args: [
-        'iam',
-        'service-accounts',
-        'create',
-        cfg.google.serviceAccountName,
-        '--display-name',
-        'BMG app mailer (send-only)',
-        '--project',
-        p,
-      ],
-    },
-    {
-      description: `Create workload identity pool ${WIF_POOL}`,
-      args: [
-        'iam',
-        'workload-identity-pools',
-        'create',
-        WIF_POOL,
-        '--location',
-        'global',
-        '--display-name',
-        'BMG AWS account',
-        '--project',
-        p,
-      ],
-    },
-    {
-      description: `Trust AWS account ${cfg.account.id}, limited to roles ${roles.join(', ')}`,
-      args: [
-        'iam',
-        'workload-identity-pools',
-        'providers',
-        'create-aws',
-        WIF_PROVIDER,
-        '--workload-identity-pool',
-        WIF_POOL,
-        '--location',
-        'global',
-        '--account-id',
-        cfg.account.id,
-        '--attribute-mapping',
-        "google.subject=assertion.arn,attribute.aws_role=assertion.arn.extract('assumed-role/{role}/')",
-        '--attribute-condition',
-        `attribute.aws_role in [${roles.map((r) => `'${r}'`).join(', ')}]`,
-        '--project',
-        p,
-      ],
-    },
-    ...roles.flatMap((role) => [
-      {
-        description: `Let ${role} act as the mailer service account`,
-        args: [
-          'iam',
-          'service-accounts',
-          'add-iam-policy-binding',
-          sa,
-          '--role',
-          'roles/iam.workloadIdentityUser',
-          '--member',
-          principal(role),
-          '--project',
-          p,
-        ],
-      },
-      {
-        description: `Let ${role} sign the delegation JWT (signJwt) for the mailer`,
-        args: [
-          'iam',
-          'service-accounts',
-          'add-iam-policy-binding',
-          sa,
-          '--role',
-          'roles/iam.serviceAccountTokenCreator',
-          '--member',
-          principal(role),
-          '--project',
-          p,
-        ],
-      },
-    ]),
-  ];
+export function smtpSecretPayload(cfg: BmgConfig, appPassword: string): SmtpSecret {
+  return {
+    host: cfg.email.smtpHost,
+    port: cfg.email.smtpPort,
+    secure: cfg.email.smtpPort === 465,
+    username: cfg.email.senderAddress,
+    password: normaliseAppPassword(appPassword),
+    from: `"${cfg.email.senderName}" <${cfg.email.senderAddress}>`,
+  };
 }
 
 export interface DnsFindings {

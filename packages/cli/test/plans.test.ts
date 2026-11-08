@@ -1,16 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseConfig } from '@bmg/config';
+import { names, parseConfig } from '@bmg/config';
 import {
   deployArgs,
   envBootstrap,
   evaluateMailDns,
   githubProtectionRequests,
-  googleSetupCommands,
+  normaliseAppPassword,
   nodeVersionOk,
   REQUIRED_CHECKS,
   secretId,
+  smtpSecretPayload,
   toolingBootstrap,
 } from '../src/lib/plans.ts';
 import { redact } from '../src/lib/runtime.ts';
@@ -102,23 +103,24 @@ describe('github protection', () => {
   });
 });
 
-describe('google setup', () => {
-  const cmds = googleSetupCommands(cfg, '123456');
-  it('never creates a service account key', () => {
-    expect(cmds.some((c) => c.args.includes('keys'))).toBe(false);
+describe('gmail smtp', () => {
+  it('builds the secret for STARTTLS on 587 as the configured sender', () => {
+    expect(smtpSecretPayload(cfg, 'abcd efgh ijkl mnop')).toEqual({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      username: 'hello@blueprintmusic.group',
+      password: 'abcdefghijklmnop',
+      from: '"Blueprint Music Group" <hello@blueprintmusic.group>',
+    });
   });
-  it('limits the AWS trust to the two mailer roles', () => {
-    const provider = cmds.find((c) => c.args.includes('create-aws'))!;
-    const cond = provider.args[provider.args.indexOf('--attribute-condition') + 1];
-    expect(cond).toBe("attribute.aws_role in ['bmg-staging-mailer', 'bmg-prod-mailer']");
-    expect(provider.args).toContain('111111111111');
+  it('uses implicit TLS on 465', () => {
+    const c465 = { ...cfg, email: { ...cfg.email, smtpPort: 465 as const } };
+    expect(smtpSecretPayload(c465, 'abcdefghijklmnop').secure).toBe(true);
   });
-  it('binds both mailer roles with workloadIdentityUser and tokenCreator', () => {
-    const bindings = cmds.filter((c) => c.args.includes('add-iam-policy-binding'));
-    expect(bindings).toHaveLength(4);
-    expect(bindings[0]!.args.join(' ')).toContain(
-      'projects/123456/locations/global/workloadIdentityPools/bmg-aws/attribute.aws_role/bmg-staging-mailer',
-    );
+  it('rejects anything that is not a 16-letter app password', () => {
+    expect(normaliseAppPassword('ABCD EFGH IJKL MNOP')).toBe('abcdefghijklmnop');
+    expect(() => normaliseAppPassword('my-real-password1')).toThrow(/16 letters/);
   });
   it('evaluates mail DNS records', () => {
     expect(
@@ -133,6 +135,9 @@ describe('google setup', () => {
       dkim: false,
       dmarc: false,
     });
+  });
+  it('stores credentials under a per-environment secret id', () => {
+    expect(names.smtpSecret(cfg, 'prod')).toBe('bmg/prod/gmail-smtp');
   });
 });
 

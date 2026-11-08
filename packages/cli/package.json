@@ -11,6 +11,9 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run"
   },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2"
+  },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1164.0",
     "@aws-sdk/client-bedrock-agentcore-control": "^3.1164.0",
@@ -32,6 +35,7 @@
     "@aws-sdk/client-sts": "^3.1164.0",
     "@bmg/config": "*",
     "@inquirer/prompts": "^8.7.5",
-    "commander": "^15.1.0"
+    "commander": "^15.1.0",
+    "nodemailer": "^10.4.0"
   }
 }

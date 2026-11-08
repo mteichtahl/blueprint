@@ -75,11 +75,18 @@ export const BmgConfigSchema = z.object({
     objectLockMode: z.enum(['GOVERNANCE', 'COMPLIANCE']).default('GOVERNANCE'),
     retentionDays: z.number().int().positive().default(2555),
   }),
-  google: z.object({
-    workspaceDomain: z.string().min(3),
+  /**
+   * App email goes out through Gmail SMTP as the sender below (design 7.4).
+   * The Gmail app password lives in Secrets Manager (`bmg email setup`), never here.
+   */
+  email: z.object({
     senderAddress: z.email(),
-    gcpProjectId: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/),
-    serviceAccountName: z.string().default('bmg-mailer'),
+    senderName: z.string().min(1).default('Blueprint Music Group'),
+    /** Domain whose SPF/DKIM/DMARC records are checked. */
+    domain: z.string().min(3),
+    smtpHost: z.string().min(1).default('smtp.gmail.com'),
+    /** 587 = STARTTLS (465 = implicit TLS). Port 25 is never used. */
+    smtpPort: z.union([z.literal(587), z.literal(465)]).default(587),
   }),
   ai: z.object({
     /** Australia-only geographic inference profile (D7). */
@@ -133,6 +140,8 @@ export const names = {
   runnerProject: (cfg: BmgConfig, kind: 'ci' | 'deploy-staging' | 'deploy-prod') =>
     `${cfg.project}-${kind}`,
   mailerRole: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}-${env}-mailer`,
+  /** Secrets Manager id of the Gmail SMTP credentials for an environment. */
+  smtpSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/gmail-smtp`,
   ssm: (cfg: BmgConfig, env: EnvironmentName, key: string) => `/${cfg.project}/${env}/${key}`,
 };
 
