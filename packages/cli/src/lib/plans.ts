@@ -332,3 +332,9 @@ export function toolingRetainedResources(cfg: BmgConfig) {
     logGroups: RUNNER_KINDS.map((k) => names.runnerLogGroup(cfg, k)),
   };
 }
+
+/** Split firing alarms into BMG's own (named `<project>-…`) and other workloads'. */
+export function partitionAlarms<T extends { name: string }>(alarms: T[], project: string) {
+  const ours = alarms.filter((a) => a.name.startsWith(`${project}-`));
+  return { ours, others: alarms.filter((a) => !ours.includes(a)) };
+}
