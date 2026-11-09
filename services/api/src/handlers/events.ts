@@ -17,6 +17,7 @@ import {
   DEFAULT_CHECKLIST,
   EVENT_PARTS,
   EventBody,
+  EventCreate,
   EventPatch,
   eventPk,
   EVENTS_PK,
@@ -320,7 +321,7 @@ export const handler = handle(async (event) => {
 
     case 'POST /events': {
       ensureBmg(principal);
-      const body = parseBody(event, EventBody);
+      const body = parseBody(event, EventCreate);
       const eventId = newId();
       const item = { eventId, ...body, createdBy: principal.sub, createdAt: now };
       await db.send(
@@ -351,7 +352,19 @@ export const handler = handle(async (event) => {
       const current = await loadEvent(eventId);
       const patch = parseBody(event, EventPatch);
       const given = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-      const next = { ...current, ...given, updatedAt: now, updatedBy: principal.sub };
+      const next: Record<string, unknown> = {
+        ...current,
+        ...given,
+        updatedAt: now,
+        updatedBy: principal.sub,
+      };
+      // Older events can be saved without times, but once either is set both are needed.
+      if ('startTime' in given || 'endTime' in given) {
+        if (!next.startTime || !next.endTime)
+          throw new HttpError(400, 'Events need a start and an end time');
+        const timeError = checkTimes(String(next.startTime), String(next.endTime));
+        if (timeError) throw new HttpError(400, timeError);
+      }
       await db.send(new PutCommand({ TableName: table(), Item: next }));
       return json(200, { ok: true });
     }

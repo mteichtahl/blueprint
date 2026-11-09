@@ -13,6 +13,8 @@ interface EventInfo {
   date: string;
   venue: string;
   venueId?: string;
+  startTime?: string;
+  endTime?: string;
   capacity: number;
   ticketTarget: number;
   ticketPriceCents: number;
@@ -108,11 +110,11 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
     <div className="flex flex-col gap-5">
       {error && <Notice tone="error">{error}</Notice>}
       {creating && (
-        <NewEvent
+        <EventForm
           cfg={cfg}
           token={token}
           onCancel={() => setCreating(false)}
-          onCreated={(id) => {
+          onSaved={(id) => {
             setCreating(false);
             setOpenId(id);
             void loadList();
@@ -136,7 +138,11 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
                   }}
                 >
                   <b className="flex-1">{e.name}</b>
-                  <span className="src">{longDate(e.date)}</span>
+                  <span className="src">
+                    {[longDate(e.date), eventTimes(e.startTime, e.endTime)]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </span>
                 </button>
               ))}
             </div>
@@ -164,29 +170,46 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
   );
 }
 
-function NewEvent({
+/** "6 pm – 11:30 pm", with "(next day)" when it runs past midnight. */
+export const eventTimes = (start?: string, end?: string) =>
+  start && end ? `${time12(start)} – ${time12(end)}${end < start ? ' (next day)' : ''}` : '';
+
+/** Create an event, or edit one's details. Start and end times are required (rev 7). */
+function EventForm({
   cfg,
   token,
+  event,
   onCancel,
-  onCreated,
+  onSaved,
 }: {
   cfg: AppConfig;
   token: string;
+  event?: EventInfo;
   onCancel: () => void;
-  onCreated: (id: string) => void;
+  onSaved: (id: string) => void;
 }) {
   const [f, setF] = useState({
-    name: '',
-    date: '',
-    capacity: '',
-    ticketTarget: '',
-    ticketPrice: '',
-    compsTarget: '',
+    name: event?.name ?? '',
+    date: event?.date ?? '',
+    startTime: event?.startTime ?? '',
+    endTime: event?.endTime ?? '',
+    capacity: event?.capacity ? String(event.capacity) : '',
+    ticketTarget: event?.ticketTarget ? String(event.ticketTarget) : '',
+    ticketPrice: event?.ticketPriceCents ? String(event.ticketPriceCents / 100) : '',
+    compsTarget: event?.compsTarget ? String(event.compsTarget) : '',
   });
-  const [venue, setVenue] = useState<{ venueId: string | null; name: string } | null>(null);
+  const [venue, setVenue] = useState<{ venueId: string | null; name: string } | null>(
+    event?.venue ? { venueId: event.venueId ?? null, name: event.venue } : null,
+  );
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
+  const timeError =
+    !f.startTime || !f.endTime
+      ? 'Add a start and an end time'
+      : f.startTime === f.endTime
+        ? 'The end time must be after the start time'
+        : null;
   /** Picking a venue from the list fills in its capacity if none is set. */
   async function pickVenue(v: { venueId: string | null; name: string } | null) {
     setVenue(v);
@@ -199,25 +222,33 @@ function NewEvent({
       // Capacity is only a convenience.
     }
   }
-  async function create() {
+  async function save() {
+    const body = {
+      name: f.name,
+      date: f.date,
+      startTime: f.startTime,
+      endTime: f.endTime,
+      venue: venue?.name ?? '',
+      ...(venue?.venueId ? { venueId: venue.venueId } : {}),
+      capacity: Number(f.capacity) || 0,
+      ticketTarget: Number(f.ticketTarget) || 0,
+      ticketPriceCents: Math.round((Number(f.ticketPrice) || 0) * 100),
+      compsTarget: Number(f.compsTarget) || 0,
+    };
     try {
-      const e = await api<EventInfo>(cfg, token, 'POST', '/events', {
-        name: f.name,
-        date: f.date,
-        venue: venue?.name ?? '',
-        ...(venue?.venueId ? { venueId: venue.venueId } : {}),
-        capacity: Number(f.capacity) || 0,
-        ticketTarget: Number(f.ticketTarget) || 0,
-        ticketPriceCents: Math.round((Number(f.ticketPrice) || 0) * 100),
-        compsTarget: Number(f.compsTarget) || 0,
-      });
-      onCreated(e.eventId);
+      if (event) {
+        await api(cfg, token, 'PATCH', `/events/${event.eventId}`, body);
+        onSaved(event.eventId);
+      } else {
+        const e = await api<EventInfo>(cfg, token, 'POST', '/events', body);
+        onSaved(e.eventId);
+      }
     } catch (e) {
       setError((e as Error).message);
     }
   }
   return (
-    <Card title="New event">
+    <Card title={event ? 'Event details' : 'New event'}>
       {error && <Notice tone="error">{error}</Notice>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
@@ -227,6 +258,25 @@ function NewEvent({
           placeholder="Industry Mixer Night"
         />
         <Field label="Date" type="date" value={f.date} onChange={set('date')} />
+        <Field
+          label="Start time"
+          type="time"
+          required
+          value={f.startTime}
+          onChange={set('startTime')}
+        />
+        <Field
+          label="End time"
+          type="time"
+          required
+          value={f.endTime}
+          onChange={set('endTime')}
+          {...(f.startTime && f.endTime && f.endTime < f.startTime
+            ? { hint: 'Finishes after midnight' }
+            : f.startTime && f.startTime === f.endTime
+              ? { hint: 'The end time must be after the start time' }
+              : {})}
+        />
         <VenuePicker
           cfg={cfg}
           token={token}
@@ -265,8 +315,12 @@ function NewEvent({
         />
       </div>
       <div className="flex gap-2">
-        <Button variant="cta" disabled={!f.name.trim() || !f.date} onClick={() => void create()}>
-          Create event
+        <Button
+          variant="cta"
+          disabled={!f.name.trim() || !f.date || !!timeError}
+          onClick={() => void save()}
+        >
+          {event ? 'Save details' : 'Create event'}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
           Cancel
@@ -293,6 +347,7 @@ function EventDetail({
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState<Part | null>(null);
   const [editingSales, setEditingSales] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
   const base = `/events/${eventId}`;
 
   const load = useCallback(async () => {
@@ -339,14 +394,47 @@ function EventDetail({
         title={e.name}
         sub={[
           longDate(e.date),
+          eventTimes(e.startTime, e.endTime),
           e.venue,
           days > 0 ? `${days} day${days === 1 ? '' : 's'} to go` : days === 0 ? 'Today' : 'Done',
         ]
           .filter(Boolean)
           .join(' · ')}
-        actions={actions}
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setEditingDetails((v) => !v)}>
+              Edit details
+            </Button>
+            {actions}
+          </>
+        }
       />
       {error && <Notice tone="error">{error}</Notice>}
+      {!editingDetails && (!e.startTime || !e.endTime) && (
+        <Notice>
+          This event has no start and end time yet.{' '}
+          <button
+            type="button"
+            className="font-bold underline"
+            onClick={() => setEditingDetails(true)}
+          >
+            Add them
+          </button>
+        </Notice>
+      )}
+      {editingDetails && (
+        <EventForm
+          cfg={cfg}
+          token={token}
+          event={e}
+          onCancel={() => setEditingDetails(false)}
+          onSaved={() => {
+            setEditingDetails(false);
+            void load();
+            onChanged();
+          }}
+        />
+      )}
 
       <div className="flex flex-wrap gap-5">
         <Card className="flex-[1_1_200px]">

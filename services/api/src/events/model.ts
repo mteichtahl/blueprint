@@ -265,6 +265,9 @@ export const partSk = (part: EventPart, id: string) => `${part.toUpperCase()}#${
 export const EventBody = z.object({
   name: z.string().trim().min(1, 'Name the event').max(120),
   date: IsoDate,
+  /** 'HH:MM'; required for new events (EventCreate). Older events may lack them. */
+  startTime: Time.optional(),
+  endTime: Time.optional(),
   venue: Text(200).default(''),
   /** Set when the venue was picked from the venues list. */
   venueId: z
@@ -301,6 +304,20 @@ export function patchOf(schema: { shape: Record<string, z.ZodType> }) {
 }
 
 export const EventPatch = patchOf(EventBody);
+
+/** Events must have a start and an end time (rev 7). */
+const RequiredTime = (what: string) =>
+  z
+    .string({
+      error: (iss) => (iss.input === undefined ? `Add the ${what}` : 'Use a time like 19:30'),
+    })
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 19:30');
+export const EventCreate = EventBody.extend({
+  startTime: RequiredTime('start time'),
+  endTime: RequiredTime('end time'),
+}).refine((e) => !checkTimes(e.startTime, e.endTime), {
+  message: 'The end time must be after the start time',
+});
 
 const money = z.number().int().min(0).max(100_000_000);
 /** Each part of an event, validated on create; patches accept the same fields, all optional. */
