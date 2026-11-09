@@ -21,6 +21,9 @@ if (!['baseline', 'full'].includes(mode)) {
   process.exit(2);
 }
 
+/** Escapes every regex metacharacter, so the target matches only itself. */
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const SAMPLES = {
   artistId: 'art_zapscan000000',
   fileId: 'zapscanfile00000001',
@@ -58,7 +61,7 @@ const plan = {
       {
         name: 'staging',
         urls: [target],
-        includePaths: [`${target.replace(/\./g, '\\.')}.*`],
+        includePaths: [`${escapeRegex(target)}.*`],
       },
     ],
     parameters: { failOnError: true, progressToStdout: true },
