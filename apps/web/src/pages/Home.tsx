@@ -1035,7 +1035,15 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       {view === 'submit' && (
         <ArtistSubmissions cfg={cfg} token={token} artistId={artistId} isBmg={false} />
       )}
-      {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
+      {view === 'plan' && (
+        <PlanTab
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          artistName={userName}
+          canEdit={false}
+        />
+      )}
       {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} />}
       {view === 'connectors' && <MyConnectors cfg={cfg} token={token} artistId={artistId} />}
       {view === 'contacts' && (
