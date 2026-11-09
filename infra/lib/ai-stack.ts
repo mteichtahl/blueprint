@@ -188,6 +188,8 @@ export class AiStack extends BmgStack {
       'AwsSolutions-IAM5[Action::s3:List*]',
       'AwsSolutions-IAM5[Resource::<Guardrail.GuardrailArn>:*]',
       `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::cdk-${cfg.environments[env].qualifier}-assets-${logs}-${home}/*]`,
+      // In CI the stack has a concrete account and region, so the partition renders literally.
+      `AwsSolutions-IAM5[Resource::arn:aws:s3:::cdk-${cfg.environments[env].qualifier}-assets-${logs}-${home}/*]`,
       ...part.flatMap((pt) => [
         `AwsSolutions-IAM5[Resource::arn:${pt}:logs:${home}:${logs}:log-group:*]`,
         `AwsSolutions-IAM5[Resource::arn:${pt}:logs:${home}:${logs}:log-group:/aws/bedrock-agentcore/runtimes/*]`,

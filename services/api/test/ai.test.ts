@@ -8,6 +8,8 @@ import {
   decodeToken,
   encodeToken,
   workspaceDigest,
+  sessionId,
+  SessionId,
 } from '../src/ai/model.ts';
 import { stepsFor } from '../src/handlers/ai-actions.ts';
 import type { Gig } from '../src/events/model.ts';
@@ -142,5 +144,15 @@ describe('carrying out actions', () => {
     const msg = stepsFor({ type: 'sendMessage', summary: 's', text: 'Hi' }, 'artist');
     expect(msg[0]).toEqual({ method: 'POST', path: '/conversations', body: { kind: 'direct' } });
     expect(msg[1]!.path).toBe('/conversations/{conversationId}/messages');
+  });
+});
+
+describe('chat session ids', () => {
+  it('are valid, unguessable and unique', () => {
+    const ids = Array.from({ length: 200 }, () => sessionId());
+    for (const id of ids) expect(SessionId.safeParse(id).success).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+    // 20 hex characters (80 bits) of randomness after the time part.
+    expect(ids[0]).toMatch(/[0-9a-f]{20}$/);
   });
 });

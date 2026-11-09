@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Principal } from '@bmg/authz';
 import { z } from 'zod';
 import type { Gig } from '../events/model.ts';
@@ -16,8 +16,8 @@ export const AI_SK = 'AI';
 /** Assistant history is kept for 30 days (design 10.5). */
 export const HISTORY_DAYS = 30;
 export const historyPk = (sub: string) => `AICHAT#${sub}`;
-export const sessionId = () =>
-  `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+/** A new chat session id: time-ordered, with 80 bits from the CSPRNG (not Math.random). */
+export const sessionId = () => `s${Date.now().toString(36)}${randomBytes(10).toString('hex')}`;
 export const SessionId = z.string().regex(/^s[a-z0-9]{8,30}$/);
 
 export const ChatBody = z
