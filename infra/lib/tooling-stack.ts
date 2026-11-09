@@ -55,9 +55,7 @@ export class ToolingStack extends BmgStack {
     const cfg = props.config;
     const connectionArn = cfg.github.connectionArn;
     if (!connectionArn) {
-      throw new Error(
-        'github.connectionArn is not set. Run `blueprint github connect` first.',
-      );
+      throw new Error('github.connectionArn is not set. Run `blueprint github connect` first.');
     }
 
     const key = new Key(this, 'ToolingKey', {
