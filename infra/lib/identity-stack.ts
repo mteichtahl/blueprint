@@ -42,7 +42,8 @@ const PRECEDENCE: Record<(typeof USER_GROUPS)[number], number> = {
  * - sign in with a passkey or email + password, MFA required (authenticator app,
  *   or a passkey with user verification, which counts as two factors);
  * - the web client lives in the web stack, whose callback is the CloudFront address;
- * - pre token generation V2 adds `role`, `artistId` and `mfa_level`.
+ * - pre token generation V2 adds `role`, `artistId` and `mfa_level`;
+ * - the custom message trigger sends every Cognito email in the BMG layout.
  */
 export class IdentityStack extends BmgStack {
   readonly userPool: UserPool;
@@ -79,6 +80,25 @@ export class IdentityStack extends BmgStack {
       description: 'Cognito pre token generation V2: role, artistId and mfa_level claims',
       prod,
     });
+    // Brands every Cognito email (design: all email carries the BMG look). The
+    // app origin is read from SSM at run time: the web stack is created later.
+    const webUrlParam = names.ssm(cfg, env, 'web/url');
+    const customMessage = new BmgFunction(this, 'CustomMessage', {
+      entry: 'services/identity/src/triggers/custom-message.ts',
+      description: 'Cognito custom message: BMG-branded emails',
+      environment: {
+        APP_URL_PARAM: webUrlParam,
+        APP_ORIGIN: `https://${names.host(cfg, env, 'app')}`,
+      },
+      prod,
+    });
+    customMessage.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'ReadAppUrl',
+        actions: ['ssm:GetParameter'],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${webUrlParam}`],
+      }),
+    );
     // Table-level ARNs only (no index/* wildcard): these triggers never query indexes.
     preSignUp.addToRolePolicy(
       new PolicyStatement({
@@ -90,7 +110,8 @@ export class IdentityStack extends BmgStack {
     postConfirmation.addToRolePolicy(
       new PolicyStatement({
         sid: 'CreateProfile',
-        actions: ['dynamodb:PutItem'],
+        // UpdateItem merges the artist contact record (ARTIST#id / CONTACT).
+        actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
         resources: [props.mainTable.tableArn],
       }),
     );
@@ -134,7 +155,7 @@ export class IdentityStack extends BmgStack {
         emailBody:
           'Hi, Blueprint Music Group has set up your account.<br><br>Email: {username}<br>Temporary password: {####}<br><br>You will be asked to set your own password and an authenticator app the first time you sign in.',
       },
-      lambdaTriggers: { preSignUp, postConfirmation },
+      lambdaTriggers: { preSignUp, postConfirmation, customMessage },
     });
     this.userPool.addTrigger(
       UserPoolOperation.PRE_TOKEN_GENERATION_CONFIG,

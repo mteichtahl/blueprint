@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
   SUBMISSION_TYPES,
@@ -9,7 +9,7 @@ import {
   type SubmissionSummary,
 } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { download, type FileItem } from '../lib/files.ts';
+import { download, formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
 import {
   Avatar,
   Button,
@@ -17,6 +17,7 @@ import {
   Chips,
   DataTable,
   Field,
+  Icon,
   Notice,
   shortDate,
   Tag,
@@ -87,12 +88,135 @@ function usePhases(cfg: AppConfig, token: string, artistId: string) {
 
 function useArtistFiles(cfg: AppConfig, token: string, artistId: string) {
   const [files, setFiles] = useState<FileItem[]>([]);
-  useEffect(() => {
-    api<{ files: FileItem[] }>(cfg, token, 'GET', `/artists/${artistId}/files`)
-      .then((r) => setFiles(r.files))
-      .catch(() => setFiles([]));
+  const reload = useCallback(async () => {
+    try {
+      setFiles(
+        (await api<{ files: FileItem[] }>(cfg, token, 'GET', `/artists/${artistId}/files`)).files,
+      );
+    } catch {
+      setFiles([]);
+    }
   }, [cfg, token, artistId]);
-  return files;
+  useEffect(() => void reload(), [reload]);
+  return { files, reload };
+}
+
+/**
+ * Files for a submission: pick any ready upload from the library, or upload a
+ * new one here. A new upload is scanned for malware first, then ticked.
+ * Private files can't be attached (Blueprint can't open them).
+ */
+function AttachFiles({
+  cfg,
+  token,
+  artistId,
+  files,
+  reload,
+  selected,
+  onChange,
+}: {
+  cfg: AppConfig;
+  token: string;
+  artistId: string;
+  files: FileItem[];
+  reload: () => Promise<void>;
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const usable = files
+    .filter((f) => f.status === 'available' && f.visibility !== 'private')
+    // The artist's own uploads first, newest first.
+    .sort(
+      (a, b) =>
+        Number(b.uploadedByMe) - Number(a.uploadedByMe) || b.createdAt.localeCompare(a.createdAt),
+    );
+  const toggle = (id: string, on: boolean) =>
+    onChange(on ? [...selected, id] : selected.filter((i) => i !== id));
+
+  async function upload(file: File) {
+    setMsg(null);
+    try {
+      setBusy(`Uploading ${file.name}…`);
+      const created = await uploadFile(cfg, token, `/artists/${artistId}/files`, file, {
+        visibility: 'normal',
+      });
+      setBusy('Checking for malware…');
+      const settled = await waitUntilScanned(
+        cfg,
+        token,
+        `/artists/${artistId}/files/${created.fileId}`,
+      );
+      await reload();
+      if (settled?.status === 'available') {
+        if (selected.length < 10) onChange([...selected, created.fileId]);
+        setMsg({ tone: 'success', text: `${file.name} is ready and attached.` });
+      } else if (!settled) {
+        setMsg({
+          tone: 'success',
+          text: 'Uploaded. The scan is taking a while; tick the file once it shows here.',
+        });
+      } else {
+        setMsg({
+          tone: 'error',
+          text: `${file.name} was not kept: ${settled.rejectReason ?? 'it failed the scan'}.`,
+        });
+      }
+    } catch (e) {
+      setMsg({ tone: 'error', text: (e as Error).message });
+    } finally {
+      setBusy(null);
+      if (input.current) input.current.value = '';
+    }
+  }
+
+  return (
+    <fieldset className="mt-4 flex flex-col gap-2 text-[15px]">
+      <legend className="mb-1 font-bold">Files</legend>
+      {usable.length === 0 ? (
+        <p className="src">No files in your library yet. Upload one below.</p>
+      ) : (
+        <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-lg border border-input p-2">
+          {usable.map((f) => (
+            <label key={f.fileId} className="flex min-h-9 items-center gap-2.5 px-1">
+              <input
+                type="checkbox"
+                className="chk"
+                checked={selected.includes(f.fileId)}
+                disabled={!selected.includes(f.fileId) && selected.length >= 10}
+                onChange={(e) => toggle(f.fileId, e.target.checked)}
+              />
+              <span className="min-w-0 flex-1 truncate">{f.name}</span>
+              <span className="src whitespace-nowrap">
+                {f.uploadedByMe ? 'Your upload' : 'From Blueprint'} · {formatSize(f.size)}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[#9AA4B0] bg-background px-3 text-[15px] font-bold">
+        <Icon name="upload" size={16} />
+        {busy ?? 'Upload a new file'}
+        <input
+          ref={input}
+          type="file"
+          className="sr-only"
+          disabled={!!busy}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void upload(f);
+          }}
+        />
+      </label>
+      <span className="src">
+        {selected.length} of 10 attached · private files can’t be attached, as Blueprint can’t open
+        them.
+      </span>
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+    </fieldset>
+  );
 }
 
 /** The artist's "Submit for review" form. */
@@ -108,9 +232,7 @@ function SubmitForm({
   onSubmitted: () => void;
 }) {
   const phases = usePhases(cfg, token, artistId);
-  const files = useArtistFiles(cfg, token, artistId).filter(
-    (f) => f.status === 'available' && f.visibility !== 'private',
-  );
+  const { files, reload } = useArtistFiles(cfg, token, artistId);
   const [title, setTitle] = useState('');
   const [type, setType] = useState('demo');
   const [priority, setPriority] = useState<Priority>('medium');
@@ -188,25 +310,15 @@ function SubmitForm({
           placeholder="What should Blueprint look at?"
         />
       </label>
-      {files.length > 0 && (
-        <fieldset className="mt-4 space-y-1 text-sm">
-          <legend className="font-semibold">Attach files from your library</legend>
-          {files.map((f) => (
-            <label key={f.fileId} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={fileIds.includes(f.fileId)}
-                onChange={(e) =>
-                  setFileIds((ids) =>
-                    e.target.checked ? [...ids, f.fileId] : ids.filter((i) => i !== f.fileId),
-                  )
-                }
-              />
-              {f.name}
-            </label>
-          ))}
-        </fieldset>
-      )}
+      <AttachFiles
+        cfg={cfg}
+        token={token}
+        artistId={artistId}
+        files={files}
+        reload={reload}
+        selected={fileIds}
+        onChange={setFileIds}
+      />
       <div className="mt-4 flex items-center gap-3">
         <Button variant="cta" disabled={busy || !title.trim()} onClick={() => void submit()}>
           {busy ? 'Sending…' : 'Submit'}
@@ -310,7 +422,7 @@ function SubmissionView({
   const path = `/artists/${artistId}/submissions/${submissionId}`;
   const [sub, setSub] = useState<SubmissionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const files = useArtistFiles(cfg, token, artistId);
+  const { files } = useArtistFiles(cfg, token, artistId);
   const phases = usePhases(cfg, token, artistId);
   const load = useCallback(async () => {
     try {

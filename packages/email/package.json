@@ -1,0 +1,22 @@
+{
+  "name": "@bmg/email",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BMG-branded email templates (HTML + text) and Gmail SMTP sending",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1164.0",
+    "@aws-sdk/client-ssm": "^3.1164.0",
+    "nodemailer": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2"
+  }
+}

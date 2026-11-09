@@ -1,5 +1,11 @@
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteCommand,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { authorize, type Action, type Principal } from '@bmg/authz';
@@ -9,6 +15,7 @@ import {
   ArtistFilePatch,
   ArtistUpload,
   contentDisposition,
+  deleteAllowed,
   FILE_ID_PATTERN,
   fileSk,
   LIBRARY_PK,
@@ -161,6 +168,63 @@ async function libraryDownloadUrl(f: FileRecord): Promise<string> {
 }
 
 /**
+ * Deletes a file: its stored object (or the quarantined upload, if the scan
+ * hasn't finished) and then its record. Both buckets are versioned, so the
+ * object stays recoverable by an admin until its old version expires (35 days).
+ */
+async function removeFile(principal: Principal, f: Stored) {
+  const scope = f.scope;
+  if (f.status === 'pending') {
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: env('QUARANTINE_BUCKET'),
+        Key: quarantineKey(scope, f.fileId, f.artistId),
+      }),
+    );
+  } else if (f.status === 'available') {
+    if (scope === 'library') {
+      await s3.send(
+        new DeleteObjectCommand({
+          Bucket: env('LIBRARY_BUCKET'),
+          Key: storedKey('library', f.fileId),
+        }),
+      );
+    } else {
+      // Artist objects are only reachable through a data-access session for that artist.
+      const credentials = await sessions.credentials({
+        roleArn: env('DATA_ACCESS_ROLE_ARN'),
+        artistId: f.artistId!,
+        role: principal.role,
+      });
+      await new S3Client({ credentials }).send(
+        new DeleteObjectCommand({
+          Bucket: env('ARTIST_BUCKET'),
+          Key: storedKey('artist', f.fileId, f.artistId),
+        }),
+      );
+    }
+  }
+  await db.send(new DeleteCommand({ TableName: table(), Key: { PK: f.PK, SK: f.SK } }));
+}
+
+/** A file attached to a submission that is still waiting for review can't be deleted. */
+async function attachedToOpenSubmission(artistId: string, fileId: string): Promise<boolean> {
+  const res = await db.send(
+    new QueryCommand({
+      TableName: table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :s)',
+      ExpressionAttributeValues: { ':pk': artistPk(artistId), ':s': 'SUB#' },
+      ProjectionExpression: '#st, fileIds',
+      ExpressionAttributeNames: { '#st': 'status' },
+      Limit: 300,
+    }),
+  );
+  return (res.Items ?? []).some(
+    (s) => s.status === 'open' && ((s.fileIds as string[] | undefined) ?? []).includes(fileId),
+  );
+}
+
+/**
  * Files: upload (to quarantine), list, rename-free metadata, sharing, and
  * short-lived download links. The malware scan and the move to the real
  * bucket happen in files-promote, after GuardDuty reports.
@@ -266,6 +330,20 @@ export const handler = handle(async (event) => {
       return json(200, { url, expiresIn: URL_LIFETIME_SECONDS });
     }
 
+    case 'DELETE /artists/{artistId}/files/{fileId}': {
+      const artistId = artistIdParam(event);
+      const f = await load(artistPk(artistId), fileIdParam(event));
+      ensure(canArtistFile(principal, 'write', artistId, f));
+      const refused = deleteAllowed(principal, f);
+      if (refused) throw new HttpError(403, refused);
+      if (await attachedToOpenSubmission(artistId, f.fileId)) {
+        throw new HttpError(409, 'This file is attached to a submission waiting for review');
+      }
+      await removeFile(principal, f);
+      await audit(event, 'file.delete', 'success', { artistId, fileId: f.fileId });
+      return json(200, { deleted: f.fileId });
+    }
+
     // ── BMG document library ──
     case 'GET /library/files': {
       const files = (await list(LIBRARY_PK))
@@ -350,6 +428,16 @@ export const handler = handle(async (event) => {
       const url = await libraryDownloadUrl(f);
       await audit(event, 'file.download', 'success', { library: true, fileId: f.fileId });
       return json(200, { url, expiresIn: URL_LIFETIME_SECONDS });
+    }
+
+    case 'DELETE /library/files/{fileId}': {
+      const f = await load(LIBRARY_PK, fileIdParam(event));
+      ensure(authorize(principal, 'write', librarySharing(f)));
+      const refused = deleteAllowed(principal, f);
+      if (refused) throw new HttpError(403, refused);
+      await removeFile(principal, f);
+      await audit(event, 'file.delete', 'success', { library: true, fileId: f.fileId });
+      return json(200, { deleted: f.fileId });
     }
 
     default:

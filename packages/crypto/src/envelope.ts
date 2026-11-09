@@ -1,5 +1,5 @@
 import { buildClient, CommitmentPolicy, KmsKeyringNode } from '@aws-crypto/client-node';
-import { KMS } from '@aws-sdk/client-kms';
+import { DescribeKeyCommand, KMS } from '@aws-sdk/client-kms';
 import type { AwsCredentialIdentity } from '@aws-sdk/types';
 import { encryptionContext, type Visibility } from './names.ts';
 
@@ -14,13 +14,36 @@ export interface ArtistCipherOptions {
   region?: string;
 }
 
-function keyring(opts: ArtistCipherOptions): KmsKeyringNode {
+/** alias ARN → key ARN, per container. Aliases are fixed once an artist is onboarded. */
+const keyArnCache = new Map<string, string>();
+
+/** True for `arn:aws:kms:<region>:<account>:alias/...` (not a key ARN). */
+export const isAliasArn = (id: string) => /^arn:aws[\w-]*:kms:[^:]+:\d{12}:alias\//.test(id);
+
+/**
+ * The Encryption SDK records the full key ARN in each message and, when
+ * decrypting, only uses keys whose ARN matches it exactly; an alias never
+ * matches. So an alias is resolved to its key ARN first (DescribeKey, which
+ * the data-access session may call for its own artist's key only).
+ */
+export async function resolveKeyArn(client: Pick<KMS, 'send'>, keyId: string): Promise<string> {
+  if (!isAliasArn(keyId)) return keyId;
+  const hit = keyArnCache.get(keyId);
+  if (hit) return hit;
+  const res = await client.send(new DescribeKeyCommand({ KeyId: keyId }));
+  const arn = res.KeyMetadata?.Arn;
+  if (!arn) throw new Error('DescribeKey returned no key ARN');
+  keyArnCache.set(keyId, arn);
+  return arn;
+}
+
+async function keyring(opts: ArtistCipherOptions): Promise<KmsKeyringNode> {
   const client = new KMS({
     credentials: opts.credentials,
     ...(opts.region ? { region: opts.region } : {}),
   });
   return new KmsKeyringNode({
-    generatorKeyId: opts.keyId,
+    generatorKeyId: await resolveKeyArn(client, opts.keyId),
     clientProvider: () => client,
   });
 }
@@ -35,7 +58,7 @@ export async function encryptForArtist(
   plaintext: Uint8Array | string,
   visibility: Visibility = 'normal',
 ): Promise<Uint8Array> {
-  const { result } = await encrypt(keyring(opts), plaintext, {
+  const { result } = await encrypt(await keyring(opts), plaintext, {
     encryptionContext: encryptionContext(opts.artistId, visibility),
   });
   return result;
@@ -50,7 +73,7 @@ export async function decryptForArtist(
   opts: ArtistCipherOptions,
   ciphertext: Uint8Array,
 ): Promise<{ plaintext: Uint8Array; visibility: Visibility }> {
-  const { plaintext, messageHeader } = await decrypt(keyring(opts), ciphertext);
+  const { plaintext, messageHeader } = await decrypt(await keyring(opts), ciphertext);
   const ctx = messageHeader.encryptionContext;
   if (ctx.artistId !== opts.artistId) {
     throw new Error('Ciphertext belongs to a different artist');

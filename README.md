@@ -3,7 +3,7 @@
 The platform for **Blueprint Music Group**: a web app (installable as a PWA) for BMG staff and the artists they develop. It runs on AWS in Sydney and is built entirely in TypeScript with AWS CDK.
 
 - **Design:** [BMG App — Solution Design (AWS)](https://claude.ai/artifact/N3KZsLiPgrwHmjRrBMkZm1). Its decisions are summarised in [`docs/decisions.md`](docs/decisions.md).
-- **Status:** Phases 1 and 2 are live; Phase 3 (core workspace) is in progress. Phase 2 (identity and keys): Cognito, the DynamoDB tables, per-artist KMS keys, the API with authorisation, consent and step-up, and the audit archive.
+- **Status:** Phases 1 and 2 are live; Phase 3 (core workspace) is in progress, including branded email and notifications. Phase 2 (identity and keys): Cognito, the DynamoDB tables, per-artist KMS keys, the API with authorisation, consent and step-up, and the audit archive.
 
 ## Repository layout
 
