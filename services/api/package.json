@@ -27,6 +27,7 @@
     "@bmg/authz": "*",
     "@bmg/crypto": "*",
     "@bmg/email": "*",
+    "@bmg/prompts": "*",
     "@smithy/signature-v4": "^5.7.5",
     "aws-jwt-verify": "^5.2.1",
     "nodemailer": "^10.4.0",

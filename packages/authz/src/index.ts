@@ -44,8 +44,13 @@ export type Resource =
       visibility: Exclude<Visibility, 'private'>;
       sharedWithArtistIds?: readonly string[];
     }
-  /** Billing, settings, connectors, prompts, user management. */
+  /** Billing, settings, connectors, user management. */
   | { kind: 'org-admin' }
+  /**
+   * AI prompts (design 10.6): BMG staff can read them and save drafts; only an
+   * admin (fresh step-up) publishes or rolls back.
+   */
+  | { kind: 'ai-prompt' }
   | {
       kind: 'conversation';
       /** artist-to-artist chats stay private to their members (design 6.3). */
@@ -89,6 +94,12 @@ export function authorize(
       return principal.role === 'bmg-admin'
         ? allow('admin manages settings')
         : deny('settings and billing are admin-only');
+
+    case 'ai-prompt':
+      if (principal.role === 'artist') return deny('AI prompts are managed by Blueprint');
+      return action === 'admin' && principal.role !== 'bmg-admin'
+        ? deny('only admins publish prompts')
+        : allow('BMG reads and drafts prompts');
 
     case 'org-shared':
       if (principal.role === 'bmg-admin' || principal.role === 'bmg-staff') {
