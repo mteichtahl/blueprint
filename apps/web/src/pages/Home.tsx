@@ -13,6 +13,7 @@ import type { FileItem } from '../lib/files.ts';
 import { overallProgress, phaseProgress } from '../lib/plan.ts';
 import { hasPendingCallback } from '../lib/connectors.ts';
 import { BmgConnectors, MyConnectors } from './Connectors.tsx';
+import { Contacts } from './Contacts.tsx';
 import { ArtistStats, Insights } from './Insights.tsx';
 import {
   ArtistShell,
@@ -175,6 +176,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           badgeTone: 'w',
         },
         { id: 'insights', label: 'Insights', icon: 'chart' },
+        { id: 'contacts', label: 'Contacts', icon: 'users' },
       ],
     },
     {
@@ -352,6 +354,16 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             artists={artists}
             onOpenArtist={(id) => setView(`artist:${id}`)}
           />
+        </>
+      )}
+      {view === 'contacts' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Contacts"
+            sub="Everyone Blueprint and its artists work with. Artists can pick and add; you manage the list."
+          />
+          <Contacts cfg={cfg} token={token} isBmg />
         </>
       )}
       {view === 'events' && <Events cfg={cfg} token={token} />}
@@ -841,7 +853,8 @@ type ArtistView =
   | 'plan'
   | 'profile'
   | 'connectors'
-  | 'stats';
+  | 'stats'
+  | 'contacts';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
@@ -876,6 +889,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
     connectors: { eyebrow: 'Profile', title: 'My connectors' },
     stats: { eyebrow: 'Socials', title: 'My stats' },
+    contacts: { eyebrow: 'Shared by Blueprint', title: 'Contacts' },
   };
   const [libTab, setLibTab] = useState<'files' | 'assets'>('files');
   const back =
@@ -884,7 +898,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     view === 'plan' ||
     view === 'profile' ||
     view === 'connectors' ||
-    view === 'stats';
+    view === 'stats' ||
+    view === 'contacts';
 
   return (
     <ArtistShell
@@ -1008,6 +1023,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
       {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} />}
       {view === 'connectors' && <MyConnectors cfg={cfg} token={token} artistId={artistId} />}
+      {view === 'contacts' && <Contacts cfg={cfg} token={token} isBmg={false} compact />}
       {view === 'stats' && (
         <>
           <ArtistStats cfg={cfg} token={token} artistId={artistId} name={userName} compact />
@@ -1193,6 +1209,25 @@ function ArtistHome({
           onClick={() => onNavigate('connectors')}
         >
           Connect Instagram, TikTok, Spotify and your calendar →
+        </button>
+      </section>
+      <section className="card gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="eyebrow">Contacts</span>
+          <button
+            type="button"
+            className="ml-auto text-sm font-bold underline"
+            onClick={() => onNavigate('contacts')}
+          >
+            Open
+          </button>
+        </div>
+        <button
+          type="button"
+          className="text-left text-[15px]"
+          onClick={() => onNavigate('contacts')}
+        >
+          Bookers, venue managers and crew, shared with Blueprint →
         </button>
       </section>
       <Button
