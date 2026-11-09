@@ -103,6 +103,22 @@ Warm, clear and upbeat, in Australian English. No hype words. Under 400 words. A
       'Search the files, plans, to-dos, gigs and notes this person is allowed to see. Use it before answering any question about their own work.',
   },
   {
+    id: 'tools.get_workspace',
+    label: 'Tool · get workspace',
+    usedBy: 'What the agent is told the workspace tool does',
+    variables: [],
+    defaultText:
+      "Get an artist's plan (outcome and phases with progress), open to-dos, upcoming gigs and open submissions. Use it before answering questions about an artist's work.",
+  },
+  {
+    id: 'tools.list_artists',
+    label: 'Tool · list artists',
+    usedBy: 'What the agent is told the roster tool does (Blueprint team only)',
+    variables: [],
+    defaultText:
+      "List the artists whose workspaces you can see, with their ids. Artists who turned AI off aren't included.",
+  },
+  {
     id: 'tools.propose_actions',
     label: 'Tool · propose actions',
     usedBy: 'What the agent is told the checklist tool does',

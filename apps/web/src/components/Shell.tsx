@@ -84,6 +84,7 @@ export function BmgShell({
   onProfile,
   bell,
   topActions,
+  onAsk,
   children,
 }: {
   sections: NavSection[];
@@ -97,9 +98,22 @@ export function BmgShell({
   onProfile: () => void;
   bell?: ReactNode;
   topActions?: ReactNode;
+  /** Opens the assistant (button and ⌘K). */
+  onAsk?: () => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!onAsk) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        onAsk();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onAsk]);
   const go = (id: string) => {
     onNavigate(id);
     setOpen(false);
@@ -110,14 +124,20 @@ export function BmgShell({
       <button type="button" className="mb-[18px] px-2 text-left" onClick={() => go('overview')}>
         <Logo />
       </button>
-      <div
-        className="mb-3 flex min-h-[42px] items-center gap-2.5 rounded-[10px] border border-white/20 bg-white/5 px-2.5 text-[15px] font-bold opacity-60"
-        title="The Blueprint assistant arrives in a later phase"
+      <button
+        type="button"
+        className="mb-3 flex min-h-[42px] items-center gap-2.5 rounded-[10px] border border-white/20 bg-white/5 px-2.5 text-left text-[15px] font-bold text-[#F1F4F7] hover:bg-white/10 disabled:opacity-60"
+        disabled={!onAsk}
+        title={onAsk ? undefined : 'The assistant is not available'}
+        onClick={() => {
+          setOpen(false);
+          onAsk?.();
+        }}
       >
         <Icon name="sparkle" />
         Ask Blueprint AI
         <span className="kbd ml-auto border-white/20 bg-white/10 text-[#D3D8DE]">⌘K</span>
-      </div>
+      </button>
       {sections.map((section, i) => (
         <div key={section.label ?? i} className="flex flex-col gap-0.5">
           {section.label && <div className="navlabel">{section.label}</div>}
@@ -247,12 +267,15 @@ export function ArtistShell({
   current,
   onNavigate,
   header,
+  onAsk,
   children,
 }: {
   tabs: PhoneTab[];
   current: string;
   onNavigate: (id: string) => void;
   header: ReactNode;
+  /** Opted-in artists only: the floating assistant button. */
+  onAsk?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -263,6 +286,16 @@ export function ArtistShell({
         aria-label="Tabs"
         className="fixed bottom-0 left-1/2 flex w-full max-w-[480px] -translate-x-1/2 border-t border-input bg-card pb-2"
       >
+        {onAsk && (
+          <button
+            type="button"
+            aria-label="Ask Blueprint AI"
+            onClick={onAsk}
+            className="absolute -top-[70px] right-4 flex size-14 items-center justify-center rounded-full bg-cta text-white shadow-[0_6px_16px_rgba(1,25,53,.28)]"
+          >
+            <Icon name="sparkle" size={24} />
+          </button>
+        )}
         {tabs.map((t) => (
           <button
             key={t.id}

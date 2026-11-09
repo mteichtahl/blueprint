@@ -31,6 +31,7 @@ import {
   shortDate,
   Tag,
 } from '../components/ui.tsx';
+import { Assistant } from '../components/Assistant.tsx';
 import { Bell } from '../components/Bell.tsx';
 import { useNotifications, type AppNotification } from '../lib/notifications.ts';
 import { useDeepLink } from '../lib/push.ts';
@@ -79,6 +80,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
   const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
   const [gigHelp, setGigHelp] = useState(0);
+  const [asking, setAsking] = useState(false);
 
   const load = useCallback(async () => {
     const [roster, queue, help] = await Promise.all([
@@ -198,6 +200,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       onTheme={setTheme}
       onSignOut={onSignOut}
       onProfile={() => setView('profile')}
+      onAsk={() => setAsking(true)}
       bell={
         <Bell
           items={notes.items}
@@ -333,6 +336,20 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           />
         </>
       )}
+      <Assistant
+        cfg={cfg}
+        token={token}
+        open={asking}
+        onClose={() => setAsking(false)}
+        userName={userName}
+        roleLabel={ROLE_LABEL[me.role]}
+        lookingAt={openArtist ? openArtist.displayName : 'Studio HQ'}
+        suggestions={[
+          'What needs my attention this week?',
+          'Which artists have gigs asking for help?',
+          'Which artists opted in to AI?',
+        ]}
+      />
     </BmgShell>
   );
 }
@@ -762,6 +779,7 @@ type ArtistView = 'home' | 'chat' | 'todo' | 'gigs' | 'library' | 'submit' | 'pl
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
+  const [asking, setAsking] = useState(false);
   const notes = useNotifications(cfg, token, me.sub);
   useDeepLink((link) =>
     setView(
@@ -795,6 +813,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       tabs={tabs}
       current={back ? 'home' : view}
       onNavigate={(id) => setView(id as ArtistView)}
+      {...(me.consent?.aiOptIn ? { onAsk: () => setAsking(true) } : {})}
       header={
         <PhoneHeader
           eyebrow={headers[view].eyebrow}
@@ -866,6 +885,22 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
           onTheme={setTheme}
           onSignOut={onSignOut}
           compact
+        />
+      )}
+      {me.consent?.aiOptIn && (
+        <Assistant
+          cfg={cfg}
+          token={token}
+          open={asking}
+          onClose={() => setAsking(false)}
+          userName={userName}
+          roleLabel="Artist"
+          lookingAt={headers[view].title}
+          suggestions={[
+            "What's due this week?",
+            'How is my plan going?',
+            'Help me plan my next gig',
+          ]}
         />
       )}
     </ArtistShell>

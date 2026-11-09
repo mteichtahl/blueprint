@@ -443,7 +443,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(67);
+    expect(routed.length).toBe(72);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -597,5 +597,40 @@ describe('environment notifications and branded email', () => {
         LambdaConfig: Match.objectLike({ CustomMessage: Match.anyValue() }),
       });
     }
+  });
+});
+
+describe('environment assistant (AI stack)', () => {
+  const [staging] = stacks.environments.map((e) => Template.fromStack(e.ai));
+
+  it('runs the agent as code on Node 22, callable only with IAM (the API)', () => {
+    staging!.hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
+      AgentRuntimeArtifact: { CodeConfiguration: Match.objectLike({ Runtime: 'NODE_22' }) },
+      EnvironmentVariables: Match.objectLike({ MODEL_ID: Match.stringLikeRegexp('^au\\.') }),
+    });
+    const runtime = Object.values(staging!.findResources('AWS::BedrockAgentCore::Runtime'))[0] as {
+      Properties: Record<string, unknown>;
+    };
+    expect(runtime.Properties.AuthorizerConfiguration).toBeUndefined();
+  });
+
+  it('guards against prompt attacks through the Sydney-only guardrail profile', () => {
+    staging!.hasResourceProperties('AWS::Bedrock::Guardrail', {
+      CrossRegionConfig: {
+        GuardrailProfileArn: Match.stringLikeRegexp('guardrail-profile/au\\.guardrail\\.v1:0$'),
+      },
+      ContentPolicyConfig: Match.objectLike({
+        FiltersConfig: Match.arrayWith([
+          Match.objectLike({ Type: 'PROMPT_ATTACK', InputStrength: 'HIGH' }),
+        ]),
+      }),
+    });
+  });
+
+  it('signs action tokens with an HMAC key', () => {
+    staging!.hasResourceProperties('AWS::KMS::Key', {
+      KeySpec: 'HMAC_256',
+      KeyUsage: 'GENERATE_VERIFY_MAC',
+    });
   });
 });
