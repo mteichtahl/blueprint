@@ -13,7 +13,7 @@ export class ApiError extends Error {
 export async function api<T>(
   cfg: AppConfig,
   token: string,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH',
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -43,3 +43,60 @@ export interface Me {
 
 /** Bump when the Terms & Privacy Policy change; everyone is asked again. */
 export const TERMS_VERSION = '2026-11-09';
+
+export interface ArtistSummary {
+  artistId: string;
+  displayName: string;
+  status: string;
+  createdAt: string;
+}
+
+export type MeasureId = 'M1' | 'M2' | 'M3' | 'M4';
+export interface Milestone {
+  id: string;
+  title: string;
+  done: boolean;
+  measures: MeasureId[];
+}
+export interface Phase {
+  id: string;
+  name: string;
+  goal: string;
+  milestones: Milestone[];
+}
+export interface Plan {
+  outcome: string;
+  measures: { id: MeasureId; label: string }[];
+  phases: Phase[];
+  version: number;
+  updatedAt: string;
+}
+export interface PlanResponse {
+  plan: Plan;
+  gaps: string[];
+  phaseLibrary: string[];
+  exists: boolean;
+}
+
+export interface Todo {
+  todoId: string;
+  artistId: string;
+  title: string;
+  notes: string | null;
+  due: string | null;
+  phaseId: string | null;
+  done: boolean;
+  source: 'bmg' | 'feedback' | 'artist';
+  bmgOnly: boolean;
+  createdAt: string;
+}
+
+export const TODO_FILTERS = [
+  { id: '', label: 'Open' },
+  { id: 'overdue', label: 'Overdue' },
+  { id: 'due-this-week', label: 'Due this week' },
+  { id: 'from-bmg', label: 'From Blueprint' },
+  { id: 'from-feedback', label: 'From feedback' },
+  { id: 'own', label: "Artist's own" },
+  { id: 'done', label: 'Done' },
+] as const;
