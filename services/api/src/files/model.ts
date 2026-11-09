@@ -133,6 +133,32 @@ export function visibilityAllowed(role: FileRecord['uploaderRole'], v: FileVisib
   return true;
 }
 
+/**
+ * Who may delete a file (on top of write access):
+ * - Library documents: a BMG admin, or the staff member who uploaded it.
+ * - Artist files: the artist deletes their own uploads; BMG deletes the ones
+ *   Blueprint uploaded to the workspace (an admin, or the uploader).
+ */
+export function deleteAllowed(
+  principal: { sub: string; role: FileRecord['uploaderRole'] },
+  f: Pick<FileRecord, 'scope' | 'uploadedBy' | 'uploaderRole'>,
+): string | undefined {
+  const own = f.uploadedBy === principal.sub;
+  if (f.scope === 'library') {
+    if (principal.role === 'artist') return 'Only Blueprint can delete library documents';
+    return principal.role === 'bmg-admin' || own
+      ? undefined
+      : 'Only an admin or the person who uploaded it can delete this document';
+  }
+  if (principal.role === 'artist') {
+    return f.uploaderRole === 'artist' && own ? undefined : 'You can only delete your own uploads';
+  }
+  if (f.uploaderRole === 'artist') return 'Only the artist can delete their own uploads';
+  return principal.role === 'bmg-admin' || own
+    ? undefined
+    : 'Only an admin or the person who uploaded it can delete this file';
+}
+
 /** The authz resource for a library file (per-file sharing). */
 export function librarySharing(rec: Pick<FileRecord, 'sharing' | 'sharedWithArtistIds'>) {
   return {

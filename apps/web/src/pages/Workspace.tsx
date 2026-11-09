@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   api,
   type Me,
@@ -9,10 +9,11 @@ import {
 } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
-import { Avatar, Bar, Card, shortDate, Tag } from '../components/ui.tsx';
+import { markdownToText } from '../lib/markdown.ts';
+import { Avatar, Bar, Button, Card, shortDate, Tag } from '../components/ui.tsx';
 import { ArtistFiles } from './Library.tsx';
 import { ArtistChatTab } from './Messages.tsx';
-import { PlanTab } from './Plan.tsx';
+import { PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG } from './Review.tsx';
 import { ArtistTodos } from './Todos.tsx';
 
@@ -38,18 +39,30 @@ const STATUS_COLOR = { done: '#011935', now: '#D9534F', next: '#5C6775' } as con
 export function PlanStrip({
   plan,
   onOpenPlan,
+  onStartPlan,
 }: {
   plan: PlanResponse | null;
   onOpenPlan?: () => void;
+  /** No plan yet: the strip is just this button. */
+  onStartPlan?: () => void;
 }) {
   if (!plan) return null;
+  if (!plan.exists) {
+    return onStartPlan ? (
+      <div>
+        <Button variant="cta" onClick={onStartPlan}>
+          Start a new plan
+        </Button>
+      </div>
+    ) : null;
+  }
   const phases = phaseProgress(plan.plan);
   return (
     <section className="card gap-3 px-5 py-4">
       <div className="flex flex-wrap items-center gap-3">
         <span className="eyebrow">Plan outcome</span>
-        <b className="min-w-[260px] flex-1">
-          {plan.plan.outcome || (
+        <b className="line-clamp-2 min-w-[260px] flex-1">
+          {markdownToText(plan.plan.outcome) || (
             <span className="font-normal text-muted-foreground">No outcome set yet</span>
           )}
         </b>
@@ -73,11 +86,6 @@ export function PlanStrip({
           </div>
         ))}
       </div>
-      {!plan.exists && (
-        <span className="src">
-          This is the template. Open the plan to start one for this artist.
-        </span>
-      )}
     </section>
   );
 }
@@ -96,12 +104,17 @@ export function ArtistWorkspace({
 }) {
   const [tab, setTab] = useState<TabId>('overview');
   const [plan, setPlan] = useState<PlanResponse | null>(null);
-  useEffect(() => {
-    setTab('overview');
+  const [startPlan, setStartPlan] = useState(false);
+  const loadPlan = useCallback(() => {
     api<PlanResponse>(cfg, token, 'GET', `/artists/${artist.artistId}/plan`)
       .then(setPlan)
       .catch(() => setPlan(null));
   }, [cfg, token, artist.artistId]);
+  useEffect(() => {
+    setTab('overview');
+    setStartPlan(false);
+    loadPlan();
+  }, [loadPlan]);
 
   return (
     <>
@@ -116,7 +129,14 @@ export function ArtistWorkspace({
           </p>
         </div>
       </header>
-      <PlanStrip plan={plan} onOpenPlan={() => setTab('plan')} />
+      <PlanStrip
+        plan={plan}
+        onOpenPlan={() => setTab('plan')}
+        onStartPlan={() => {
+          setStartPlan(true);
+          setTab('plan');
+        }}
+      />
       <nav aria-label="Workspace" role="tablist" className="flex flex-wrap border-b border-input">
         {TABS.map((t) => (
           <button
@@ -137,13 +157,28 @@ export function ArtistWorkspace({
         <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
       )}
       {tab === 'chat' && <ArtistChatTab cfg={cfg} token={token} me={me} artist={artist} />}
-      {tab === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artist.artistId} canEdit />}
+      {tab === 'plan' && (
+        <PlanTab
+          cfg={cfg}
+          token={token}
+          artistId={artist.artistId}
+          canEdit
+          autoStart={startPlan}
+          onChanged={loadPlan}
+        />
+      )}
       {tab === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artist.artistId} isBmg />}
       {tab === 'submissions' && (
         <ArtistSubmissions cfg={cfg} token={token} artistId={artist.artistId} isBmg />
       )}
       {tab === 'library' && (
-        <ArtistFiles cfg={cfg} token={token} artistId={artist.artistId} isBmg />
+        <ArtistFiles
+          cfg={cfg}
+          token={token}
+          artistId={artist.artistId}
+          isBmg
+          isAdmin={me.role === 'bmg-admin'}
+        />
       )}
     </>
   );

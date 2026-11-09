@@ -285,6 +285,8 @@ const ICONS = {
   filter: 'M4 6h16M7 12h10M10 18h4',
   chevrons: 'M7 15l5 5 5-5M7 9l5-5 5 5',
   back: 'M15 18l-6-6 6-6',
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6',
+  pencil: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
 } as const;
 export type IconName = keyof typeof ICONS;
 

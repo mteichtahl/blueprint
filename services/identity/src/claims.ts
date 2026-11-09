@@ -90,3 +90,36 @@ export function inviteKey(email: string): { PK: string; SK: string } {
 export function profileKey(sub: string): { PK: string; SK: string } {
   return { PK: `USER#${sub}`, SK: 'PROFILE' };
 }
+
+/**
+ * Where notifications find an artist's email (`ARTIST#<id>` / `CONTACT`). The
+ * roster item stays free of email, and this item is on no index.
+ */
+export function contactKey(artistId: string): { PK: string; SK: string } {
+  return { PK: `ARTIST#${artistId}`, SK: 'CONTACT' };
+}
+
+/** Which branded email replaces a Cognito message; undefined keeps Cognito's own (e.g. SMS). */
+export function cognitoMessageKind(
+  triggerSource: string,
+):
+  | 'admin-create-user'
+  | 'verification-code'
+  | 'forgot-password'
+  | 'attribute-verification'
+  | undefined {
+  switch (triggerSource) {
+    case 'CustomMessage_AdminCreateUser':
+      return 'admin-create-user';
+    case 'CustomMessage_SignUp':
+    case 'CustomMessage_ResendCode':
+      return 'verification-code';
+    case 'CustomMessage_ForgotPassword':
+      return 'forgot-password';
+    case 'CustomMessage_UpdateUserAttribute':
+    case 'CustomMessage_VerifyUserAttribute':
+      return 'attribute-verification';
+    default:
+      return undefined;
+  }
+}

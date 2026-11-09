@@ -36,7 +36,8 @@ import { useNotifications, type AppNotification } from '../lib/notifications.ts'
 import { ArtistFiles, Library } from './Library.tsx';
 import { Profile } from './Profile.tsx';
 import { ArtistChats, BmgMessages, useInbox, type ConversationSummary } from './Messages.tsx';
-import { PlanTab } from './Plan.tsx';
+import { markdownToText } from '../lib/markdown.ts';
+import { PlanStages, PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
 import { ArtistWorkspace } from './Workspace.tsx';
@@ -117,7 +118,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           badge: artists.length,
           badgeTone: 'w',
         },
-        { id: 'templates', label: 'Plan templates', icon: 'template', soon: true },
+        { id: 'templates', label: 'Plan templates', icon: 'template' },
       ],
     },
     {
@@ -221,6 +222,16 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           />
         </>
       )}
+      {view === 'templates' && (
+        <>
+          <PageHeader
+            eyebrow="Artist workspaces"
+            title="Plan templates"
+            sub="Custom stages for one or more artists, on top of the built-in phase library."
+          />
+          <PlanStages cfg={cfg} token={token} artists={artists} />
+        </>
+      )}
       {view === 'messages' && (
         <>
           <PageHeader
@@ -258,7 +269,13 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             title="Document library"
             sub="Upload once, then choose per file who sees it."
           />
-          <Library cfg={cfg} token={token} isBmg artists={artists} />
+          <Library
+            cfg={cfg}
+            token={token}
+            isBmg
+            isAdmin={me.role === 'bmg-admin'}
+            artists={artists}
+          />
         </>
       )}
     </BmgShell>
@@ -843,7 +860,11 @@ function ArtistHome({
               Open
             </button>
           </div>
-          {plan.plan.outcome && <b className="text-[15px] leading-snug">{plan.plan.outcome}</b>}
+          {plan.plan.outcome && (
+            <b className="line-clamp-3 text-[15px] leading-snug">
+              {markdownToText(plan.plan.outcome)}
+            </b>
+          )}
           {phaseProgress(plan.plan)
             .filter((p) => p.status === 'now')
             .slice(0, 2)

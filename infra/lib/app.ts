@@ -10,6 +10,7 @@ import { EnvFoundationStack } from './env-foundation-stack.ts';
 import { FilesStack } from './files-stack.ts';
 import { IdentityStack } from './identity-stack.ts';
 import { KeysStack } from './keys-stack.ts';
+import { NotifyStack } from './notify-stack.ts';
 import { WebStack } from './web-stack.ts';
 import { ToolingStack } from './tooling-stack.ts';
 
@@ -32,6 +33,7 @@ export interface BuildAppOptions {
  *   bmg-<env>-audit         home region  pipeline-deployed (event bus, Object Lock audit archive)
  *   bmg-<env>-files         home region  pipeline-deployed (quarantine, malware scan, file buckets)
  *   bmg-<env>-api           home region  pipeline-deployed (REST API, authorizer, WAF)
+ *   bmg-<env>-notify        home region  pipeline-deployed (branded notification email)
  *   bmg-<env>-web           home region  pipeline-deployed (web app on CloudFront, web client)
  * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
  */
@@ -130,6 +132,17 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       quarantineKey: files.quarantineKey,
       description: `BMG ${envName} REST API: authorizer, consent, step-up, invites`,
     });
+    const notify = new NotifyStack(app, `${cfg.project}-${envName}-notify`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      mainTable: data.tables.main,
+      userPool: identity.userPool,
+      bus: audit.bus,
+      alarmTopic: foundation.alarmTopic,
+      description: `BMG ${envName} notifications: branded email for workspace events`,
+    });
     const web = new WebStack(app, `${cfg.project}-${envName}-web`, {
       config: cfg,
       env: home,
@@ -141,7 +154,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       uploadOrigin: `https://${names.bucket(cfg, envName, 'quarantine')}.s3.${cfg.account.homeRegion}.amazonaws.com`,
       description: `BMG ${envName} web app: CloudFront, site bucket, web client`,
     });
-    return { foundation, data, identity, keys, audit, files, api, web };
+    return { foundation, data, identity, keys, audit, files, api, notify, web };
   });
 
   Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));

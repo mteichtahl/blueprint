@@ -4,6 +4,7 @@
  * unit-tested. Nothing here carries message text or file contents: emails
  * and notifications say what happened and link to the app.
  */
+import { renderLayout } from '@bmg/email';
 import { z } from 'zod';
 
 export interface Recipient {
@@ -193,21 +194,29 @@ export const NOTIFICATION_TTL_SECONDS = 90 * 24 * 3600;
 /** At most one message email per conversation per person every 30 minutes. */
 export const MESSAGE_EMAIL_THROTTLE_SECONDS = 30 * 60;
 
+const EYEBROW: Record<Draft['kind'], string> = {
+  review: 'Review',
+  feedback: 'Feedback',
+  message: 'New message',
+  file: 'Upload',
+};
+
+/** The notification as a BMG-branded email (the shared layout in `@bmg/email`). */
 export function emailText(
   d: Draft,
   appUrl: string,
 ): { subject: string; text: string; html: string } {
-  const esc = (s: string) =>
-    s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-  return {
-    subject: d.title,
-    text: `${d.body}\n\nOpen Blueprint: ${appUrl}\n\nYou can change which emails you get in Profile & preferences.`,
-    html: `<div style="font-family:Arial,sans-serif;color:#011935;max-width:520px">
-<p style="font-size:11px;letter-spacing:.16em;color:#B5403C;text-transform:uppercase">Blueprint Music Group</p>
-<h1 style="font-size:22px;margin:0 0 12px">${esc(d.title)}</h1>
-<p style="font-size:16px;line-height:1.45">${esc(d.body)}</p>
-<p><a href="${esc(appUrl)}" style="display:inline-block;background:#B5403C;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Open Blueprint</a></p>
-<p style="font-size:13px;color:#5C6775">You can change which emails you get in Profile &amp; preferences.</p>
-</div>`,
-  };
+  const origin = appUrl.replace(/\/$/, '');
+  return renderLayout(
+    {
+      subject: d.title,
+      preheader: d.body,
+      eyebrow: EYEBROW[d.kind],
+      heading: d.title,
+      blocks: [{ kind: 'p', text: d.body }],
+      ...(origin ? { cta: { label: 'Open Blueprint', url: origin } } : {}),
+      footerNote: 'You can change which emails you get in Profile & preferences.',
+    },
+    { logoUrl: `${origin}/brand/bmg-logo-white-on-navy.png` },
+  );
 }

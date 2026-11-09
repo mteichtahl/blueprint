@@ -13,7 +13,7 @@ export class ApiError extends Error {
 export async function api<T>(
   cfg: AppConfig,
   token: string,
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -61,10 +61,27 @@ export interface Milestone {
 export interface Phase {
   id: string;
   name: string;
+  /** Markdown. */
   goal: string;
   milestones: Milestone[];
+  /** Set when the stage came from a custom stage. */
+  stageId?: string;
+}
+
+/** A custom stage from BMG's stage library. */
+export interface CustomStage {
+  stageId: string;
+  name: string;
+  /** Markdown. */
+  goal: string;
+  milestones: string[];
+  appliesTo: 'all' | 'selected';
+  artistIds: string[];
+  createdAt: string;
+  updatedAt: string | null;
 }
 export interface Plan {
+  /** Markdown. */
   outcome: string;
   measures: { id: MeasureId; label: string }[];
   phases: Phase[];
@@ -75,8 +92,14 @@ export interface PlanResponse {
   plan: Plan;
   gaps: string[];
   phaseLibrary: string[];
+  /** Custom stages that apply to this artist (BMG only; empty for artists). */
+  stages: CustomStage[];
   exists: boolean;
 }
+
+/** Same limits as the API (services/api/src/workspace/model.ts). */
+export const OUTCOME_MAX = 2000;
+export const GOAL_MAX = 4000;
 
 export interface Todo {
   todoId: string;
@@ -84,12 +107,26 @@ export interface Todo {
   title: string;
   notes: string | null;
   due: string | null;
+  /** 'HH:MM', Blueprint's local time (Melbourne). */
+  dueTime: string | null;
+  reminder: Reminder | null;
+  remindAt: string | null;
   phaseId: string | null;
   done: boolean;
   source: 'bmg' | 'feedback' | 'artist';
   bmgOnly: boolean;
   createdAt: string;
+  updatedAt: string | null;
 }
+
+export type Reminder = '60m' | '1d' | '3d' | '7d';
+export const REMINDER_OPTIONS: { value: '' | Reminder; label: string }[] = [
+  { value: '', label: 'No reminder' },
+  { value: '60m', label: '60 minutes before' },
+  { value: '1d', label: '1 day before' },
+  { value: '3d', label: '3 days before' },
+  { value: '7d', label: '7 days before' },
+];
 
 export const TODO_FILTERS = [
   { id: '', label: 'Open' },

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ArtistUpload,
   contentDisposition,
+  deleteAllowed,
   isInlineSafe,
   LibraryUpload,
   librarySharing,
@@ -138,5 +139,29 @@ describe('downloads', () => {
     expect(shown.uploadedByMe).toBe(true);
     expect(JSON.stringify(shown)).not.toContain('artists/');
     expect(publicFile(f, 'u-b').uploadedByMe).toBe(false);
+  });
+});
+
+describe('deleting files', () => {
+  const admin = { sub: 'u-admin', role: 'bmg-admin' as const };
+  const staff = { sub: 'u-staff', role: 'bmg-staff' as const };
+  const lib = (uploadedBy: string) =>
+    ({ scope: 'library', uploadedBy, uploaderRole: 'bmg-staff' }) as const;
+  const art = (uploadedBy: string, uploaderRole: FileRecord['uploaderRole']) =>
+    ({ scope: 'artist', uploadedBy, uploaderRole }) as const;
+
+  it('lets an admin or the uploader delete library documents, never artists', () => {
+    expect(deleteAllowed(admin, lib('someone'))).toBeUndefined();
+    expect(deleteAllowed(staff, lib('u-staff'))).toBeUndefined();
+    expect(deleteAllowed(staff, lib('someone'))).toMatch(/admin or the person/);
+    expect(deleteAllowed(artistA, lib('u-a'))).toMatch(/Only Blueprint/);
+  });
+
+  it('keeps an artist’s own uploads theirs to delete', () => {
+    expect(deleteAllowed(artistA, art('u-a', 'artist'))).toBeUndefined();
+    expect(deleteAllowed(artistA, art('u-staff', 'bmg-staff'))).toMatch(/your own uploads/);
+    expect(deleteAllowed(admin, art('u-a', 'artist'))).toMatch(/Only the artist/);
+    expect(deleteAllowed(admin, art('u-staff', 'bmg-staff'))).toBeUndefined();
+    expect(deleteAllowed(staff, art('u-other', 'bmg-staff'))).toMatch(/admin or the person/);
   });
 });

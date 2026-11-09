@@ -27,6 +27,7 @@ import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
 import type { ITopic } from 'aws-cdk-lib/aws-sns';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import type { IKey } from 'aws-cdk-lib/aws-kms';
+import { CfnScheduleGroup } from 'aws-cdk-lib/aws-scheduler';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import type { IStateMachine } from 'aws-cdk-lib/aws-stepfunctions';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
@@ -127,7 +128,35 @@ export class ApiStack extends BmgStack {
     const stepUp = fn('StepUp', 'step-up', 'TOTP step-up for social sign-in', {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
     });
-    const workspace = fn('Workspace', 'workspace', 'artists, plans and to-dos');
+    // ── To-do reminders: one EventBridge Scheduler one-off per to-do ──
+    // It puts `todo.reminder` straight on the env bus; the notifier sends it.
+    const reminderGroup = new CfnScheduleGroup(this, 'ReminderGroup', {
+      name: `${p}-reminders`,
+    });
+    const reminderRole = new Role(this, 'ReminderRole', {
+      roleName: `${p}-reminder-scheduler`,
+      description: `BMG ${env}: EventBridge Scheduler puts to-do reminders on the event bus`,
+      assumedBy: new ServicePrincipal('scheduler.amazonaws.com', {
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: {
+            'aws:SourceArn': `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/*`,
+          },
+        },
+      }),
+    });
+    reminderRole.addToPolicy(
+      new PolicyStatement({
+        sid: 'PutReminderEvents',
+        actions: ['events:PutEvents'],
+        resources: [props.bus.eventBusArn],
+      }),
+    );
+    const workspace = fn('Workspace', 'workspace', 'artists, plans and to-dos', {
+      EVENT_BUS_ARN: props.bus.eventBusArn,
+      REMINDER_GROUP: reminderGroup.name!,
+      REMINDER_ROLE_ARN: reminderRole.roleArn,
+    });
     const dataAccessRoleArn = `arn:aws:iam::${this.account}:role/${p}-data-access`;
     const bucket = (kind: 'quarantine' | 'artist-data' | 'org-data') =>
       names.bucket(cfg, env, kind);
@@ -212,9 +241,15 @@ export class ApiStack extends BmgStack {
       ACCOUNT_ID: this.account,
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
     });
+    const smtpSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.smtpSecret(cfg, env)}-*`;
+    const webUrlParam = names.ssm(cfg, env, 'web/url');
     const artists = fn('Artists', 'artists', 'invite artists', {
       USER_POOL_ID: props.userPool.userPoolId,
       ONBOARDING_STATE_MACHINE_ARN: props.onboarding.stateMachineArn,
+      // Invites go out as BMG-branded email through Gmail SMTP (design F1).
+      SMTP_SECRET_ID: names.smtpSecret(cfg, env),
+      APP_URL_PARAM: webUrlParam,
+      APP_ORIGIN: `https://${names.host(cfg, env, 'app')}`,
     });
 
     const allow = (f: BmgFunction, sid: string, actions: string[], resources: string[]) =>
@@ -252,7 +287,24 @@ export class ApiStack extends BmgStack {
       [sessions],
     );
     putEvents(stepUp);
-    allow(artists, 'Invites', ['dynamodb:GetItem', 'dynamodb:PutItem'], [main]);
+    allow(
+      artists,
+      'Invites',
+      ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+      [main],
+    );
+    allow(artists, 'ReadSmtpSecret', ['secretsmanager:GetSecretValue'], [smtpSecretArn]);
+    allow(
+      artists,
+      'ReadAppUrl',
+      ['ssm:GetParameter'],
+      [`arn:aws:ssm:${this.region}:${this.account}:parameter${webUrlParam}`],
+    );
+    acknowledge(
+      artists.role!,
+      'Secrets Manager appends a random suffix to secret ARNs; the wildcard matches only that suffix of the one SMTP secret.',
+      `AwsSolutions-IAM5[Resource::${smtpSecretArn}]`,
+    );
     allow(
       workspace,
       'WorkspaceItems',
@@ -261,9 +313,26 @@ export class ApiStack extends BmgStack {
         'dynamodb:BatchGetItem',
         'dynamodb:PutItem',
         'dynamodb:UpdateItem',
+        // Custom plan stages are deleted from the library.
+        'dynamodb:DeleteItem',
         'dynamodb:Query',
       ],
       [main],
+    );
+    // To-do edits are announced on the bus so the notifier can tell the right person.
+    putEvents(workspace);
+    const reminderSchedules = `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/todo-*`;
+    allow(
+      workspace,
+      'ReminderSchedules',
+      ['scheduler:CreateSchedule', 'scheduler:UpdateSchedule', 'scheduler:DeleteSchedule'],
+      [reminderSchedules],
+    );
+    allow(workspace, 'PassReminderRole', ['iam:PassRole'], [reminderRole.roleArn]);
+    acknowledge(
+      workspace.role!,
+      "One reminder schedule per to-do, named todo-<artistId>-<todoId>, in this environment's reminder group.",
+      `AwsSolutions-IAM5[Resource::${reminderSchedules}]`,
     );
     // Roster (GSI1) and all-artist to-dos (GSI2); GSI3 is the review queue (review function).
     allow(
@@ -275,8 +344,24 @@ export class ApiStack extends BmgStack {
     allow(
       files,
       'FileRecords',
-      ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+      [
+        'dynamodb:GetItem',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
+        'dynamodb:Query',
+      ],
       [main],
+    );
+    // Deleting a document: the stored library object, or an upload still in quarantine.
+    allow(
+      files,
+      'DeleteFiles',
+      ['s3:DeleteObject'],
+      [
+        ...[objects('quarantine', 'artists/*'), objects('quarantine', 'library/*')],
+        objects('org-data', 'library/*'),
+      ],
     );
     // Signs presigned POSTs: S3 checks the signer may put the object and use the quarantine key.
     const uploadPrefixes = [objects('quarantine', 'artists/*'), objects('quarantine', 'library/*')];
@@ -418,8 +503,6 @@ export class ApiStack extends BmgStack {
       ],
     });
 
-    const smtpSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.smtpSecret(cfg, env)}-*`;
-    const webUrlParam = names.ssm(cfg, env, 'web/url');
     const mailer = new BmgFunction(this, 'Mailer', {
       entry: 'services/api/src/handlers/mailer.ts',
       description: `BMG ${env}: send notification email through Gmail SMTP`,
@@ -474,7 +557,13 @@ export class ApiStack extends BmgStack {
     allow(
       artists,
       'CreateArtistUsers',
-      ['cognito-idp:AdminCreateUser', 'cognito-idp:AdminAddUserToGroup'],
+      [
+        'cognito-idp:AdminCreateUser',
+        'cognito-idp:AdminAddUserToGroup',
+        // Resending an invite: check the user is still unconfirmed, then set a new temporary password.
+        'cognito-idp:AdminGetUser',
+        'cognito-idp:AdminSetUserPassword',
+      ],
       [props.userPool.userPoolArn],
     );
     putEvents(artists);
@@ -534,7 +623,7 @@ export class ApiStack extends BmgStack {
       },
       defaultCorsPreflightOptions: {
         allowOrigins: prod ? [appOrigin] : [appOrigin, 'http://localhost:5173'],
-        allowMethods: ['GET', 'POST', 'PUT', 'PATCH'],
+        allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
         allowHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
         maxAge: Duration.hours(1),
       },
@@ -566,7 +655,7 @@ export class ApiStack extends BmgStack {
       validateRequestParameters: true,
     });
     const route = (
-      method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+      method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
       path: string,
       handler: BmgFunction,
     ) => {
@@ -585,6 +674,7 @@ export class ApiStack extends BmgStack {
     route('POST', '/step-up/totp/setup', stepUp);
     route('POST', '/step-up/totp/verify', stepUp);
     route('POST', '/artists', artists);
+    route('POST', '/artists/{artistId}/invite/resend', artists);
     route('GET', '/artists', workspace);
     route('GET', '/artists/{artistId}', workspace);
     route('GET', '/artists/{artistId}/plan', workspace);
@@ -593,11 +683,17 @@ export class ApiStack extends BmgStack {
     route('POST', '/artists/{artistId}/todos', workspace);
     route('PATCH', '/artists/{artistId}/todos/{todoId}', workspace);
     route('GET', '/todos', workspace);
+    route('GET', '/plan-stages', workspace);
+    route('POST', '/plan-stages', workspace);
+    route('PUT', '/plan-stages/{stageId}', workspace);
+    route('DELETE', '/plan-stages/{stageId}', workspace);
+    route('POST', '/plan-stages/{stageId}/apply', workspace);
     route('GET', '/artists/{artistId}/files', files);
     route('POST', '/artists/{artistId}/files', files);
     route('GET', '/artists/{artistId}/files/{fileId}', files);
     route('PATCH', '/artists/{artistId}/files/{fileId}', files);
     route('POST', '/artists/{artistId}/files/{fileId}/download', files);
+    route('DELETE', '/artists/{artistId}/files/{fileId}', files);
     route('GET', '/review-queue', review);
     route('GET', '/artists/{artistId}/submissions', review);
     route('POST', '/artists/{artistId}/submissions', review);
@@ -618,6 +714,7 @@ export class ApiStack extends BmgStack {
     route('GET', '/library/files/{fileId}', files);
     route('PATCH', '/library/files/{fileId}', files);
     route('POST', '/library/files/{fileId}/download', files);
+    route('DELETE', '/library/files/{fileId}', files);
 
     acknowledge(
       this.api,
