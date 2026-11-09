@@ -97,6 +97,21 @@ function send(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+/**
+ * What an error says, for logs. AWS service errors (they carry $metadata) also
+ * give their status and message, which name the failing action and resource,
+ * never prompt or reply text. Anything else is logged by type only.
+ */
+export function describeError(err: unknown): Record<string, unknown> {
+  const e = err as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+  const out: Record<string, unknown> = { error: e?.name ?? 'Error' };
+  if (e?.$metadata) {
+    out.status = e.$metadata.httpStatusCode;
+    out.detail = String(e.message ?? '').slice(0, 300);
+  }
+  return out;
+}
+
 let busy = false;
 
 export const server = createServer((req, res) => {
@@ -111,8 +126,8 @@ export const server = createServer((req, res) => {
       if (!parsed.success) return send(res, 400, { error: 'Bad invocation' });
       send(res, 200, await runTurn(parsed.data));
     } catch (err) {
-      // Log the error type only: prompts and replies are never logged (design 10.5).
-      console.error(JSON.stringify({ level: 'error', error: (err as Error).name }));
+      // Prompts and replies are never logged (design 10.5); AWS errors add their status and message.
+      console.error(JSON.stringify({ level: 'error', ...describeError(err) }));
       send(res, 500, { error: 'The assistant hit a problem. Try again.' });
     } finally {
       busy = false;
