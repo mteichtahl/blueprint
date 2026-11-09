@@ -1,0 +1,14 @@
+{
+  "name": "@bmg/prompts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The AI prompts BMG admins can edit (design 10.6): ids, variables, defaults and the fixed platform rules",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  }
+}

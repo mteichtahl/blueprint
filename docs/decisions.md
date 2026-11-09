@@ -117,6 +117,18 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - Ticket sales are typed in until the Humanitix connector links the event (`humanitixEventId`).
   - Money is stored in cents.
 - **Patches only change what was sent.** Zod's `.partial()` still fills in default values, so a patch could reset fields nobody touched. Patch schemas therefore come from `patchOf()`, which makes every field optional, removes defaults and rejects unknown fields.
+- **Not finished in Phase 4 (moved on at Marc's request, 9 Nov):** the connector framework and its screens, Insights snapshots and the vendor adapters. They need BMG's vendor accounts first: see `claude/BMG_Connector_Vendor_Check_O1.md` in the project, which covers which connectors are feasible and what each needs. Until then, Events take ticket numbers typed in by hand.
+
+## Phase 5: AI
+
+- **AI prompts (design 10.6)** live in `@bmg/prompts`, shared by the API and the agent.
+  - The package fixes which prompts exist, the variables each feature supplies, and the built-in default. A default stays live until a version is published.
+  - Storage: `PROMPT#<id> / META` holds the live and latest version numbers and any draft. `PROMPT#<id> / VERSION#<n>` holds the published versions, which are never changed.
+  - Publishing is one transaction: it writes the new version and moves "live" only if nobody published in between. Rollback points "live" at any earlier version and creates no new version.
+  - Staff can read prompts and save drafts. Publishing and rollback are admin-only and need a fresh step-up. This is the new authz resource `ai-prompt`, with five new matrix rows.
+  - Drafts, publishes and rollbacks are audited, including denied attempts.
+  - The editor rejects variables the feature doesn't supply. A read-only "platform rules" block above each prompt lists the safety rules enforced in code.
+  - Previewing against sample inputs, and "promote to prod", are deferred until the agent exists. Until then, staging and prod are edited separately.
 
 ## Notes: Blueprint's own sign-in (9 Nov 2026)
 

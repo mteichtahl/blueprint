@@ -37,6 +37,7 @@ const libraryForA: Resource = {
   sharedWithArtistIds: [A],
 };
 const settings: Resource = { kind: 'org-admin' };
+const prompt: Resource = { kind: 'ai-prompt' };
 const a2aChat: Resource = {
   kind: 'conversation',
   type: 'artist-to-artist',
@@ -57,6 +58,11 @@ const matrix: Row[] = [
   ['admin reads a BMG-only item', admin, 'read', dataA('bmg-only'), true],
   ['admin cannot read a private item', admin, 'read', dataA('private'), false],
   ['admin manages settings', admin, 'write', settings, true],
+  ['admin publishes an AI prompt', admin, 'admin', prompt, true],
+  ['admin needs a fresh step-up to publish a prompt', staleAdmin, 'admin', prompt, false],
+  ['staff drafts an AI prompt', staffA, 'write', prompt, true],
+  ['staff cannot publish an AI prompt', staffA, 'admin', prompt, false],
+  ['artist cannot read AI prompts', artistA, 'read', prompt, false],
   ['admin cannot read artist-to-artist chats', admin, 'read', a2aChat, false],
   ['admin reads BMG-artist chats', admin, 'read', bmgChat, true],
   ['admin invites with a fresh step-up', admin, 'admin', dataA(), true],

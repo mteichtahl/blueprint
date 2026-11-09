@@ -293,6 +293,7 @@ export class ApiStack extends BmgStack {
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
     });
     const gigsEvents = fn('Events', 'events', 'artist gigs and Blueprint events');
+    const prompts = fn('Prompts', 'prompts', 'Settings - AI prompts: drafts, versions, publish');
     const smtpSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.smtpSecret(cfg, env)}-*`;
     const webUrlParam = names.ssm(cfg, env, 'web/url');
     const artists = fn('Artists', 'artists', 'invite artists', {
@@ -462,6 +463,13 @@ export class ApiStack extends BmgStack {
     // GSI3 also holds every shared gig (GSI3PK GIGS) for Blueprint's "Artist gigs".
     allow(gigsEvents, 'SharedGigs', ['dynamodb:Query'], [`${main}/index/GSI3`]);
     putEvents(gigsEvents);
+    allow(
+      prompts,
+      'PromptItems',
+      ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+      [main],
+    );
+    putEvents(prompts);
     allow(
       messages,
       'ConversationItems',
@@ -653,6 +661,7 @@ export class ApiStack extends BmgStack {
       messages,
       notifications,
       gigsEvents,
+      prompts,
     ]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
@@ -666,6 +675,7 @@ export class ApiStack extends BmgStack {
       messages,
       notifications,
       gigsEvents,
+      prompts,
     ]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
@@ -797,6 +807,12 @@ export class ApiStack extends BmgStack {
     route('POST', '/events/{eventId}/{part}', gigsEvents);
     route('PATCH', '/events/{eventId}/{part}/{itemId}', gigsEvents);
     route('DELETE', '/events/{eventId}/{part}/{itemId}', gigsEvents);
+    route('GET', '/ai/prompts', prompts);
+    route('GET', '/ai/prompts/{promptId}', prompts);
+    route('PUT', '/ai/prompts/{promptId}/draft', prompts);
+    route('DELETE', '/ai/prompts/{promptId}/draft', prompts);
+    route('POST', '/ai/prompts/{promptId}/publish', prompts);
+    route('POST', '/ai/prompts/{promptId}/rollback', prompts);
     route('GET', '/conversations', messages);
     route('POST', '/conversations', messages);
     route('GET', '/conversations/{conversationId}/messages', messages);

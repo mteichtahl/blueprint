@@ -42,6 +42,7 @@ import { PlanStages, PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
 import { Events } from './Events.tsx';
+import { Prompts } from './Prompts.tsx';
 import { AllGigs, ArtistGigs } from './Gigs.tsx';
 import { ArtistWorkspace } from './Workspace.tsx';
 
@@ -177,6 +178,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         { id: 'newsroom', label: 'Newsroom', icon: 'mail', soon: true },
         { id: 'connectors', label: 'Connectors', icon: 'plug', soon: true },
         { id: 'access', label: 'Access & permissions', icon: 'lock', soon: true },
+        { id: 'prompts', label: 'AI prompts', icon: 'sparkle' },
       ],
     },
   ];
@@ -305,6 +307,16 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         </>
       )}
       {view === 'events' && <Events cfg={cfg} token={token} />}
+      {view === 'prompts' && (
+        <>
+          <PageHeader
+            eyebrow="BMG only · Settings"
+            title="AI prompts"
+            sub="Every instruction the AI follows. Edit a draft, publish it, or roll back to any earlier version."
+          />
+          <Prompts cfg={cfg} token={token} isAdmin={me.role === 'bmg-admin'} onReauth={onReauth} />
+        </>
+      )}
       {view === 'library' && (
         <>
           <PageHeader
