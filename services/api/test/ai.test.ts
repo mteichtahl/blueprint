@@ -144,3 +144,13 @@ describe('carrying out actions', () => {
     expect(msg[1]!.path).toBe('/conversations/{conversationId}/messages');
   });
 });
+
+describe('conversation ids', () => {
+  it('are random, unguessable and match the accepted format', async () => {
+    const { sessionId, SessionId } = await import('../src/ai/model.ts');
+    const a = sessionId();
+    expect(SessionId.safeParse(a).success).toBe(true);
+    expect(a).toMatch(/^s[0-9a-f]{24}$/);
+    expect(sessionId()).not.toBe(a);
+  });
+});
