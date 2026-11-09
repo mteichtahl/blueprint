@@ -117,7 +117,24 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - Ticket sales are typed in until the Humanitix connector links the event (`humanitixEventId`).
   - Money is stored in cents.
 - **Patches only change what was sent.** Zod's `.partial()` still fills in default values, so a patch could reset fields nobody touched. Patch schemas therefore come from `patchOf()`, which makes every field optional, removes defaults and rejects unknown fields.
-- **Not finished in Phase 4 (moved on at Marc's request, 9 Nov):** the connector framework and its screens, Insights snapshots and the vendor adapters. They need BMG's vendor accounts first: see `claude/BMG_Connector_Vendor_Check_O1.md` in the project, which covers which connectors are feasible and what each needs. Until then, Events take ticket numbers typed in by hand.
+
+### Connectors and Insights
+
+- **Catalogue** (vendor facts from the O1 vendor check, 9 Nov 2026):
+  - Blueprint: Squarespace (website stats through Google Analytics 4, because Squarespace has no traffic API), Humanitix, Mailchimp, Google Workspace (a "Blueprint" calendar), Meta Business Suite (Instagram and Facebook in one sign-in), TikTok and LinkedIn.
+  - Artists: Instagram and Facebook (through Meta), TikTok, YouTube, Google Calendar, Humanitix, and Spotify.
+  - **Spotify is entered by hand** (monthly listeners, followers): Spotify's Development Mode no longer returns followers, and Extended Quota needs 250k monthly users. TikTok, LinkedIn, Instagram and Facebook can also be typed in by Blueprint until their apps are approved.
+- **OAuth apps are registered once per environment** with `blueprint connectors setup <google|meta|mailchimp|tiktok|linkedin>`. The client id and secret go to Secrets Manager as `bmg/<env>/connectors/<provider>` under the platform key, and the command prints the redirect URI (`<app>/connectors/callback`). Until a provider is set up, its cards say "Set-up needed". `blueprint connectors status` lists what's registered. Humanitix needs no app: an admin pastes a scoped API key.
+- **Sign-in flow:** the API makes a one-time `state` (10 minutes, bound to the person who started it; Google also uses PKCE). The vendor sends the browser back to `/connectors/callback`, the app keeps the code in session storage and posts it to `POST /connectors/callback`, which swaps it for tokens on the server. Tokens never reach the browser.
+- **Tokens are sealed before they are stored:** Blueprint's under the platform key (encryption context `purpose=connector`, the connector id), and an artist's under that artist's own key in a data-access session, like notes and feedback. The API only ever returns status, account name and settings.
+- **Who can do what:** connecting, changing or disconnecting Blueprint's connectors is an admin action (fresh sign-in within 5 minutes). Only the artist can connect their own accounts; Blueprint sees their status and stats, can send a reminder, and an admin can disconnect one (for example when an artist leaves). Settings such as the GA4 property, Mailchimp audience, Facebook Page or LinkedIn page must be one of the choices the vendor offered at sign-in.
+- **Hourly sync** (`bmg-<env>-api-connectors-sync`, EventBridge rate(1 hour)) refreshes tokens, writes the day's snapshot per account and source (`STATS#<account> / <date>#<source>`, kept about 800 days) and runs side jobs:
+  - Humanitix: ticket counts for BMG events linked to a Humanitix event (Events → "Link to Humanitix"); typed-in sales stop once linked. For artists, gigs whose ticket link is a Humanitix link with an `eventId`.
+  - Calendars: confirmed and booked gigs (Blueprint: every shared gig plus its own events) go into a "Blueprint" calendar the app creates, scope `calendar.app.created`. Event ids are derived from the gig or event id, so re-syncing updates instead of duplicating. Removing a cancelled gig from the calendar is not done yet.
+  - GA4 gives 14 days of daily rows each run, so website history fills itself in.
+- **Snapshots are ours:** several vendors only keep lifetime or monthly numbers, so 30/60/90-day sparklines come from our own daily snapshots. A day with no snapshot carries the last known value forward. Combined followers add Instagram, Facebook, TikTok, LinkedIn and YouTube; Spotify listeners are shown separately, as in the design.
+- **Sign in again:** when a vendor stops accepting a connection (LinkedIn after 60 days, a revoked app), the connection shows "Sign in again" and one `connector.needsReauth` notification goes to the admins (or to the artist for their own).
+- **Not in this release:** Squarespace Commerce (needs Commerce Advanced or an approved extension), sending the newsletter through Mailchimp (Newsroom), and the design's "1:1 enquiries", "mailing list sign-ups this week" and "clicks to tickets" website figures, which need GA4 conversion events set up on the site first.
 
 ## Phase 5: AI
 
