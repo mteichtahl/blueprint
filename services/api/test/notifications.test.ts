@@ -109,3 +109,34 @@ describe('email', () => {
     expect(m.text).toContain('https://app');
   });
 });
+
+import { PushSubscriptionBody, pushPayload, pushSk } from '../src/notifications/model.ts';
+
+describe('web push', () => {
+  it('accepts browser subscriptions over HTTPS only', () => {
+    const ok = {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/abc',
+      keys: { p256dh: 'BOrn1234567890', auth: 'abcdefgh' },
+    };
+    expect(PushSubscriptionBody.safeParse(ok).success).toBe(true);
+    expect(PushSubscriptionBody.safeParse({ ...ok, endpoint: 'http://x.example/p' }).success).toBe(
+      false,
+    );
+  });
+  it('keys devices by a hash of the endpoint', () => {
+    expect(pushSk('https://a')).toMatch(/^PUSH#[0-9a-f]{40}$/);
+    expect(pushSk('https://a')).not.toBe(pushSk('https://b'));
+  });
+  it('carries only the title, body and link', () => {
+    const p = JSON.parse(
+      pushPayload({
+        kind: 'message',
+        title: 'New message from Kyra',
+        body: 'Open the app to read it.',
+        link: 'chat:x',
+        throttleKey: 'x',
+      }),
+    );
+    expect(Object.keys(p).sort()).toEqual(['body', 'link', 'tag', 'title']);
+  });
+});

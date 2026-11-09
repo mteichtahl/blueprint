@@ -4,8 +4,10 @@ import {
   ListUsersInGroupCommand,
   type UserType,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
-import { BatchGetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import webpush from 'web-push';
 import {
   DEFAULT_PREFERENCES,
   inQuietHours,
@@ -15,8 +17,11 @@ import {
   plan,
   Preferences,
   PREFS_SK,
+  pushPayload,
   userPk,
+  type Draft,
   type DomainEvent,
+  type PushSubscriptionBody,
   type Recipient,
 } from '../notifications/model.ts';
 import { publish } from '../realtime.ts';
@@ -24,6 +29,58 @@ import { db, env } from '../lib.ts';
 
 const cognito = new CognitoIdentityProviderClient({});
 const sqs = new SQSClient({});
+const secrets = new SecretsManagerClient({});
+
+let vapid: { publicKey: string; privateKey: string; subject: string } | null | undefined;
+async function vapidKeys() {
+  if (vapid !== undefined) return vapid;
+  try {
+    const res = await secrets.send(new GetSecretValueCommand({ SecretId: env('VAPID_SECRET_ID') }));
+    const v = JSON.parse(res.SecretString ?? '{}');
+    vapid = v.publicKey && v.privateKey ? v : null;
+  } catch {
+    vapid = null;
+  }
+  return vapid;
+}
+
+/** Sends to each of the person's devices; drops subscriptions the push service says are gone. */
+async function push(sub: string, draft: Draft) {
+  const keys = await vapidKeys();
+  if (!keys) return;
+  const res = await db.send(
+    new QueryCommand({
+      TableName: env('MAIN_TABLE'),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :p)',
+      ExpressionAttributeValues: { ':pk': userPk(sub), ':p': 'PUSH#' },
+      Limit: 10,
+    }),
+  );
+  await Promise.all(
+    (res.Items ?? []).map(async (item) => {
+      try {
+        await webpush.sendNotification(
+          item.subscription as PushSubscriptionBody,
+          pushPayload(draft),
+          {
+            vapidDetails: keys,
+            TTL: 24 * 3600,
+            urgency: 'normal',
+          },
+        );
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410) {
+          await db.send(
+            new DeleteCommand({ TableName: env('MAIN_TABLE'), Key: { PK: item.PK, SK: item.SK } }),
+          );
+        } else {
+          console.warn(JSON.stringify({ level: 'warn', event: 'push.failed', status }));
+        }
+      }
+    }),
+  );
+}
 
 const attr = (u: UserType, name: string) => u.Attributes?.find((a) => a.Name === name)?.Value;
 
@@ -158,7 +215,9 @@ export async function handler(event: { 'detail-type': string; detail: Record<str
     await publish([`/inbox/user-${r.sub}`], { notification: id });
 
     const p = prefs[r.sub] ?? DEFAULT_PREFERENCES;
-    if (!r.email || !p.email || inQuietHours(p, now)) continue;
+    const quiet = inQuietHours(p, now);
+    if (p.push && !quiet) await push(r.sub, planned.draft);
+    if (!r.email || !p.email || quiet) continue;
     if (planned.draft.throttleKey && !(await claimThrottle(r.sub, planned.draft.throttleKey)))
       continue;
     await sqs.send(
