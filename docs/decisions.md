@@ -232,3 +232,10 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Contrast check:** text, primary and accent on the background, and background on primary, graded against WCAG AA (4.5:1, or 3:1 for large text).
 - **Export PDF** is the browser's print-to-PDF with print styles that show only the kit.
 - **No new Lambdas:** the routes reuse the workspace and files functions, keeping the API stack under 500 resources (now 105 routes).
+
+## Notes: Phase 6 staging scans (10 Nov 2026)
+
+- **ZAP and the load test run from a workflow** (`staging-scans.yml`) on the CI CodeBuild runner, with no AWS credentials. It runs weekly (baseline scan and load test) and on demand (the full active scan). Details are in [staging-scans.md](staging-scans.md).
+- **No Docker, so ZAP comes from its GitHub release,** pinned by version and SHA-256. The load test is plain Node rather than k6, so there's no other binary to pin.
+- **Scans are unauthenticated.** Per-role access is covered by the authorisation matrix in CI. A staging scanner user would need a TOTP secret on the runner, which isn't worth the exposure for this app.
+- **New finding W5:** the API WAF rate rule counts CloudFront edge addresses, not users. It gets fixed with the edge WAF when the custom domain arrives.
