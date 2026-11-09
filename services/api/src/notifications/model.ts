@@ -51,6 +51,14 @@ export type DomainEvent =
       title?: string;
     }
   | {
+      type: 'gig.helpRequested';
+      artistId: string;
+      gigId: string;
+      title: string;
+      topics?: string[];
+      artistName?: string;
+    }
+  | {
       type: 'file.rejected';
       fileId: string;
       artistId?: string;
@@ -61,7 +69,7 @@ export type DomainEvent =
 
 export interface Draft {
   /** In-app and email category; preferences can turn email off per category later. */
-  kind: 'review' | 'feedback' | 'message' | 'file';
+  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
@@ -69,6 +77,13 @@ export interface Draft {
   /** Messages are throttled per conversation for email. */
   throttleKey?: string;
 }
+
+const HELP_LABEL: Record<string, string> = {
+  pitch: 'the pitch email',
+  budget: 'the budget',
+  promo: 'promo',
+  setlist: 'the set list',
+};
 
 const isBmg = (r: Recipient) => r.role === 'bmg-admin' || r.role === 'bmg-staff';
 const bmgFor = (r: Recipient, artistIds: string[]) =>
@@ -141,6 +156,18 @@ export function plan(
         },
       };
     }
+    case 'gig.helpRequested':
+      return {
+        to: everyone.filter((r) => isBmg(r) && bmgFor(r, [e.artistId])),
+        draft: {
+          kind: 'gig',
+          title: `${e.artistName ?? 'An artist'} asked for help with a gig`,
+          body: e.topics?.length
+            ? `“${e.title}”: help with ${e.topics.map((t) => HELP_LABEL[t] ?? t).join(', ')}.`
+            : `“${e.title}” needs a hand.`,
+          link: 'gigs',
+        },
+      };
     case 'file.rejected':
       return {
         to: everyone.filter((r) => r.sub === e.uploadedBy || r.role === 'bmg-admin'),
@@ -200,6 +227,7 @@ const EYEBROW: Record<Draft['kind'], string> = {
   feedback: 'Feedback',
   message: 'New message',
   file: 'Upload',
+  gig: 'Gig help',
 };
 
 /** The notification as a BMG-branded email (the shared layout in `@bmg/email`). */

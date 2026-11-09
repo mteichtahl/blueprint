@@ -5,7 +5,7 @@ import { subscribeInbox } from './realtime.ts';
 
 export interface AppNotification {
   id: string;
-  kind: 'review' | 'feedback' | 'message' | 'file';
+  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig';
   title: string;
   body: string;
   link: string;
