@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   api,
+  type Me,
   type ArtistSummary,
   type PlanResponse,
   type SubmissionSummary,
@@ -10,6 +11,7 @@ import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
 import { Avatar, Bar, Card, shortDate, Tag } from '../components/ui.tsx';
 import { ArtistFiles } from './Library.tsx';
+import { ArtistChatTab } from './Messages.tsx';
 import { PlanTab } from './Plan.tsx';
 import { ArtistSubmissions, PRIORITY_TAG } from './Review.tsx';
 import { ArtistTodos } from './Todos.tsx';
@@ -17,7 +19,7 @@ import { ArtistTodos } from './Todos.tsx';
 /** Workspace tabs from the screens doc; the greyed ones arrive in later phases. */
 const TABS = [
   { id: 'overview', label: 'Overview' },
-  { id: 'chat', label: 'Chat', soon: true },
+  { id: 'chat', label: 'Chat' },
   { id: 'plan', label: 'Plan' },
   { id: 'todo', label: 'To-do' },
   { id: 'submissions', label: 'Submissions' },
@@ -84,10 +86,12 @@ export function PlanStrip({
 export function ArtistWorkspace({
   cfg,
   token,
+  me,
   artist,
 }: {
   cfg: AppConfig;
   token: string;
+  me: Me;
   artist: ArtistSummary;
 }) {
   const [tab, setTab] = useState<TabId>('overview');
@@ -132,6 +136,7 @@ export function ArtistWorkspace({
       {tab === 'overview' && (
         <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
       )}
+      {tab === 'chat' && <ArtistChatTab cfg={cfg} token={token} me={me} artist={artist} />}
       {tab === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artist.artistId} canEdit />}
       {tab === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artist.artistId} isBmg />}
       {tab === 'submissions' && (

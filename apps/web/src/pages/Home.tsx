@@ -32,6 +32,7 @@ import {
   Tag,
 } from '../components/ui.tsx';
 import { ArtistFiles, Library } from './Library.tsx';
+import { ArtistChats, BmgMessages, useInbox, type ConversationSummary } from './Messages.tsx';
 import { PlanTab } from './Plan.tsx';
 import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
@@ -80,6 +81,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   }, [cfg, token]);
   useEffect(() => void load().catch(() => undefined), [load]);
 
+  const inbox = useInbox(cfg, token, me);
+  const unread = (inbox.conversations ?? []).filter((c) => c.unread).length;
   const reviewsFor = (id: string) => openReviews.filter((s) => s.artistId === id).length;
   const sections: NavSection[] = [
     { items: [{ id: 'overview', label: 'Overview', icon: 'home' }] },
@@ -106,7 +109,13 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     {
       label: 'SHARED WITH ARTISTS',
       items: [
-        { id: 'messages', label: 'Messages & groups', icon: 'chat', coral: true, soon: true },
+        {
+          id: 'messages',
+          label: 'Messages & groups',
+          icon: 'chat',
+          coral: true,
+          badge: unread || undefined,
+        },
         { id: 'todos', label: 'Tasks & to-dos', icon: 'todo' },
         { id: 'library', label: 'Document library', icon: 'folder' },
         {
@@ -159,6 +168,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           userName={userName}
           artists={artists}
           openReviews={openReviews}
+          conversations={inbox.conversations ?? []}
           onNavigate={setView}
         />
       )}
@@ -173,7 +183,17 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           onInvited={() => void load()}
         />
       )}
-      {openArtist && <ArtistWorkspace cfg={cfg} token={token} artist={openArtist} />}
+      {openArtist && <ArtistWorkspace cfg={cfg} token={token} me={me} artist={openArtist} />}
+      {view === 'messages' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Messages & groups"
+            sub="Direct chats, groups you create, and the all-artists broadcast."
+          />
+          <BmgMessages cfg={cfg} token={token} me={me} artists={artists} />
+        </>
+      )}
       {view === 'todos' && (
         <>
           <PageHeader
@@ -215,6 +235,7 @@ function StudioHq({
   userName,
   artists,
   openReviews,
+  conversations,
   onNavigate,
 }: {
   cfg: AppConfig;
@@ -222,6 +243,7 @@ function StudioHq({
   userName: string;
   artists: ArtistSummary[];
   openReviews: SubmissionSummary[];
+  conversations: ConversationSummary[];
   onNavigate: (v: string) => void;
 }) {
   const [plans, setPlans] = useState<Record<string, PlanResponse>>({});
@@ -286,7 +308,7 @@ function StudioHq({
         >
           {artists.length === 0 && <p className="src">No artists yet. Invite your first one.</p>}
           {artists.slice(0, 4).map((a) => {
-            const p = plans[a.artistId];
+            const p = plans[a.artistId]?.plan ? plans[a.artistId] : undefined;
             const now = p
               ? phaseProgress(p.plan)
                   .filter((x) => x.status === 'now')
@@ -320,6 +342,32 @@ function StudioHq({
               </button>
             );
           })}
+        </Card>
+
+        <Card
+          className="flex-[1_1_320px]"
+          title="Messages"
+          action={
+            conversations.some((c) => c.unread) && (
+              <Tag tone="k">{conversations.filter((c) => c.unread).length} unread</Tag>
+            )
+          }
+          footer={go('messages')}
+        >
+          {conversations.slice(0, 3).map((c) => (
+            <div key={c.conversationId} className="flex items-center gap-3">
+              {c.type === 'broadcast' ? (
+                <span className="av bg-[#E6E9ED] text-[11px] text-[#011935]">ALL</span>
+              ) : (
+                <Avatar name={c.title} />
+              )}
+              <span className="min-w-0 flex-1">
+                <b className="block">{c.title}</b>
+                <span className="src block truncate">{c.preview ?? 'No messages yet'}</span>
+              </span>
+              {c.unread && <Tag tone="k">New</Tag>}
+            </div>
+          ))}
         </Card>
 
         <Card className="flex-[1_1_320px]" title="Tasks & to-dos" footer={go('todos')}>
@@ -601,7 +649,7 @@ function InviteArtist({
 
 // ═════════════════════════════ Artist phone app ═════════════════════════════
 
-type ArtistView = 'home' | 'todo' | 'library' | 'submit' | 'plan';
+type ArtistView = 'home' | 'chat' | 'todo' | 'library' | 'submit' | 'plan';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   useTheme();
@@ -610,13 +658,14 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const first = userName.split(' ')[0];
   const tabs = [
     { id: 'home', label: 'Home', icon: 'home' as const },
-    { id: 'chat', label: 'Chat', icon: 'chat' as const, soon: true },
+    { id: 'chat', label: 'Chat', icon: 'chat' as const },
     { id: 'todo', label: 'To-do', icon: 'todo' as const },
     { id: 'gigs', label: 'Gigs', icon: 'mic' as const, soon: true },
     { id: 'library', label: 'Library', icon: 'folder' as const },
   ];
   const headers: Record<ArtistView, { eyebrow: string; title: string }> = {
     home: { eyebrow: 'Blueprint', title: `Hi ${first}` },
+    chat: { eyebrow: 'Chats', title: 'Messages' },
     todo: { eyebrow: 'To-do', title: 'This week' },
     library: { eyebrow: 'Library & assets', title: 'Your files' },
     submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
@@ -656,6 +705,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       }
     >
       {view === 'home' && <ArtistHome cfg={cfg} token={token} me={me} onNavigate={setView} />}
+      {view === 'chat' && <ArtistChats cfg={cfg} token={token} me={me} />}
       {view === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artistId} isBmg={false} />}
       {view === 'library' && (
         <>

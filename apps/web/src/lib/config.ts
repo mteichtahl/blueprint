@@ -5,6 +5,8 @@ export interface AppConfig {
   region: string;
   userPoolId: string;
   apiBase: string;
+  /** AppSync Events domains for realtime inbox nudges (absent in older deploys). */
+  realtime?: { http: string; ws: string };
 }
 
 let cached: AppConfig | undefined;

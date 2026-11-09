@@ -39,6 +39,8 @@ export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly restApiId: string;
   /** The quarantine bucket the browser uploads to (presigned POST). */
   readonly uploadOrigin: string;
+  /** AppSync Events domains for realtime inbox nudges. */
+  readonly realtime: { httpDns: string; realtimeDns: string };
 }
 
 const WEB_DIST = resolve(REPO_ROOT, 'apps/web/dist');
@@ -100,7 +102,7 @@ export class WebStack extends BmgStack {
             "style-src 'self'",
             "font-src 'self'",
             "img-src 'self' data:",
-            `connect-src 'self' ${cognitoIdp} ${loginOrigin} ${props.uploadOrigin}`,
+            `connect-src 'self' ${cognitoIdp} ${loginOrigin} ${props.uploadOrigin} wss://${props.realtime.realtimeDns}`,
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "form-action 'self' " + loginOrigin,
@@ -211,6 +213,7 @@ export class WebStack extends BmgStack {
           region: this.region,
           userPoolId: props.userPool.userPoolId,
           apiBase: '/v1',
+          realtime: { http: props.realtime.httpDns, ws: props.realtime.realtimeDns },
         }),
       ],
     });

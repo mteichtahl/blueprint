@@ -9,10 +9,17 @@ import {
   RequestAuthorizer,
   RestApi,
 } from 'aws-cdk-lib/aws-apigateway';
+import {
+  AppSyncAuthorizationType,
+  AppSyncFieldLogLevel,
+  type CfnApi,
+  Code,
+  EventApi,
+} from 'aws-cdk-lib/aws-appsync';
 import type { IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
 import type { IEventBus } from 'aws-cdk-lib/aws-events';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import type { IKey } from 'aws-cdk-lib/aws-kms';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import type { IStateMachine } from 'aws-cdk-lib/aws-stepfunctions';
@@ -45,8 +52,29 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
  * A Lambda authorizer verifies the Cognito access token and the step-up
  * state. Regional AWS WAF sits in front; CloudFront arrives with the web app.
  */
+/**
+ * Realtime subscribe rule (AppSync Events, APPSYNC_JS): a user may only listen
+ * on their own inbox channel. Payloads carry ids only; content always comes
+ * through the API and its access rules.
+ */
+const INBOX_HANDLER = `
+import { util } from '@aws-appsync/utils';
+export function onSubscribe(ctx) {
+  const claims = (ctx.identity && ctx.identity.claims) || {};
+  const target = ctx.info.channel.segments[1] || '';
+  const bmg = claims.role === 'bmg-admin' || claims.role === 'bmg-staff';
+  if (target === 'bmg' && bmg) return;
+  if (claims.role === 'artist' && (target === 'all-artists' || target === 'artist-' + claims.artistId)) return;
+  util.unauthorized();
+}
+export function onPublish(ctx) {
+  return ctx.events;
+}
+`;
+
 export class ApiStack extends BmgStack {
   readonly api: RestApi;
+  readonly realtime: EventApi;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     const env = props.envName;
@@ -110,6 +138,65 @@ export class ApiStack extends BmgStack {
       // The S3 presigners aren't guaranteed to be in the Lambda runtime.
       true,
     );
+    // ── Realtime (AppSync Events): inbox nudges for messages ──
+    this.realtime = new EventApi(this, 'Realtime', {
+      apiName: `${p}-realtime`,
+      authorizationConfig: {
+        authProviders: [
+          {
+            authorizationType: AppSyncAuthorizationType.USER_POOL,
+            cognitoConfig: { userPool: props.userPool },
+          },
+          { authorizationType: AppSyncAuthorizationType.IAM },
+        ],
+        connectionAuthModeTypes: [AppSyncAuthorizationType.USER_POOL, AppSyncAuthorizationType.IAM],
+        defaultPublishAuthModeTypes: [AppSyncAuthorizationType.IAM],
+        defaultSubscribeAuthModeTypes: [AppSyncAuthorizationType.USER_POOL],
+      },
+    });
+    // Error logs, set here rather than through `logConfig`, so the log group
+    // is owned by this stack with a fixed retention (no log-retention Lambda)
+    // and the logging role can only write to it.
+    const realtimeLogs = new LogGroup(this, 'RealtimeLogs', {
+      logGroupName: `/aws/appsync/apis/${this.realtime.apiId}`,
+      retention: prod ? RetentionDays.ONE_YEAR : RetentionDays.ONE_MONTH,
+      removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+    const realtimeLogsRole = new Role(this, 'RealtimeLogsRole', {
+      assumedBy: new ServicePrincipal('appsync.amazonaws.com'),
+      description: `BMG ${env}: AppSync Events error logs`,
+    });
+    realtimeLogsRole.addToPolicy(
+      new PolicyStatement({
+        actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+        resources: [`${realtimeLogs.logGroupArn}:*`],
+      }),
+    );
+    acknowledge(
+      realtimeLogsRole,
+      "Log streams are created by AppSync inside this API's own log group.",
+      `AwsSolutions-IAM5[Resource::<${this.getLogicalId(realtimeLogs.node.defaultChild as never)}.Arn>:*]`,
+    );
+    (this.realtime.node.defaultChild as CfnApi).addPropertyOverride('EventConfig.LogConfig', {
+      CloudWatchLogsRoleArn: realtimeLogsRole.roleArn,
+      LogLevel: AppSyncFieldLogLevel.ERROR,
+    });
+    this.realtime.addChannelNamespace('inbox', {
+      code: Code.fromInline(INBOX_HANDLER),
+      authorizationConfig: {
+        publishAuthModeTypes: [AppSyncAuthorizationType.IAM],
+        subscribeAuthModeTypes: [AppSyncAuthorizationType.USER_POOL],
+      },
+    });
+
+    const messages = fn('Messages', 'messages', 'messages and groups', {
+      PROJECT: cfg.project,
+      BMG_ENV: env,
+      ACCOUNT_ID: this.account,
+      DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
+      PLATFORM_KEY_ARN: props.platformKey.keyArn,
+      EVENTS_HTTP_DOMAIN: this.realtime.httpDns,
+    });
     const review = fn('Review', 'review', 'submissions and the review queue', {
       PROJECT: cfg.project,
       BMG_ENV: env,
@@ -215,6 +302,33 @@ export class ApiStack extends BmgStack {
     allow(review, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
     putEvents(review);
     allow(
+      messages,
+      'ConversationItems',
+      [
+        'dynamodb:GetItem',
+        'dynamodb:BatchGetItem',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:Query',
+        'dynamodb:ConditionCheckItem',
+      ],
+      [main],
+    );
+    // GSI1: the roster, for the artist directory.
+    allow(messages, 'ArtistDirectory', ['dynamodb:Query'], [`${main}/index/GSI1`]);
+    // Artist-to-artist keys are wrapped under each artist's key, in an artist session.
+    allow(messages, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
+    this.realtime.grantPublish(messages);
+    acknowledge(
+      messages.role!,
+      'Publishes inbox nudges (ids only) to channels in this API; channel names are per user.',
+      // The partition renders literally or as a token depending on the synth context.
+      ...['aws', '<AWS::Partition>'].map(
+        (partition) =>
+          `AwsSolutions-IAM5[Resource::arn:${partition}:appsync:${this.region}:${this.account}:apis/<${this.getLogicalId(this.realtime.node.defaultChild as never)}.ApiId>/channelNamespace/*]`,
+      ),
+    );
+    allow(
       artists,
       'StartOnboarding',
       ['states:StartExecution'],
@@ -227,10 +341,10 @@ export class ApiStack extends BmgStack {
       [props.userPool.userPoolArn],
     );
     putEvents(artists);
-    for (const f of [authorizerFn, me, consent, artists, workspace, files, review]) {
+    for (const f of [authorizerFn, me, consent, artists, workspace, files, review, messages]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
-    for (const f of [consent, stepUp, artists, workspace, files, review]) {
+    for (const f of [consent, stepUp, artists, workspace, files, review, messages]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
     props.platformKey.grant(stepUp, 'kms:Decrypt');
@@ -343,6 +457,11 @@ export class ApiStack extends BmgStack {
     route('GET', '/artists/{artistId}/submissions/{submissionId}', review);
     route('PATCH', '/artists/{artistId}/submissions/{submissionId}', review);
     route('POST', '/artists/{artistId}/submissions/{submissionId}/feedback', review);
+    route('GET', '/conversations', messages);
+    route('POST', '/conversations', messages);
+    route('GET', '/conversations/{conversationId}/messages', messages);
+    route('POST', '/conversations/{conversationId}/messages', messages);
+    route('GET', '/directory', messages);
     route('GET', '/library/files', files);
     route('POST', '/library/files', files);
     route('GET', '/library/files/{fileId}', files);
@@ -402,5 +521,6 @@ export class ApiStack extends BmgStack {
       stringValue: this.api.url,
     });
     new CfnOutput(this, 'ApiEndpoint', { value: this.api.url });
+    new CfnOutput(this, 'RealtimeEndpoint', { value: this.realtime.realtimeDns });
   }
 }

@@ -443,8 +443,15 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(30);
+    expect(routed.length).toBe(35);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
+  });
+
+  it('limits realtime subscribers to their own inbox channel and publishing to IAM', () => {
+    const ns = Object.values(prod!.findResources('AWS::AppSync::ChannelNamespace'))[0]!;
+    expect(ns.Properties.CodeHandlers).toContain('util.unauthorized()');
+    expect(ns.Properties.PublishAuthModes).toEqual([{ AuthType: 'AWS_IAM' }]);
+    expect(ns.Properties.SubscribeAuthModes).toEqual([{ AuthType: 'AMAZON_COGNITO_USER_POOLS' }]);
   });
 
   it('puts a regional WAF with rate limiting in front', () => {
