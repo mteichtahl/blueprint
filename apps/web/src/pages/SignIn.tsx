@@ -107,7 +107,7 @@ export function SignIn({
       return setScreen(step);
     }
     rememberEmail(email);
-    const session = storeTokens(step.tokens);
+    const session = await storeTokens(step.tokens);
     // Offer a passkey to people who signed in another way and have none yet.
     if (passkeysSupported() && !offerDismissed(email)) {
       const count = await listPasskeys(cfg, session.accessToken).catch(() => 1);
