@@ -427,6 +427,29 @@ body {
   .li:last-child {
     border-bottom: 0;
   }
+  /* Chat bubbles: 16px corners, 6px on the tail corner. */
+  .bubble {
+    max-width: 80%;
+    padding: 11px 15px;
+    font-size: 16px;
+    line-height: 1.45;
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(1, 25, 53, 0.05);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .b-in {
+    background: #f1f4f7;
+    color: #011935;
+    align-self: flex-start;
+    border-bottom-left-radius: 6px;
+  }
+  .b-out {
+    background: #011935;
+    color: #f1f4f7;
+    align-self: flex-end;
+    border-bottom-right-radius: 6px;
+  }
   /* Phone tab bar (artist app). */
   .ptab {
     flex: 1;
@@ -496,6 +519,10 @@ a:hover {
   background-image: none;
   background-color: #13233a;
   border-color: #24364f;
+}
+.dark .b-in {
+  background: #1c2e47;
+  color: #f1f4f7;
 }
 .dark .tile,
 .dark .search-fill {
