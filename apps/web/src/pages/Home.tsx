@@ -33,6 +33,7 @@ import {
 } from '../components/ui.tsx';
 import { Bell } from '../components/Bell.tsx';
 import { useNotifications, type AppNotification } from '../lib/notifications.ts';
+import { useDeepLink } from '../lib/push.ts';
 import { ArtistFiles, Library } from './Library.tsx';
 import { Profile } from './Profile.tsx';
 import { ArtistChats, BmgMessages, useInbox, type ConversationSummary } from './Messages.tsx';
@@ -87,6 +88,15 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
 
   const inbox = useInbox(cfg, token, me);
   const notes = useNotifications(cfg, token, me.sub);
+  const goTo = (link: string) =>
+    setView(
+      link.startsWith('chat:')
+        ? 'messages'
+        : (({ review: 'review', library: 'library', submit: 'review' } as Record<string, string>)[
+            link
+          ] ?? 'overview'),
+    );
+  useDeepLink(goTo);
   const openNotification = (n: AppNotification) => {
     void notes.markRead([n.id]);
     setView(
@@ -708,6 +718,11 @@ type ArtistView = 'home' | 'chat' | 'todo' | 'library' | 'submit' | 'plan' | 'pr
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const notes = useNotifications(cfg, token, me.sub);
+  useDeepLink((link) =>
+    setView(
+      link.startsWith('chat:') ? 'chat' : link === 'submit' || link === 'library' ? link : 'home',
+    ),
+  );
   const [view, setView] = useState<ArtistView>('home');
   const artistId = me.artistId!;
   const first = userName.split(' ')[0];

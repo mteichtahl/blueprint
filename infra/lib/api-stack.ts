@@ -1,4 +1,5 @@
-import { CfnOutput, Duration, RemovalPolicy, Tags } from 'aws-cdk-lib';
+import { CfnOutput, CustomResource, Duration, RemovalPolicy, Tags } from 'aws-cdk-lib';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import {
   AccessLogFormat,
   EndpointType,
@@ -234,7 +235,57 @@ export class ApiStack extends BmgStack {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
       EVENTS_HTTP_DOMAIN: this.realtime.httpDns,
     });
-    const notifications = fn('Notifications', 'notifications', 'notifications and preferences');
+    // ── Web push: the environment's VAPID key pair, generated once inside AWS ──
+    const vapidSecretId = `${cfg.project}/${env}/vapid`;
+    const vapid = new Secret(this, 'VapidKeys', {
+      secretName: vapidSecretId,
+      description: `BMG ${env}: web push (VAPID) key pair`,
+      encryptionKey: props.platformKey,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    acknowledge(
+      vapid,
+      'VAPID keys must stay stable: rotating them would cancel every device subscription.',
+      'AwsSolutions-SMG4',
+    );
+    const vapidFn = new BmgFunction(this, 'VapidKeysSetup', {
+      entry: 'services/api/src/handlers/vapid-keys.ts',
+      description: `BMG ${env}: create the web push key pair if missing`,
+      timeout: Duration.seconds(30),
+      prod,
+      environment: {
+        VAPID_SECRET_ID: vapidSecretId,
+        VAPID_SUBJECT: `mailto:${cfg.email.senderAddress}`,
+      },
+    });
+    // Explicit grants: the secret's key lives in the foundation stack, and
+    // Secret.grant* would edit that key's policy (a stack cycle).
+    const vapidArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${vapidSecretId}-*`;
+    const readVapid = (f: BmgFunction) => {
+      f.addToRolePolicy(
+        new PolicyStatement({ actions: ['secretsmanager:GetSecretValue'], resources: [vapidArn] }),
+      );
+      props.platformKey.grant(f, 'kms:Decrypt');
+      acknowledge(
+        f.role!,
+        'The Secrets Manager ARN ends in a random suffix, so the secret name is matched with -*.',
+        `AwsSolutions-IAM5[Resource::${vapidArn}]`,
+      );
+    };
+    readVapid(vapidFn);
+    vapidFn.addToRolePolicy(
+      new PolicyStatement({ actions: ['secretsmanager:PutSecretValue'], resources: [vapidArn] }),
+    );
+    props.platformKey.grant(vapidFn, 'kms:Encrypt', 'kms:GenerateDataKey');
+    new CustomResource(this, 'VapidKeysReady', {
+      serviceToken: vapidFn.functionArn,
+      resourceType: 'Custom::BmgVapidKeys',
+    }).node.addDependency(vapid, vapidFn, vapidFn.role!);
+
+    const notifications = fn('Notifications', 'notifications', 'notifications and preferences', {
+      VAPID_SECRET_ID: vapidSecretId,
+    });
+    readVapid(notifications);
     const review = fn('Review', 'review', 'submissions and the review queue', {
       PROJECT: cfg.project,
       BMG_ENV: env,
@@ -425,7 +476,13 @@ export class ApiStack extends BmgStack {
     allow(
       notifications,
       'OwnNotificationsAndPreferences',
-      ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+      [
+        'dynamodb:GetItem',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:Query',
+        'dynamodb:DeleteItem',
+      ],
       [main],
     );
     putEvents(messages);
@@ -457,6 +514,7 @@ export class ApiStack extends BmgStack {
         ...common,
         USER_POOL_ID: props.userPool.userPoolId,
         MAIL_QUEUE_URL: mailQueue.queueUrl,
+        VAPID_SECRET_ID: vapidSecretId,
         EVENTS_HTTP_DOMAIN: this.realtime.httpDns,
       },
     });
@@ -709,6 +767,9 @@ export class ApiStack extends BmgStack {
     route('POST', '/notifications/read', notifications);
     route('GET', '/preferences', notifications);
     route('PUT', '/preferences', notifications);
+    route('GET', '/push/key', notifications);
+    route('POST', '/push/subscriptions', notifications);
+    route('POST', '/push/unsubscribe', notifications);
     route('GET', '/library/files', files);
     route('POST', '/library/files', files);
     route('GET', '/library/files/{fileId}', files);

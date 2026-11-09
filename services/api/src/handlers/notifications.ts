@@ -1,13 +1,22 @@
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import { z } from 'zod';
 import {
   DEFAULT_PREFERENCES,
   notificationPk,
   Preferences,
   PREFS_SK,
+  PushSubscriptionBody,
+  pushSk,
   userPk,
 } from '../notifications/model.ts';
 import { authContext, db, env, handle, HttpError, json, parseBody } from '../lib.ts';
+
+const secrets = new SecretsManagerClient({});
+let vapidPublicKey: string | undefined;
+
+const Unsubscribe = z.object({ endpoint: z.string().url().max(1000) });
 
 const MarkRead = z.object({
   ids: z
@@ -106,6 +115,43 @@ export const handler = handle(async (event) => {
         }),
       );
       return json(200, prefs);
+    }
+
+    case 'GET /push/key': {
+      if (!vapidPublicKey) {
+        const res = await secrets.send(
+          new GetSecretValueCommand({ SecretId: env('VAPID_SECRET_ID') }),
+        );
+        vapidPublicKey = (JSON.parse(res.SecretString ?? '{}') as { publicKey?: string }).publicKey;
+      }
+      if (!vapidPublicKey) throw new HttpError(409, 'Push isn’t set up yet');
+      return json(200, { publicKey: vapidPublicKey });
+    }
+
+    case 'POST /push/subscriptions': {
+      const subscription = parseBody(event, PushSubscriptionBody);
+      await db.send(
+        new PutCommand({
+          TableName: table,
+          Item: {
+            PK: userPk(sub),
+            SK: pushSk(subscription.endpoint),
+            type: 'push-subscription',
+            subscription,
+            userAgent: (event.headers?.['user-agent'] ?? '').slice(0, 200),
+            createdAt: new Date().toISOString(),
+          },
+        }),
+      );
+      return json(201, { ok: true });
+    }
+
+    case 'POST /push/unsubscribe': {
+      const { endpoint } = parseBody(event, Unsubscribe);
+      await db.send(
+        new DeleteCommand({ TableName: table, Key: { PK: userPk(sub), SK: pushSk(endpoint) } }),
+      );
+      return json(200, { ok: true });
     }
 
     default:

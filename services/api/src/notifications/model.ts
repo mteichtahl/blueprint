@@ -5,6 +5,7 @@
  * and notifications say what happened and link to the app.
  */
 import { renderLayout } from '@bmg/email';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 export interface Recipient {
@@ -158,7 +159,7 @@ const Time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 22:0
 
 export const Preferences = z.object({
   email: z.boolean().default(true),
-  /** Web push arrives with the installable app (next release); stored now. */
+  /** Web push to the devices this person turned it on for (installable app). */
   push: z.boolean().default(false),
   quietHours: z
     .object({ start: Time, end: Time })
@@ -219,4 +220,30 @@ export function emailText(
     },
     { logoUrl: `${origin}/brand/bmg-logo-white-on-navy.png` },
   );
+}
+
+// ── Web push ─────────────────────────────────────────────────────────────
+/** A browser push subscription (PushSubscription.toJSON()). */
+export const PushSubscriptionBody = z.object({
+  endpoint: z
+    .string()
+    .url()
+    .max(1000)
+    .refine((u) => u.startsWith('https://'), 'Push endpoints must use HTTPS'),
+  keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(8).max(100) }),
+});
+export type PushSubscriptionBody = z.infer<typeof PushSubscriptionBody>;
+
+/** One row per device: the endpoint is hashed into the key, never used as one. */
+export const pushSk = (endpoint: string) =>
+  `PUSH#${createHash('sha256').update(endpoint).digest('hex').slice(0, 40)}`;
+
+/** What a push carries: the notification's title, body and link only. */
+export function pushPayload(d: Draft): string {
+  return JSON.stringify({
+    title: d.title,
+    body: d.body,
+    link: d.link,
+    tag: d.throttleKey ?? d.kind,
+  });
 }

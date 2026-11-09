@@ -98,3 +98,10 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - Artists can now edit any to-do they can see, not only their own. Every edit by someone other than the person it's allocated to sends `todo.updated` (changed fields only) so they are emailed; all edits are audited.
 - **Deleting documents:** BMG admins, or the uploader, can delete library documents; artists delete their own uploads and BMG the files Blueprint uploaded to a workspace. A file attached to a submission waiting for review can't be deleted. Both buckets are versioned, so a deleted object can be recovered by an admin for 35 days. Uploads still in quarantine are removed from there.
 - **Submit for review** lists every ready, non-private file in the artist's library (their own uploads first) and lets them upload a new one in the form; it is attached once the malware scan passes.
+- **Installable app and web push:**
+  - The web app is installable: it has a manifest, icons and a service worker. The worker only handles push; there is no offline caching.
+  - The icons are generated from the same waveform stand-in the app shows. **Replace `apps/web/public/icons/*` with the official logo files when they arrive** (Brand Kit: only the supplied logos may be used).
+  - The VAPID key pair is created once inside AWS by a deploy-time custom resource and kept in Secrets Manager (`bmg/<env>/vapid`, platform key). It is never rotated, because rotating it would cancel every device's subscription.
+  - Each person turns push on per device in Profile. The device is stored under a hash of its endpoint and removed when the push service says it's gone (404/410).
+  - Pushes carry the notification's title, body and link only, and follow the same quiet hours as email.
+  - On iPhone, web push works only once Blueprint is added to the Home Screen (iOS 16.4+). Profile says so.

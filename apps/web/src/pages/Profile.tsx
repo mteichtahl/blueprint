@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, type Me } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import type { Preferences } from '../lib/notifications.ts';
+import { disablePush, enablePush, pushSupported } from '../lib/push.ts';
 import type { Theme } from '../components/Shell.tsx';
 import { Button, Card, Notice } from '../components/ui.tsx';
 
@@ -76,10 +77,25 @@ export function Profile({
             </label>
             <label className={row}>
               <span className="flex-1">
-                <b className="block">Push</b>
-                <span className="src">Arrives with the installable app</span>
+                <b className="block">Push on this device</b>
+                <span className="src">
+                  {pushSupported()
+                    ? 'Alerts even when the app is closed'
+                    : 'On iPhone, add Blueprint to your Home Screen first (Share → Add to Home Screen)'}
+                </span>
               </span>
-              <input className="switch" type="checkbox" checked={false} disabled />
+              <input
+                className="switch"
+                type="checkbox"
+                checked={prefs.push}
+                disabled={!pushSupported()}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  void (on ? enablePush(cfg, token) : disablePush(cfg, token))
+                    .then(() => save({ ...prefs, push: on }))
+                    .catch((err) => setMsg({ tone: 'error', text: (err as Error).message }));
+                }}
+              />
             </label>
             <div className={row}>
               <span className="flex-1">
