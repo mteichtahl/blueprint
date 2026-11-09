@@ -444,7 +444,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(105);
+    expect(routed.length).toBe(107);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -743,7 +743,10 @@ describe('connectors', () => {
   it('keeps the API stacks well under the 500-resource limit', () => {
     for (const env of stacks.environments) {
       const count = Object.keys(Template.fromStack(env.api).toJSON().Resources).length;
-      expect(count).toBeLessThan(420);
+      // CloudFormation's hard limit is 500. Rev 7 (contacts, venues, to-do
+      // threads, plan PDF) takes it into the 430s; past 460, split routes into
+      // a second stack rather than raising this again.
+      expect(count).toBeLessThan(460);
     }
     // One invoke permission per function, not two per route.
     const perms = Object.keys(prod.findResources('AWS::Lambda::Permission')).length;
