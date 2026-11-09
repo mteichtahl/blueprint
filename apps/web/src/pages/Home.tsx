@@ -1,11 +1,41 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, type ArtistSummary, type Me } from '../lib/api.ts';
+import {
+  api,
+  ApiError,
+  type ArtistSummary,
+  type Me,
+  type PlanResponse,
+  type SubmissionSummary,
+  type Todo,
+} from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { Button, Card, Field, Notice, Wordmark } from '../components/ui.tsx';
-import { PlanTab } from './Plan.tsx';
+import type { FileItem } from '../lib/files.ts';
+import { overallProgress, phaseProgress } from '../lib/plan.ts';
+import {
+  ArtistShell,
+  BmgShell,
+  PhoneHeader,
+  useTheme,
+  type NavSection,
+} from '../components/Shell.tsx';
+import {
+  Avatar,
+  Bar,
+  Button,
+  Card,
+  DataTable,
+  Field,
+  Icon,
+  Notice,
+  PageHeader,
+  shortDate,
+  Tag,
+} from '../components/ui.tsx';
 import { ArtistFiles, Library } from './Library.tsx';
-import { ArtistSubmissions, ReviewQueue } from './Review.tsx';
+import { PlanTab } from './Plan.tsx';
+import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
+import { ArtistWorkspace } from './Workspace.tsx';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
   'bmg-admin': 'BMG admin',
@@ -13,197 +43,473 @@ const ROLE_LABEL: Record<Me['role'], string> = {
   artist: 'Artist',
 };
 
-type View =
-  | 'overview'
-  | 'artists'
-  | 'todos'
-  | 'review'
-  | 'library'
-  | 'plan'
-  | 'my-todos'
-  | 'submit'
-  | 'my-library';
-const BMG_NAV: { id: View; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'artists', label: 'Artists' },
-  { id: 'todos', label: 'Tasks & to-dos' },
-  { id: 'review', label: 'Review queue' },
-  { id: 'library', label: 'Library' },
-];
-const ARTIST_NAV: { id: View; label: string }[] = [
-  { id: 'overview', label: 'Home' },
-  { id: 'plan', label: 'My plan' },
-  { id: 'my-todos', label: 'To-do' },
-  { id: 'submit', label: 'Submit for review' },
-  { id: 'my-library', label: 'Library' },
-];
-/** Shown greyed out until their Phase 3 PRs land. */
-const COMING = ['Messages'];
+export interface HomeProps {
+  cfg: AppConfig;
+  token: string;
+  me: Me;
+  userName: string;
+  onSignOut: () => void;
+  onReauth: () => void;
+}
 
-/** App shell (design: 264px navy sidebar, sticky top bar). Workspace screens arrive in the next Phase 3 PRs. */
-export function Home({
+/** BMG staff get the desktop app; artists get the phone app (screens doc). */
+export function Home(props: HomeProps) {
+  return props.me.role === 'artist' ? <ArtistApp {...props} /> : <BmgApp {...props} />;
+}
+
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+// ═════════════════════════════ BMG desktop ═════════════════════════════
+
+function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
+  const [theme, setTheme] = useTheme();
+  const [view, setView] = useState('overview');
+  const [artists, setArtists] = useState<ArtistSummary[]>([]);
+  const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
+
+  const load = useCallback(async () => {
+    const [roster, queue] = await Promise.all([
+      api<{ artists: ArtistSummary[] }>(cfg, token, 'GET', '/artists'),
+      api<{ submissions: SubmissionSummary[] }>(cfg, token, 'GET', '/review-queue?status=open'),
+    ]);
+    setArtists(roster.artists);
+    setOpenReviews(queue.submissions);
+  }, [cfg, token]);
+  useEffect(() => void load().catch(() => undefined), [load]);
+
+  const reviewsFor = (id: string) => openReviews.filter((s) => s.artistId === id).length;
+  const sections: NavSection[] = [
+    { items: [{ id: 'overview', label: 'Overview', icon: 'home' }] },
+    {
+      label: 'ARTIST WORKSPACES',
+      items: [
+        ...artists.slice(0, 8).map((a) => ({
+          id: `artist:${a.artistId}`,
+          label: a.displayName,
+          avatar: a.displayName,
+          badge: reviewsFor(a.artistId) || undefined,
+        })),
+        { id: 'gigs', label: 'Artist gigs', icon: 'mic', soon: true },
+        {
+          id: 'artists',
+          label: 'Artists & applications',
+          icon: 'users',
+          badge: artists.length,
+          badgeTone: 'w',
+        },
+        { id: 'templates', label: 'Plan templates', icon: 'template', soon: true },
+      ],
+    },
+    {
+      label: 'SHARED WITH ARTISTS',
+      items: [
+        { id: 'messages', label: 'Messages & groups', icon: 'chat', coral: true, soon: true },
+        { id: 'todos', label: 'Tasks & to-dos', icon: 'todo' },
+        { id: 'library', label: 'Document library', icon: 'folder' },
+        {
+          id: 'review',
+          label: 'Review queue',
+          icon: 'music',
+          badge: openReviews.length || undefined,
+          badgeTone: 'w',
+        },
+        { id: 'insights', label: 'Insights', icon: 'chart', soon: true },
+      ],
+    },
+    {
+      label: 'BMG ONLY',
+      items: [
+        { id: 'events', label: 'Events', icon: 'calendar', soon: true },
+        { id: 'newsroom', label: 'Newsroom', icon: 'mail', soon: true },
+        { id: 'connectors', label: 'Connectors', icon: 'plug', soon: true },
+        { id: 'access', label: 'Access & permissions', icon: 'lock', soon: true },
+      ],
+    },
+  ];
+
+  const openArtist = view.startsWith('artist:')
+    ? artists.find((a) => `artist:${a.artistId}` === view)
+    : undefined;
+
+  return (
+    <BmgShell
+      sections={sections}
+      current={view}
+      onNavigate={setView}
+      userName={userName}
+      roleLabel={ROLE_LABEL[me.role]}
+      theme={theme}
+      onTheme={setTheme}
+      onSignOut={onSignOut}
+      topActions={
+        me.role === 'bmg-admin' && (
+          <Button size="sm" variant="ghost" onClick={() => setView('artists')}>
+            Invite artist
+          </Button>
+        )
+      }
+    >
+      {view === 'overview' && (
+        <StudioHq
+          cfg={cfg}
+          token={token}
+          userName={userName}
+          artists={artists}
+          openReviews={openReviews}
+          onNavigate={setView}
+        />
+      )}
+      {view === 'artists' && (
+        <ArtistsPage
+          cfg={cfg}
+          token={token}
+          me={me}
+          artists={artists}
+          onOpen={(id) => setView(`artist:${id}`)}
+          onReauth={onReauth}
+          onInvited={() => void load()}
+        />
+      )}
+      {openArtist && <ArtistWorkspace cfg={cfg} token={token} artist={openArtist} />}
+      {view === 'todos' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Tasks & to-dos"
+            sub="Every artist's to-dos in one place, with quick filters."
+          />
+          <AllTodos cfg={cfg} token={token} artists={artists} />
+        </>
+      )}
+      {view === 'review' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Review queue"
+            sub="Sorted by priority, then date needed. Feedback turns into the artist's to-dos."
+          />
+          <ReviewQueue cfg={cfg} token={token} artists={artists} onChanged={() => void load()} />
+        </>
+      )}
+      {view === 'library' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Document library"
+            sub="Upload once, then choose per file who sees it."
+          />
+          <Library cfg={cfg} token={token} isBmg artists={artists} />
+        </>
+      )}
+    </BmgShell>
+  );
+}
+
+/** Studio HQ overview: the cards that have live data today. */
+function StudioHq({
+  cfg,
+  token,
+  userName,
+  artists,
+  openReviews,
+  onNavigate,
+}: {
+  cfg: AppConfig;
+  token: string;
+  userName: string;
+  artists: ArtistSummary[];
+  openReviews: SubmissionSummary[];
+  onNavigate: (v: string) => void;
+}) {
+  const [plans, setPlans] = useState<Record<string, PlanResponse>>({});
+  const [files, setFiles] = useState<FileItem[]>([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
+
+  useEffect(() => {
+    void Promise.all(
+      artists.slice(0, 6).map((a) =>
+        api<PlanResponse>(cfg, token, 'GET', `/artists/${a.artistId}/plan`)
+          .then((p) => [a.artistId, p] as const)
+          .catch(() => undefined),
+      ),
+    ).then((rows) =>
+      setPlans(Object.fromEntries(rows.filter((r): r is readonly [string, PlanResponse] => !!r))),
+    );
+  }, [cfg, token, artists]);
+  useEffect(() => {
+    api<{ files: FileItem[] }>(cfg, token, 'GET', '/library/files')
+      .then((r) => setFiles(r.files.filter((f) => f.status === 'available')))
+      .catch(() => setFiles([]));
+    api<{ todos: Todo[] }>(cfg, token, 'GET', '/todos')
+      .then((r) => setTodos(r.todos))
+      .catch(() => setTodos([]));
+  }, [cfg, token]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const week = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+  const overdue = todos.filter((t) => t.due && t.due < today).length;
+  const dueSoon = todos.filter((t) => t.due && t.due >= today && t.due <= week).length;
+  const go = (v: string) => (
+    <button type="button" className="w-full" onClick={() => onNavigate(v)}>
+      {v === 'review'
+        ? 'Open queue'
+        : v === 'library'
+          ? 'Open library'
+          : v === 'todos'
+            ? 'Tasks & to-dos'
+            : 'Artists & applications'}
+    </button>
+  );
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Studio HQ"
+        title={`${greeting()}, ${userName.split(' ')[0]}`}
+        sub={new Date().toLocaleDateString('en-AU', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+        })}
+      />
+
+      <div className="flex flex-wrap items-stretch gap-5">
+        <Card
+          className="flex-[1_1_320px]"
+          title="Artist workspaces"
+          action={<span className="src">Phases from each plan</span>}
+          footer={go('artists')}
+        >
+          {artists.length === 0 && <p className="src">No artists yet. Invite your first one.</p>}
+          {artists.slice(0, 4).map((a) => {
+            const p = plans[a.artistId];
+            const now = p
+              ? phaseProgress(p.plan)
+                  .filter((x) => x.status === 'now')
+                  .map((x) => x.name)
+                  .join(' · ')
+              : '';
+            const pct = p ? overallProgress(p.plan) : 0;
+            const n = openReviews.filter((s) => s.artistId === a.artistId).length;
+            return (
+              <button
+                key={a.artistId}
+                type="button"
+                onClick={() => onNavigate(`artist:${a.artistId}`)}
+                className="tile gap-2 rounded-[10px] p-3 text-left hover:shadow-md"
+              >
+                <span className="flex items-center gap-3">
+                  <Avatar name={a.displayName} />
+                  <span className="min-w-0 flex-1">
+                    <b className="block">{a.displayName}</b>
+                    <span className="src">
+                      {now ? `Now: ${now}` : p?.exists ? 'Plan set' : 'No plan yet'}
+                    </span>
+                  </span>
+                  {n > 0 && <Tag tone="c">{n} to review</Tag>}
+                </span>
+                <span className="flex items-center text-sm text-muted-foreground">
+                  <span className="flex-1">Plan progress</span>
+                  <b className="text-foreground">{pct}%</b>
+                </span>
+                <Bar pct={pct} />
+              </button>
+            );
+          })}
+        </Card>
+
+        <Card className="flex-[1_1_320px]" title="Tasks & to-dos" footer={go('todos')}>
+          <div className="big">
+            {todos.length}{' '}
+            <span className="text-[22px] tracking-normal text-muted-foreground">open</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="tile">
+              <span className="src">Overdue</span>
+              <b className="t text-xl">{overdue}</b>
+            </div>
+            <div className="tile">
+              <span className="src">Due this week</span>
+              <b className="t text-xl">{dueSoon}</b>
+            </div>
+            <div className="tile">
+              <span className="src">From feedback</span>
+              <b className="t text-xl">{todos.filter((t) => t.source === 'feedback').length}</b>
+            </div>
+          </div>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[15px]">
+            {todos.slice(0, 3).map((t) => (
+              <li key={t.todoId} className="flex items-center gap-3">
+                <span className="flex-1 truncate">{t.title}</span>
+                <span className="src">{names[t.artistId] ?? ''}</span>
+                {t.due && <Tag tone={t.due < today ? 'c' : 's'}>{shortDate(t.due)}</Tag>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </div>
+
+      <div className="flex flex-wrap items-stretch gap-5">
+        <Card
+          className="flex-[2_1_560px] pb-0"
+          title="Review queue"
+          action={
+            <>
+              <span className="src">Artist uploads waiting on your feedback</span>
+              <Button size="sm" variant="cta" onClick={() => onNavigate('review')}>
+                Open queue
+              </Button>
+            </>
+          }
+        >
+          {openReviews.length === 0 ? (
+            <p className="src pb-5">Nothing waiting for review.</p>
+          ) : (
+            <>
+              <DataTable>
+                <thead>
+                  <tr>
+                    <th scope="col">Upload</th>
+                    <th scope="col">Artist</th>
+                    <th scope="col">Priority</th>
+                    <th scope="col">Due</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openReviews.slice(0, 5).map((s) => (
+                    <tr key={s.submissionId}>
+                      <td>
+                        <b className="block">{s.title}</b>
+                        <span className="src capitalize">{s.type.replace('-', ' ')}</span>
+                      </td>
+                      <td>
+                        <span className="flex items-center gap-2">
+                          <Avatar name={names[s.artistId] ?? 'Artist'} size={28} />
+                          {names[s.artistId] ?? 'Artist'}
+                        </span>
+                      </td>
+                      <td>
+                        <Tag tone={PRIORITY_TAG[s.priority][0]}>{PRIORITY_TAG[s.priority][1]}</Tag>
+                      </td>
+                      <td>{shortDate(s.neededBy)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+              <div className="flex items-center py-3 text-[15px]">
+                <b>{openReviews.length}</b>&nbsp;
+                <span className="text-muted-foreground">waiting</span>
+              </div>
+            </>
+          )}
+        </Card>
+
+        <Card
+          className="flex-[1_1_320px]"
+          title="Document library"
+          action={
+            <Button size="sm" variant="ghost" onClick={() => onNavigate('library')}>
+              Upload &amp; share
+            </Button>
+          }
+          footer={go('library')}
+        >
+          {files.length === 0 && <p className="src">The library is empty.</p>}
+          {files.slice(0, 4).map((f) => (
+            <div key={f.fileId} className="li">
+              <span className="appsq !bg-secondary !text-foreground">
+                <Icon name="file" size={14} strokeWidth={2.4} />
+              </span>
+              <span className="flex-1 truncate">{f.name}</span>
+              <span className="src">
+                {f.sharing === 'all-artists'
+                  ? 'All artists'
+                  : f.sharing === 'selected'
+                    ? `${f.sharedWithArtistIds.length} artist${f.sharedWithArtistIds.length === 1 ? '' : 's'}`
+                    : 'BMG only'}
+              </span>
+            </div>
+          ))}
+        </Card>
+      </div>
+    </>
+  );
+}
+
+/** Artists & applications: roster with terms and AI status, plus invite. */
+function ArtistsPage({
   cfg,
   token,
   me,
-  onSignOut,
+  artists,
+  onOpen,
   onReauth,
+  onInvited,
 }: {
   cfg: AppConfig;
   token: string;
   me: Me;
-  onSignOut: () => void;
+  artists: ArtistSummary[];
+  onOpen: (id: string) => void;
   onReauth: () => void;
+  onInvited: () => void;
 }) {
-  const isBmg = me.role !== 'artist';
-  const nav = isBmg ? BMG_NAV : ARTIST_NAV;
-  const [view, setView] = useState<View>('overview');
-  const [artists, setArtists] = useState<ArtistSummary[]>([]);
-  const [openArtist, setOpenArtist] = useState<ArtistSummary | null>(null);
-  const loadArtists = useCallback(async () => {
-    if (!isBmg) return;
-    setArtists((await api<{ artists: ArtistSummary[] }>(cfg, token, 'GET', '/artists')).artists);
-  }, [cfg, token, isBmg]);
-  useEffect(() => void loadArtists(), [loadArtists]);
-
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[264px_1fr]">
-      <aside className="hidden bg-primary p-5 text-primary-foreground md:block">
-        <Wordmark light />
-        <nav className="mt-8 space-y-1 text-sm" aria-label="Main">
-          {nav.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setView(item.id);
-                setOpenArtist(null);
-              }}
-              className={`block w-full rounded-md px-3 py-2 text-left ${view === item.id ? 'bg-white/10 font-semibold' : 'hover:bg-white/5'}`}
-              aria-current={view === item.id ? 'page' : undefined}
-            >
-              {item.label}
-            </button>
-          ))}
-          {COMING.map((item) => (
-            <div key={item} className="rounded-md px-3 py-2 opacity-40" title="Coming soon">
-              {item}
-            </div>
-          ))}
-        </nav>
-      </aside>
-      <div>
-        <header className="sticky top-0 flex h-16 items-center justify-between border-b border-border bg-background/90 px-6 backdrop-blur">
-          <span className="flex items-center gap-3 md:hidden">
-            <Wordmark />
-            <select
-              className="h-9 rounded-md border border-input bg-white px-2 text-sm"
-              value={view}
-              aria-label="Go to"
-              onChange={(e) => {
-                setView(e.target.value as View);
-                setOpenArtist(null);
-              }}
-            >
-              {nav.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.label}
-                </option>
-              ))}
-            </select>
-          </span>
-          <span className="text-sm text-muted-foreground">{ROLE_LABEL[me.role]}</span>
-          <Button variant="ghost" onClick={onSignOut}>
-            Sign out
-          </Button>
-        </header>
-        <main className="mx-auto max-w-5xl space-y-6 p-6">
-          {view === 'artists' &&
-            (openArtist ? (
-              <ArtistWorkspace
-                cfg={cfg}
-                token={token}
-                artist={openArtist}
-                onBack={() => setOpenArtist(null)}
-              />
-            ) : (
-              <Roster artists={artists} onOpen={setOpenArtist} />
-            ))}
-          {view === 'todos' && <AllTodos cfg={cfg} token={token} artists={artists} />}
-          {view === 'review' && (
-            <>
-              <h1 className="font-title text-3xl">Review queue</h1>
-              <ReviewQueue cfg={cfg} token={token} artists={artists} />
-            </>
+    <>
+      <PageHeader eyebrow="Artist workspaces" title="Artists & applications" />
+      <div className="flex flex-wrap items-start gap-5">
+        <Card
+          className="flex-[2_1_520px] pb-0"
+          title="Roster"
+          action={<span className="src">{artists.length} artists</span>}
+        >
+          {artists.length === 0 ? (
+            <p className="src pb-5">No artists yet.</p>
+          ) : (
+            <DataTable>
+              <thead>
+                <tr>
+                  <th scope="col">Artist</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Joined</th>
+                  <th scope="col" />
+                </tr>
+              </thead>
+              <tbody>
+                {artists.map((a) => (
+                  <tr key={a.artistId}>
+                    <td>
+                      <span className="flex items-center gap-3">
+                        <Avatar name={a.displayName} size={32} />
+                        <b>{a.displayName}</b>
+                      </span>
+                    </td>
+                    <td>
+                      <Tag tone={a.status === 'active' ? 'n' : 's'}>{a.status || 'Invited'}</Tag>
+                    </td>
+                    <td>{shortDate(a.createdAt)}</td>
+                    <td className="text-right">
+                      <Button size="sm" variant="ghost" onClick={() => onOpen(a.artistId)}>
+                        Open workspace
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </DataTable>
           )}
-          {view === 'submit' && me.artistId && (
-            <>
-              <h1 className="font-title text-3xl">Submit for review</h1>
-              <ArtistSubmissions cfg={cfg} token={token} artistId={me.artistId} isBmg={false} />
-            </>
-          )}
-          {view === 'library' && (
-            <>
-              <h1 className="font-title text-3xl">Document library</h1>
-              <Library cfg={cfg} token={token} isBmg artists={artists} />
-            </>
-          )}
-          {view === 'my-library' && me.artistId && (
-            <>
-              <h1 className="font-title text-3xl">Library</h1>
-              <ArtistFiles cfg={cfg} token={token} artistId={me.artistId} isBmg={false} />
-              <h2 className="pt-4 font-title text-2xl">Shared by Blueprint</h2>
-              <Library cfg={cfg} token={token} isBmg={false} artists={[]} />
-            </>
-          )}
-          {view === 'plan' && me.artistId && (
-            <>
-              <h1 className="font-title text-3xl">My plan</h1>
-              <PlanTab cfg={cfg} token={token} artistId={me.artistId} canEdit={false} />
-            </>
-          )}
-          {view === 'my-todos' && me.artistId && (
-            <>
-              <h1 className="font-title text-3xl">To-do</h1>
-              <ArtistTodos cfg={cfg} token={token} artistId={me.artistId} isBmg={false} />
-            </>
-          )}
-          {view === 'overview' && (
-            <>
-              <h1 className="font-title text-3xl">
-                {me.role === 'artist' ? 'Your workspace' : 'Studio HQ'}
-              </h1>
-              <Card title="You're signed in">
-                <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[160px_1fr]">
-                  <dt className="text-muted-foreground">Role</dt>
-                  <dd>{ROLE_LABEL[me.role]}</dd>
-                  {me.artistId && (
-                    <>
-                      <dt className="text-muted-foreground">Artist id</dt>
-                      <dd className="font-mono text-xs">{me.artistId}</dd>
-                    </>
-                  )}
-                  <dt className="text-muted-foreground">Two-step verification</dt>
-                  <dd>
-                    {me.mfaLevel === 'cognito'
-                      ? 'Cognito (passkey or authenticator)'
-                      : 'App step-up (social sign-in)'}
-                  </dd>
-                  <dt className="text-muted-foreground">AI assistance</dt>
-                  <dd>{me.consent?.aiOptIn ? 'On' : 'Off'}</dd>
-                </dl>
-              </Card>
-              {me.role === 'bmg-admin' && (
-                <InviteArtist
-                  cfg={cfg}
-                  token={token}
-                  onReauth={onReauth}
-                  onInvited={() => void loadArtists()}
-                />
-              )}
-            </>
-          )}
-        </main>
+        </Card>
+        {me.role === 'bmg-admin' && (
+          <div className="flex-[1_1_320px]">
+            <InviteArtist cfg={cfg} token={token} onReauth={onReauth} onInvited={onInvited} />
+          </div>
+        )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -231,13 +537,10 @@ function InviteArtist({
     setBusy(true);
     setResult(null);
     try {
-      const res = await api<{ artistId: string }>(cfg, token, 'POST', '/artists', {
-        email,
-        displayName,
-      });
+      await api<{ artistId: string }>(cfg, token, 'POST', '/artists', { email, displayName });
       setResult({
         tone: 'success',
-        text: `Invited ${displayName} (${res.artistId}). Their key is being created.`,
+        text: `Invited ${displayName}. Their login and private key are being created.`,
       });
       setEmail('');
       setDisplayName('');
@@ -257,7 +560,7 @@ function InviteArtist({
   return (
     <Card title="Invite an artist">
       <form
-        className="grid gap-4 sm:grid-cols-2"
+        className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
           void invite();
@@ -277,7 +580,7 @@ function InviteArtist({
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-        <div className="flex items-center gap-3 sm:col-span-2">
+        <div className="flex items-center gap-3">
           <Button type="submit" variant="cta" disabled={busy}>
             Send invite
           </Button>
@@ -287,87 +590,214 @@ function InviteArtist({
             </Button>
           )}
         </div>
+        <span className="src">
+          This creates their login. They choose a passkey or password on first sign-in.
+        </span>
       </form>
-      {result && (
-        <div className="mt-4">
-          <Notice tone={result.tone}>{result.text}</Notice>
-        </div>
-      )}
+      {result && <Notice tone={result.tone}>{result.text}</Notice>}
     </Card>
   );
 }
 
-function Roster({
-  artists,
-  onOpen,
-}: {
-  artists: ArtistSummary[];
-  onOpen: (a: ArtistSummary) => void;
-}) {
+// ═════════════════════════════ Artist phone app ═════════════════════════════
+
+type ArtistView = 'home' | 'todo' | 'library' | 'submit' | 'plan';
+
+function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
+  useTheme();
+  const [view, setView] = useState<ArtistView>('home');
+  const artistId = me.artistId!;
+  const first = userName.split(' ')[0];
+  const tabs = [
+    { id: 'home', label: 'Home', icon: 'home' as const },
+    { id: 'chat', label: 'Chat', icon: 'chat' as const, soon: true },
+    { id: 'todo', label: 'To-do', icon: 'todo' as const },
+    { id: 'gigs', label: 'Gigs', icon: 'mic' as const, soon: true },
+    { id: 'library', label: 'Library', icon: 'folder' as const },
+  ];
+  const headers: Record<ArtistView, { eyebrow: string; title: string }> = {
+    home: { eyebrow: 'Blueprint', title: `Hi ${first}` },
+    todo: { eyebrow: 'To-do', title: 'This week' },
+    library: { eyebrow: 'Library & assets', title: 'Your files' },
+    submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
+    plan: { eyebrow: 'My plan', title: 'Your plan' },
+  };
+  const back = view === 'submit' || view === 'plan';
+
   return (
-    <Card title="Artists">
-      {artists.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No artists yet. Invite one from Overview.</p>
-      ) : (
-        <ul className="divide-y divide-border">
-          {artists.map((a) => (
-            <li key={a.artistId}>
+    <ArtistShell
+      tabs={tabs}
+      current={back ? 'home' : view}
+      onNavigate={(id) => setView(id as ArtistView)}
+      header={
+        <PhoneHeader
+          eyebrow={headers[view].eyebrow}
+          title={headers[view].title}
+          right={
+            back ? (
               <button
-                className="flex w-full items-center justify-between py-3 text-left hover:opacity-80"
-                onClick={() => onOpen(a)}
+                type="button"
+                className="text-sm font-bold text-[#D3D8DE]"
+                onClick={() => setView('home')}
               >
-                <span className="font-semibold">{a.displayName}</span>
-                <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold">
-                  {a.status}
-                </span>
+                ← Home
               </button>
-            </li>
-          ))}
-        </ul>
+            ) : (
+              <button
+                type="button"
+                className="text-sm font-bold text-[#D3D8DE] hover:text-white"
+                onClick={onSignOut}
+              >
+                Sign out
+              </button>
+            )
+          }
+        />
+      }
+    >
+      {view === 'home' && <ArtistHome cfg={cfg} token={token} me={me} onNavigate={setView} />}
+      {view === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artistId} isBmg={false} />}
+      {view === 'library' && (
+        <>
+          <ArtistFiles cfg={cfg} token={token} artistId={artistId} isBmg={false} />
+          <div className="eyebrow pt-2 text-muted-foreground">Shared by Blueprint</div>
+          <Library cfg={cfg} token={token} isBmg={false} artists={[]} />
+        </>
       )}
-    </Card>
+      {view === 'submit' && (
+        <ArtistSubmissions cfg={cfg} token={token} artistId={artistId} isBmg={false} />
+      )}
+      {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
+    </ArtistShell>
   );
 }
 
-const TABS = ['Plan', 'To-do', 'Submissions', 'Library'] as const;
-
-/** Artist workspace (BMG view): header plus tabs. Chat, gigs and stats arrive in later PRs. */
-function ArtistWorkspace({
+function ArtistHome({
   cfg,
   token,
-  artist,
-  onBack,
+  me,
+  onNavigate,
 }: {
   cfg: AppConfig;
   token: string;
-  artist: ArtistSummary;
-  onBack: () => void;
+  me: Me;
+  onNavigate: (v: ArtistView) => void;
 }) {
-  const [tab, setTab] = useState<(typeof TABS)[number]>('Plan');
+  const artistId = me.artistId!;
+  const [plan, setPlan] = useState<PlanResponse | null>(null);
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [shared, setShared] = useState<FileItem[]>([]);
+  const [subs, setSubs] = useState<SubmissionSummary[]>([]);
+  useEffect(() => {
+    api<PlanResponse>(cfg, token, 'GET', `/artists/${artistId}/plan`)
+      .then(setPlan)
+      .catch(() => setPlan(null));
+    api<{ todos: Todo[] }>(cfg, token, 'GET', `/artists/${artistId}/todos`)
+      .then((r) => setTodos(r.todos))
+      .catch(() => setTodos([]));
+    api<{ files: FileItem[] }>(cfg, token, 'GET', '/library/files')
+      .then((r) => setShared(r.files))
+      .catch(() => setShared([]));
+    api<{ submissions: SubmissionSummary[] }>(cfg, token, 'GET', `/artists/${artistId}/submissions`)
+      .then((r) => setSubs(r.submissions))
+      .catch(() => setSubs([]));
+  }, [cfg, token, artistId]);
+  const changed = subs.filter((s) => s.status === 'open' && s.changedByBmgAt);
+  const reviewed = subs.filter((s) => s.status === 'reviewed').slice(0, 2);
+
   return (
-    <div className="space-y-4">
-      <button className="text-sm text-muted-foreground hover:underline" onClick={onBack}>
-        ← All artists
-      </button>
-      <h1 className="font-title text-3xl">{artist.displayName}</h1>
-      <div className="flex gap-1 border-b border-border" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold ${tab === t ? 'border-accent' : 'border-transparent text-muted-foreground'}`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      {tab === 'Plan' && <PlanTab cfg={cfg} token={token} artistId={artist.artistId} canEdit />}
-      {tab === 'To-do' && <ArtistTodos cfg={cfg} token={token} artistId={artist.artistId} isBmg />}
-      {tab === 'Library' && (
-        <ArtistFiles cfg={cfg} token={token} artistId={artist.artistId} isBmg />
+    <>
+      {changed.map((s) => (
+        <Notice key={s.submissionId}>Blueprint changed the priority or date of “{s.title}”.</Notice>
+      ))}
+      {plan?.exists && (
+        <section className="card gap-2.5">
+          <div className="flex items-center gap-2">
+            <span className="eyebrow">My plan</span>
+            <button
+              type="button"
+              className="ml-auto text-sm font-bold underline"
+              onClick={() => onNavigate('plan')}
+            >
+              Open
+            </button>
+          </div>
+          {plan.plan.outcome && <b className="text-[15px] leading-snug">{plan.plan.outcome}</b>}
+          {phaseProgress(plan.plan)
+            .filter((p) => p.status === 'now')
+            .slice(0, 2)
+            .map((p) => (
+              <div key={p.id} className="flex flex-col gap-1.5">
+                <span className="flex text-sm">
+                  <span className="flex-1">{p.name}</span>
+                  <b>{p.pct}%</b>
+                </span>
+                <Bar pct={p.pct} color="#D9534F" />
+              </div>
+            ))}
+        </section>
       )}
-    </div>
+      <section className="card gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="eyebrow">To-do</span>
+          <button
+            type="button"
+            className="ml-auto text-sm font-bold underline"
+            onClick={() => onNavigate('todo')}
+          >
+            All
+          </button>
+        </div>
+        {todos.length === 0 && <p className="src">You're all caught up.</p>}
+        {todos.slice(0, 3).map((t) => (
+          <div key={t.todoId} className="flex items-center gap-3 text-[15px]">
+            <span className="flex-1">{t.title}</span>
+            {t.due && <Tag tone="s">{shortDate(t.due)}</Tag>}
+          </div>
+        ))}
+      </section>
+      {reviewed.length > 0 && (
+        <section className="card gap-2.5">
+          <span className="eyebrow">Feedback</span>
+          {reviewed.map((s) => (
+            <button
+              key={s.submissionId}
+              type="button"
+              className="flex items-center gap-3 text-left text-[15px]"
+              onClick={() => onNavigate('submit')}
+            >
+              <Tag tone="n">Reviewed</Tag>
+              <span className="flex-1">{s.title}</span>
+            </button>
+          ))}
+        </section>
+      )}
+      <section className="card gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="eyebrow">Shared with me</span>
+          <button
+            type="button"
+            className="ml-auto text-sm font-bold underline"
+            onClick={() => onNavigate('library')}
+          >
+            Library
+          </button>
+        </div>
+        {shared.length === 0 && <p className="src">Nothing shared yet.</p>}
+        {shared.slice(0, 3).map((f) => (
+          <div key={f.fileId} className="flex items-center gap-3 text-[15px]">
+            <Tag tone="s">{(f.name.split('.').pop() ?? 'File').slice(0, 4).toUpperCase()}</Tag>
+            <span className="truncate">{f.name}</span>
+          </div>
+        ))}
+      </section>
+      <Button
+        variant="cta"
+        className="min-h-[50px] w-full tracking-[.04em]"
+        onClick={() => onNavigate('submit')}
+      >
+        Upload music or lyrics for review
+      </Button>
+    </>
   );
 }

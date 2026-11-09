@@ -10,29 +10,32 @@ import {
 } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { download, type FileItem } from '../lib/files.ts';
-import { Button, Card, Field, Notice } from '../components/ui.tsx';
+import {
+  Avatar,
+  Button,
+  Card,
+  Chips,
+  DataTable,
+  Field,
+  Notice,
+  shortDate,
+  Tag,
+} from '../components/ui.tsx';
 
 const PRIORITY_LABEL: Record<Priority, string> = { high: 'High', medium: 'Medium', low: 'Low' };
-const PRIORITY_STYLE: Record<Priority, string> = {
-  high: 'bg-cta text-white',
-  medium: 'bg-secondary',
-  low: 'bg-white border border-border text-muted-foreground',
+/** Canvas badge colours: High deep coral, Medium coral tint, Low slate. */
+export const PRIORITY_TAG: Record<Priority, readonly ['k' | 'c' | 's', string]> = {
+  high: ['k', 'High'],
+  medium: ['c', 'Medium'],
+  low: ['s', 'Low'],
 };
 const TYPE_LABEL = Object.fromEntries(SUBMISSION_TYPES.map((t) => [t.id, t.label]));
 
-const date = (iso: string) =>
-  new Date(iso.length === 10 ? `${iso}T00:00:00` : iso).toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-  });
+const date = shortDate;
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
 function PriorityBadge({ p }: { p: Priority }) {
-  return (
-    <span className={`rounded px-2 py-0.5 text-xs font-semibold ${PRIORITY_STYLE[p]}`}>
-      {PRIORITY_LABEL[p]}
-    </span>
-  );
+  return <Tag tone={PRIORITY_TAG[p][0]}>{PRIORITY_TAG[p][1]}</Tag>;
 }
 
 function SelectField({
@@ -50,9 +53,9 @@ function SelectField({
 }) {
   return (
     <label className="block space-y-1.5">
-      <span className="text-sm font-semibold">{label}</span>
+      <span className="text-[15px] font-bold">{label}</span>
       <select
-        className="h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
+        className="min-h-11 w-full rounded-lg border border-input bg-white px-3 text-base shadow-xs"
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
@@ -176,9 +179,9 @@ function SubmitForm({
         />
       </div>
       <label className="mt-4 block space-y-1.5">
-        <span className="text-sm font-semibold">Note</span>
+        <span className="text-[15px] font-bold">Note</span>
         <textarea
-          className="min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm"
+          className="min-h-24 w-full rounded-lg border border-input bg-white p-3 text-base shadow-xs"
           value={note}
           maxLength={4000}
           onChange={(e) => setNote(e.target.value)}
@@ -232,45 +235,57 @@ function SubmissionTable({
   onOpen: (s: SubmissionSummary) => void;
   empty: string;
 }) {
-  if (!subs) return <p className="text-sm text-muted-foreground">Loading…</p>;
-  if (subs.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>;
+  if (!subs) return <p className="src">Loading…</p>;
+  if (subs.length === 0) return <p className="src pb-5">{empty}</p>;
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-white">
-      <table className="w-full text-sm">
-        <thead className="bg-secondary text-left text-xs uppercase tracking-wide text-muted-foreground">
+    <>
+      <DataTable>
+        <thead>
           <tr>
-            <th className="px-4 py-2">Priority</th>
-            <th className="px-4 py-2">Needed by</th>
-            {names && <th className="px-4 py-2">Artist</th>}
-            <th className="px-4 py-2">Title</th>
-            <th className="px-4 py-2">Type</th>
-            <th className="px-4 py-2">Status</th>
+            <th scope="col">Upload</th>
+            {names && <th scope="col">Artist</th>}
+            <th scope="col">Priority</th>
+            <th scope="col">Needed by</th>
+            <th scope="col">Status</th>
           </tr>
         </thead>
         <tbody>
           {subs.map((s) => (
-            <tr
-              key={s.submissionId}
-              className="cursor-pointer border-t border-border hover:bg-secondary/50"
-              onClick={() => onOpen(s)}
-            >
-              <td className="px-4 py-2">
+            <tr key={s.submissionId} className="cursor-pointer" onClick={() => onOpen(s)}>
+              <td>
+                <button type="button" className="text-left">
+                  <b className="block">{s.title}</b>
+                  <span className="src">
+                    {TYPE_LABEL[s.type]}
+                    {s.fileIds.length
+                      ? ` · ${s.fileIds.length} file${s.fileIds.length === 1 ? '' : 's'}`
+                      : ''}
+                  </span>
+                </button>
+              </td>
+              {names && (
+                <td>
+                  <span className="flex items-center gap-2">
+                    <Avatar name={names[s.artistId] ?? 'Artist'} size={28} />
+                    {names[s.artistId] ?? 'Artist'}
+                  </span>
+                </td>
+              )}
+              <td>
                 <PriorityBadge p={s.priority} />
               </td>
-              <td className="px-4 py-2">{date(s.neededBy)}</td>
-              {names && <td className="px-4 py-2">{names[s.artistId] ?? 'Artist'}</td>}
-              <td className="px-4 py-2 font-medium">
-                <button className="text-left hover:underline">{s.title}</button>
-              </td>
-              <td className="px-4 py-2 text-muted-foreground">{TYPE_LABEL[s.type]}</td>
-              <td className="px-4 py-2 text-muted-foreground">
+              <td>{date(s.neededBy)}</td>
+              <td className="src">
                 {s.status === 'open' ? 'Waiting for review' : `Reviewed ${date(s.reviewedAt!)}`}
               </td>
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+      </DataTable>
+      <div className="flex items-center py-3 text-[15px]">
+        <b>{subs.length}</b>&nbsp;<span className="text-muted-foreground">submissions</span>
+      </div>
+    </>
   );
 }
 
@@ -440,7 +455,7 @@ function FeedbackForm({
   return (
     <Card title="Provide feedback">
       <textarea
-        className="min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm"
+        className="min-h-24 w-full rounded-lg border border-input bg-white p-3 text-base shadow-xs"
         placeholder="Overall feedback for the artist"
         value={comment}
         maxLength={4000}
@@ -538,17 +553,46 @@ export function ArtistSubmissions({
       />
     );
   }
+  if (isBmg) {
+    return (
+      <Card
+        className="pb-0"
+        title="Submissions"
+        action={<span className="src">Priority, then date needed</span>}
+      >
+        {error && <Notice tone="error">{error}</Notice>}
+        <SubmissionTable
+          subs={subs}
+          onOpen={(s) => setOpenId(s.submissionId)}
+          empty="Nothing submitted yet."
+        />
+      </Card>
+    );
+  }
+  // Artist phone: the form first, then their submissions as cards.
   return (
-    <div className="space-y-4">
-      {!isBmg && (
-        <SubmitForm cfg={cfg} token={token} artistId={artistId} onSubmitted={() => void load()} />
-      )}
+    <div className="flex flex-col gap-3">
+      <SubmitForm cfg={cfg} token={token} artistId={artistId} onSubmitted={() => void load()} />
       {error && <Notice tone="error">{error}</Notice>}
-      <SubmissionTable
-        subs={subs}
-        onOpen={(s) => setOpenId(s.submissionId)}
-        empty={isBmg ? 'Nothing submitted yet.' : 'You haven’t submitted anything yet.'}
-      />
+      <div className="eyebrow pt-2 text-muted-foreground">My submissions</div>
+      {subs?.length === 0 && <p className="src">You haven’t submitted anything yet.</p>}
+      {subs?.map((s) => (
+        <button
+          key={s.submissionId}
+          type="button"
+          onClick={() => setOpenId(s.submissionId)}
+          className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 text-left shadow-xs"
+        >
+          <span className="min-w-0 flex-1">
+            <b className="block">{s.title}</b>
+            <span className="src">
+              {TYPE_LABEL[s.type]} ·{' '}
+              {s.status === 'open' ? `needed by ${date(s.neededBy)}` : 'Feedback ready'}
+            </span>
+          </span>
+          {s.status === 'open' ? <PriorityBadge p={s.priority} /> : <Tag tone="n">Reviewed</Tag>}
+        </button>
+      ))}
     </div>
   );
 }
@@ -558,10 +602,13 @@ export function ReviewQueue({
   cfg,
   token,
   artists,
+  onChanged,
 }: {
   cfg: AppConfig;
   token: string;
   artists: ArtistSummary[];
+  /** Lets the shell refresh its queue badge. */
+  onChanged?: () => void;
 }) {
   const [status, setStatus] = useState<'open' | 'reviewed'>('open');
   const [subs, setSubs] = useState<SubmissionSummary[] | null>(null);
@@ -595,28 +642,31 @@ export function ReviewQueue({
         submissionId={opened.submissionId}
         isBmg
         onBack={() => setOpened(null)}
-        onChanged={() => void load()}
+        onChanged={() => {
+          void load();
+          onChanged?.();
+        }}
       />
     );
   }
   return (
-    <div className="space-y-4">
-      <div className="flex gap-1 border-b border-border" role="tablist">
-        {(['open', 'reviewed'] as const).map((s) => (
-          <button
-            key={s}
-            role="tab"
-            aria-selected={status === s}
-            onClick={() => {
-              setSubs(null);
-              setStatus(s);
-            }}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold ${status === s ? 'border-accent' : 'border-transparent text-muted-foreground'}`}
-          >
-            {s === 'open' ? 'Waiting for review' : 'Reviewed'}
-          </button>
-        ))}
-      </div>
+    <Card
+      className="pb-0"
+      title={
+        <Chips
+          label="Show"
+          value={status}
+          onChange={(v) => {
+            setSubs(null);
+            setStatus(v);
+          }}
+          options={[
+            { id: 'open', label: 'Waiting for review' },
+            { id: 'reviewed', label: 'Reviewed' },
+          ]}
+        />
+      }
+    >
       {error && <Notice tone="error">{error}</Notice>}
       <SubmissionTable
         subs={subs}
@@ -624,6 +674,6 @@ export function ReviewQueue({
         onOpen={setOpened}
         empty={status === 'open' ? 'Nothing waiting for review.' : 'Nothing reviewed yet.'}
       />
-    </div>
+    </Card>
   );
 }

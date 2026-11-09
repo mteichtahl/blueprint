@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type MeasureId, type Plan, type PlanResponse } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { Button, Card, Field, Notice } from '../components/ui.tsx';
+import { phaseProgress } from '../lib/plan.ts';
+import { Bar, Button, Card, Field, Notice, Tag } from '../components/ui.tsx';
 
 const MEASURES: MeasureId[] = ['M1', 'M2', 'M3', 'M4'];
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -65,7 +66,7 @@ export function PlanTab({
   const edit = (fn: (p: Plan) => Plan) => setDraft(fn(structuredClone(plan)));
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {!data.exists && !editing && (
         <Notice>
           {canEdit
@@ -74,12 +75,22 @@ export function PlanTab({
         </Notice>
       )}
       {data.gaps.length > 0 && !editing && (data.exists || canEdit) && (
-        <Notice>
-          <strong>Alignment check:</strong> {data.gaps.join(' ')}
-        </Notice>
+        <section className="card gap-2 border-[#E8A9A6]">
+          <div className="card-hd">
+            <span className="eyebrow">Alignment check</span>
+            <Tag tone="c">
+              {data.gaps.length} gap{data.gaps.length === 1 ? '' : 's'}
+            </Tag>
+          </div>
+          <ul className="m-0 flex flex-col gap-1 pl-[18px] text-[15px]">
+            {data.gaps.map((g) => (
+              <li key={g}>{g}</li>
+            ))}
+          </ul>
+        </section>
       )}
 
-      <Card title="Outcome">
+      <Card title={<span className="eyebrow">Outcome and success measures</span>}>
         {editing ? (
           <Field
             label="What this plan delivers"
@@ -88,15 +99,14 @@ export function PlanTab({
             onChange={(e) => edit((p) => ({ ...p, outcome: e.target.value }))}
           />
         ) : (
-          <p className="text-sm">
-            {plan.outcome || <span className="text-muted-foreground">Not set</span>}
-          </p>
+          <h2 className="t m-0 text-[22px] leading-snug">
+            {plan.outcome || <span className="font-normal text-muted-foreground">Not set</span>}
+          </h2>
         )}
-        <h3 className="mt-5 mb-2 text-sm font-semibold">Success measures</h3>
-        <ul className="grid gap-2 sm:grid-cols-2">
+        <ul className="m-0 grid list-none gap-2 p-0 sm:grid-cols-2 lg:grid-cols-4">
           {plan.measures.map((m, i) => (
-            <li key={m.id} className="rounded-[10px] bg-background px-3 py-2 text-sm">
-              <span className="mr-2 font-semibold">{m.id}</span>
+            <li key={m.id} className="tile text-[15px]">
+              <span className="t text-lg">{m.id}</span>
               {editing ? (
                 <input
                   className="w-[80%] bg-transparent outline-none"
@@ -113,110 +123,129 @@ export function PlanTab({
         </ul>
       </Card>
 
-      {plan.phases.map((phase, pi) => (
-        <Card key={phase.id}>
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <h3 className="font-title text-lg">
-              {pi + 1}. {phase.name}
-            </h3>
-            <span className="text-xs text-muted-foreground">
-              {phase.milestones.filter((m) => m.done).length}/{phase.milestones.length} done
-            </span>
-          </div>
-          {editing ? (
-            <Field
-              label="Goal"
-              value={phase.goal}
-              maxLength={500}
-              onChange={(e) => edit((p) => ((p.phases[pi]!.goal = e.target.value), p))}
-            />
-          ) : (
-            phase.goal && <p className="mb-3 text-sm text-muted-foreground">{phase.goal}</p>
-          )}
-          <ul className="mt-3 space-y-2">
-            {phase.milestones.map((m, mi) => (
-              <li key={m.id} className="flex items-center gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-4"
-                  checked={m.done}
-                  disabled={!canEdit}
-                  aria-label={`Milestone "${m.title}" done`}
-                  onChange={() => {
-                    const next = structuredClone(plan);
-                    next.phases[pi]!.milestones[mi]!.done = !m.done;
-                    if (editing) setDraft(next);
-                    else void save(next);
-                  }}
-                />
-                <span className={m.done ? 'text-muted-foreground line-through' : ''}>
-                  {m.title}
-                </span>
-                <span className="ml-auto flex gap-1">
-                  {MEASURES.map((id) =>
-                    editing ? (
-                      <button
-                        key={id}
-                        type="button"
-                        aria-pressed={m.measures.includes(id)}
-                        className={`rounded-md px-1.5 text-xs ${m.measures.includes(id) ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}
-                        onClick={() =>
-                          edit((p) => {
-                            const ms = p.phases[pi]!.milestones[mi]!.measures;
-                            p.phases[pi]!.milestones[mi]!.measures = ms.includes(id)
-                              ? ms.filter((x) => x !== id)
-                              : [...ms, id];
-                            return p;
-                          })
-                        }
-                      >
-                        {id}
-                      </button>
-                    ) : (
-                      m.measures.includes(id) && (
-                        <span
-                          key={id}
-                          className="rounded-md bg-secondary px-1.5 text-xs font-semibold"
-                        >
-                          {id}
-                        </span>
-                      )
-                    ),
-                  )}
-                  {editing && (
-                    <button
-                      type="button"
-                      className="ml-2 text-xs text-destructive"
-                      onClick={() => edit((p) => (p.phases[pi]!.milestones.splice(mi, 1), p))}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {editing && (
-            <AddMilestone
-              onAdd={(title) =>
-                edit(
-                  (p) => (
-                    p.phases[pi]!.milestones.push({ id: uid(), title, done: false, measures: [] }),
-                    p
-                  ),
-                )
+      {plan.phases.map((phase, pi) => {
+        const prog = phaseProgress(plan)[pi]!;
+        return (
+          <Card key={phase.id}>
+            <div className="flex items-center gap-3">
+              <h3 className="t m-0 flex-1 text-xl">
+                {pi + 1}. {phase.name}
+              </h3>
+              <Tag tone={prog.status === 'done' ? 'n' : prog.status === 'now' ? 'c' : 's'}>
+                {prog.status === 'done' ? 'Done' : prog.status === 'now' ? 'Now' : 'Next'}
+              </Tag>
+              <span className="src">
+                {prog.done}/{prog.total} done
+              </span>
+            </div>
+            <Bar
+              pct={prog.pct}
+              color={
+                prog.status === 'done' ? '#011935' : prog.status === 'now' ? '#D9534F' : '#5C6775'
               }
             />
-          )}
-        </Card>
-      ))}
+            {editing ? (
+              <Field
+                label="Goal"
+                value={phase.goal}
+                maxLength={500}
+                onChange={(e) => edit((p) => ((p.phases[pi]!.goal = e.target.value), p))}
+              />
+            ) : (
+              phase.goal && (
+                <p className="m-0 text-[15px]">
+                  <span className="eyebrow mr-2 text-muted-foreground">Goal</span>
+                  {phase.goal}
+                </p>
+              )
+            )}
+            <ul className="m-0 flex list-none flex-col p-0">
+              {phase.milestones.map((m, mi) => (
+                <li key={m.id} className="li text-[15px]">
+                  <input
+                    type="checkbox"
+                    className="chk"
+                    checked={m.done}
+                    disabled={!canEdit}
+                    aria-label={`Milestone "${m.title}" done`}
+                    onChange={() => {
+                      const next = structuredClone(plan);
+                      next.phases[pi]!.milestones[mi]!.done = !m.done;
+                      if (editing) setDraft(next);
+                      else void save(next);
+                    }}
+                  />
+                  <span className={m.done ? 'text-muted-foreground line-through' : ''}>
+                    {m.title}
+                  </span>
+                  <span className="ml-auto flex gap-1">
+                    {MEASURES.map((id) =>
+                      editing ? (
+                        <button
+                          key={id}
+                          type="button"
+                          aria-pressed={m.measures.includes(id)}
+                          className={`tag ${m.measures.includes(id) ? 'tn' : 'ts'}`}
+                          onClick={() =>
+                            edit((p) => {
+                              const ms = p.phases[pi]!.milestones[mi]!.measures;
+                              p.phases[pi]!.milestones[mi]!.measures = ms.includes(id)
+                                ? ms.filter((x) => x !== id)
+                                : [...ms, id];
+                              return p;
+                            })
+                          }
+                        >
+                          {id}
+                        </button>
+                      ) : (
+                        m.measures.includes(id) && (
+                          <span key={id} className="tag ts">
+                            {id}
+                          </span>
+                        )
+                      ),
+                    )}
+                    {editing && (
+                      <button
+                        type="button"
+                        className="ml-2 text-xs text-destructive"
+                        onClick={() => edit((p) => (p.phases[pi]!.milestones.splice(mi, 1), p))}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {editing && (
+              <AddMilestone
+                onAdd={(title) =>
+                  edit(
+                    (p) => (
+                      p.phases[pi]!.milestones.push({
+                        id: uid(),
+                        title,
+                        done: false,
+                        measures: [],
+                      }),
+                      p
+                    ),
+                  )
+                }
+              />
+            )}
+          </Card>
+        );
+      })}
 
       {canEdit && (
         <div className="flex flex-wrap items-center gap-3">
           {editing ? (
             <>
               <select
-                className="h-10 rounded-md border border-input bg-white px-2 text-sm"
+                className="dd"
                 defaultValue=""
                 aria-label="Add a phase"
                 onChange={(e) => {
@@ -263,7 +292,7 @@ function AddMilestone({ onAdd }: { onAdd: (title: string) => void }) {
       }}
     >
       <input
-        className="h-9 flex-1 rounded-md border border-input bg-white px-3 text-sm shadow-xs"
+        className="min-h-[38px] flex-1 rounded-lg border border-input bg-white px-3 text-base shadow-xs"
         placeholder="New milestone"
         value={title}
         maxLength={200}
