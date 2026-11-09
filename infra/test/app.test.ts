@@ -491,6 +491,28 @@ describe('environment API', () => {
     }
   });
 
+  it('lets Scheduler assume the reminder role from the reminder schedule group', () => {
+    // AWS checks the trust policy at CreateSchedule with the schedule-group ARN;
+    // a schedule-only SourceArn made every new reminder fail.
+    staging!.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'bmg-staging-reminder-scheduler',
+      AssumeRolePolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Principal: { Service: 'scheduler.amazonaws.com' },
+            Condition: Match.objectLike({
+              ArnLike: {
+                'aws:SourceArn': Match.arrayWith([
+                  Match.stringLikeRegexp(':schedule-group/bmg-staging-reminders$'),
+                ]),
+              },
+            }),
+          }),
+        ]),
+      },
+    });
+  });
+
   it('owns the account-level API Gateway logging role in staging only', () => {
     staging!.resourceCountIs('AWS::ApiGateway::Account', 1);
     prod!.resourceCountIs('AWS::ApiGateway::Account', 0);

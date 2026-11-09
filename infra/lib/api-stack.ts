@@ -146,8 +146,17 @@ export class ApiStack extends BmgStack {
       assumedBy: new ServicePrincipal('scheduler.amazonaws.com', {
         conditions: {
           StringEquals: { 'aws:SourceAccount': this.account },
+          // Scheduler checks the trust policy when a schedule is created, and AWS
+          // says aws:SourceArn must be the schedule *group* ARN. Scoping it to the
+          // schedules themselves made CreateSchedule fail ("The execution role you
+          // provide must allow AWS EventBridge Scheduler to assume the role"),
+          // which surfaced as an internal error when adding a to-do reminder.
+          // Both forms are listed so creation and delivery each match.
           ArnLike: {
-            'aws:SourceArn': `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/*`,
+            'aws:SourceArn': [
+              `arn:aws:scheduler:${this.region}:${this.account}:schedule-group/${p}-reminders`,
+              `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/*`,
+            ],
           },
         },
       }),
