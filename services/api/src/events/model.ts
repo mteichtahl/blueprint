@@ -20,7 +20,17 @@ export const GIG_STATUSES = [
   'played',
   'cancelled',
 ] as const;
-export const GIG_DEALS = ['free', 'fee', 'door-split', 'ticketed', 'other'] as const;
+/**
+ * The deal on a gig. `tbc` is "not set yet" (the default); `other` comes with
+ * the user's own description in `dealNote` (rev 7).
+ */
+export const GIG_DEALS = ['tbc', 'free', 'fee', 'door-split', 'ticketed', 'other'] as const;
+export type GigDeal = (typeof GIG_DEALS)[number];
+
+/** The deal note only belongs to "Other": it's kept for Other and dropped for the rest. */
+export function dealNoteFor(deal: GigDeal, note: string | undefined): string | undefined {
+  return deal === 'other' && note?.trim() ? note.trim() : undefined;
+}
 /** What an artist can ask Blueprint to help with on a gig (Plan a gig). */
 export const HELP_TOPICS = ['pitch', 'budget', 'promo', 'setlist'] as const;
 
@@ -116,8 +126,9 @@ export const GigCreate = z.object({
   venue: Text(160).optional(),
   notes: Text(2000).optional(),
   status: z.enum(GIG_STATUSES).default('idea'),
-  deal: z.enum(GIG_DEALS).default('other'),
-  dealNote: Text(200).optional(),
+  deal: z.enum(GIG_DEALS).default('tbc'),
+  /** Free text describing an "Other" deal. */
+  dealNote: Text(300).optional(),
   ticketUrl: z
     .url({ protocol: /^https$/ })
     .max(500)
@@ -135,7 +146,7 @@ export const GigPatch = z
     notes: Text(2000).optional(),
     status: z.enum(GIG_STATUSES).optional(),
     deal: z.enum(GIG_DEALS).optional(),
-    dealNote: Text(200).optional(),
+    dealNote: Text(300).optional(),
     ticketUrl: z
       .url({ protocol: /^https$/ })
       .max(500)

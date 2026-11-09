@@ -3,6 +3,7 @@ import {
   byTime,
   checkTimes,
   crossesMidnight,
+  dealNoteFor,
   durationMinutes,
   EventBody,
   EventPatch,
@@ -176,5 +177,23 @@ describe('set duration (removed in rev 7)', () => {
       GigCreate.parse({ title: 'X', date: '2026-12-11', setLength: '45 min' }),
     ).not.toHaveProperty('setLength');
     expect(GigPatch.safeParse({ setLength: '45 min' }).success).toBe(false);
+  });
+});
+
+describe('deal: Other with free text', () => {
+  it('defaults to not set yet', () => {
+    expect(GigCreate.parse({ title: 'X', date: '2026-12-11' }).deal).toBe('tbc');
+  });
+
+  it('keeps the note only for Other', () => {
+    expect(dealNoteFor('other', '  70/30 after costs ')).toBe('70/30 after costs');
+    expect(dealNoteFor('other', '   ')).toBeUndefined();
+    expect(dealNoteFor('fee', 'stale note')).toBeUndefined();
+  });
+
+  it('accepts a longer description', () => {
+    const note = 'x'.repeat(300);
+    expect(GigPatch.parse({ deal: 'other', dealNote: note }).dealNote).toBe(note);
+    expect(GigPatch.safeParse({ dealNote: 'x'.repeat(301) }).success).toBe(false);
   });
 });
