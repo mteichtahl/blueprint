@@ -10,6 +10,7 @@ import {
   workspaceDigest,
 } from '../src/ai/model.ts';
 import { stepsFor } from '../src/handlers/ai-actions.ts';
+import { describeError } from '../src/handlers/ai-chat.ts';
 import type { Gig } from '../src/events/model.ts';
 import type { Todo } from '../src/workspace/model.ts';
 
@@ -152,5 +153,26 @@ describe('conversation ids', () => {
     expect(SessionId.safeParse(a).success).toBe(true);
     expect(a).toMatch(/^s[0-9a-f]{24}$/);
     expect(sessionId()).not.toBe(a);
+  });
+});
+
+describe('assistant error logs', () => {
+  it('add status and message for AWS errors only', () => {
+    const aws = Object.assign(
+      new Error('User is not authorized to perform: bedrock:ApplyGuardrail'),
+      {
+        name: 'AccessDeniedException',
+        $metadata: { httpStatusCode: 403 },
+      },
+    );
+    expect(describeError(aws)).toEqual({
+      error: 'AccessDeniedException',
+      status: 403,
+      detail: 'User is not authorized to perform: bedrock:ApplyGuardrail',
+    });
+    // Anything else could hold conversation text, so only its type is logged.
+    expect(describeError(new TypeError('the user said something private'))).toEqual({
+      error: 'TypeError',
+    });
   });
 });

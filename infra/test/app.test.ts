@@ -615,6 +615,16 @@ describe('environment assistant (AI stack)', () => {
     expect(runtime.Properties.AuthorizerConfiguration).toBeUndefined();
   });
 
+  it('lets the agent apply its guardrail in every Australian destination Region', () => {
+    const json = JSON.stringify(staging!.toJSON());
+    for (const region of ['ap-southeast-2', 'ap-southeast-4']) {
+      expect(json).toContain(`:bedrock:${region}:`);
+      expect(json).toMatch(
+        new RegExp(`bedrock:${region}:[^"]*:guardrail-profile/au\\.guardrail\\.v1:0`),
+      );
+    }
+  });
+
   it('gives AgentCore a .js entry point, marked as an ES module', () => {
     // NODE_22 rejects any other extension ("Entrypoint file type does not match").
     staging!.hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
