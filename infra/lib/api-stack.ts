@@ -87,6 +87,7 @@ export class ApiStack extends BmgStack {
     const stepUp = fn('StepUp', 'step-up', 'TOTP step-up for social sign-in', {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
     });
+    const workspace = fn('Workspace', 'workspace', 'artists, plans and to-dos');
     const artists = fn('Artists', 'artists', 'invite artists', {
       USER_POOL_ID: props.userPool.userPoolId,
       ONBOARDING_STATE_MACHINE_ARN: props.onboarding.stateMachineArn,
@@ -129,6 +130,25 @@ export class ApiStack extends BmgStack {
     putEvents(stepUp);
     allow(artists, 'Invites', ['dynamodb:GetItem', 'dynamodb:PutItem'], [main]);
     allow(
+      workspace,
+      'WorkspaceItems',
+      [
+        'dynamodb:GetItem',
+        'dynamodb:BatchGetItem',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:Query',
+      ],
+      [main],
+    );
+    // Roster (GSI1) and all-artist to-dos (GSI2) only; GSI3 isn't used yet.
+    allow(
+      workspace,
+      'WorkspaceIndexes',
+      ['dynamodb:Query'],
+      [`${main}/index/GSI1`, `${main}/index/GSI2`],
+    );
+    allow(
       artists,
       'StartOnboarding',
       ['states:StartExecution'],
@@ -141,8 +161,10 @@ export class ApiStack extends BmgStack {
       [props.userPool.userPoolArn],
     );
     putEvents(artists);
-    for (const f of [authorizerFn, me, consent, artists]) props.platformKey.grant(f, 'kms:Decrypt');
-    for (const f of [consent, stepUp, artists]) {
+    for (const f of [authorizerFn, me, consent, artists, workspace]) {
+      props.platformKey.grant(f, 'kms:Decrypt');
+    }
+    for (const f of [consent, stepUp, artists, workspace]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
     props.platformKey.grant(stepUp, 'kms:Decrypt');
@@ -185,7 +207,7 @@ export class ApiStack extends BmgStack {
       },
       defaultCorsPreflightOptions: {
         allowOrigins: prod ? [appOrigin] : [appOrigin, 'http://localhost:5173'],
-        allowMethods: ['GET', 'POST'],
+        allowMethods: ['GET', 'POST', 'PUT', 'PATCH'],
         allowHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
         maxAge: Duration.hours(1),
       },
@@ -216,7 +238,11 @@ export class ApiStack extends BmgStack {
       validateRequestBody: true,
       validateRequestParameters: true,
     });
-    const route = (method: 'GET' | 'POST', path: string, handler: BmgFunction) => {
+    const route = (
+      method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+      path: string,
+      handler: BmgFunction,
+    ) => {
       const resource = path
         .split('/')
         .filter(Boolean)
@@ -232,6 +258,14 @@ export class ApiStack extends BmgStack {
     route('POST', '/step-up/totp/setup', stepUp);
     route('POST', '/step-up/totp/verify', stepUp);
     route('POST', '/artists', artists);
+    route('GET', '/artists', workspace);
+    route('GET', '/artists/{artistId}', workspace);
+    route('GET', '/artists/{artistId}/plan', workspace);
+    route('PUT', '/artists/{artistId}/plan', workspace);
+    route('GET', '/artists/{artistId}/todos', workspace);
+    route('POST', '/artists/{artistId}/todos', workspace);
+    route('PATCH', '/artists/{artistId}/todos/{todoId}', workspace);
+    route('GET', '/todos', workspace);
 
     acknowledge(
       this.api,

@@ -266,19 +266,8 @@ describe('environment identity (Cognito)', () => {
     staging!.hasResourceProperties('AWS::Cognito::UserPool', { UserPoolTier: 'ESSENTIALS' });
   });
 
-  it('has a public PKCE web client with short-lived tokens and rotation', () => {
-    prod!.hasResourceProperties('AWS::Cognito::UserPoolClient', {
-      GenerateSecret: false,
-      AllowedOAuthFlows: ['code'],
-      AccessTokenValidity: 15,
-      IdTokenValidity: 15,
-      TokenValidityUnits: Match.objectLike({ AccessToken: 'minutes' }),
-      EnableTokenRevocation: true,
-      PreventUserExistenceErrors: 'ENABLED',
-      RefreshTokenRotation: Match.objectLike({ Feature: 'ENABLED' }),
-      CallbackURLs: [`https://app.${cfg.domain.root}/auth/callback`],
-      WriteAttributes: ['email'],
-    });
+  it('leaves the web client to the web stack', () => {
+    prod!.resourceCountIs('AWS::Cognito::UserPoolClient', 0);
   });
 
   it('creates the three groups and wires pre token generation V2', () => {
@@ -404,7 +393,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(6);
+    expect(routed.length).toBe(14);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -481,6 +470,15 @@ describe('environment web app', () => {
       );
     expect(urls(staging!)).toContain('http://localhost:5173/auth/callback');
     expect(urls(prod!)).not.toContain('localhost');
-    prod!.hasResourceProperties('AWS::Cognito::UserPoolClient', { GenerateSecret: false });
+    prod!.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      GenerateSecret: false,
+      AllowedOAuthFlows: ['code'],
+      AccessTokenValidity: 15,
+      IdTokenValidity: 15,
+      EnableTokenRevocation: true,
+      PreventUserExistenceErrors: 'ENABLED',
+      RefreshTokenRotation: Match.objectLike({ Feature: 'ENABLED' }),
+      WriteAttributes: ['email'],
+    });
   });
 });

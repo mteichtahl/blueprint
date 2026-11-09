@@ -78,6 +78,26 @@ export const handler = handle(async (event) => {
     throw err;
   }
 
+  // Roster entry (GSI1 sorts the roster by name). No email here: it stays in Cognito and the invite.
+  await db.send(
+    new PutCommand({
+      TableName: env('MAIN_TABLE'),
+      Item: {
+        PK: `ARTIST#${artistId}`,
+        SK: 'PROFILE',
+        type: 'artistProfile',
+        artistId,
+        displayName: body.displayName,
+        status: 'invited',
+        invitedBy: ctx.sub,
+        createdAt: new Date().toISOString(),
+        GSI1PK: 'ARTISTS',
+        GSI1SK: `${body.displayName.toLowerCase()}#${artistId}`,
+      },
+      ConditionExpression: 'attribute_not_exists(PK)',
+    }),
+  );
+
   // Executions are named by artistId, so a retry can never create a second key.
   await sfn.send(
     new StartExecutionCommand({

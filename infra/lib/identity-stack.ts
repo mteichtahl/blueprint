@@ -1,21 +1,16 @@
 import { CfnOutput, Duration, RemovalPolicy } from 'aws-cdk-lib';
 import {
   AccountRecovery,
-  CfnManagedLoginBranding,
   CfnUserPool,
   CfnUserPoolGroup,
-  ClientAttributes,
   FeaturePlan,
   LambdaVersion,
   ManagedLoginVersion,
   Mfa,
-  OAuthScope,
   PasskeyUserVerification,
   StandardThreatProtectionMode,
   StringAttribute,
   UserPool,
-  UserPoolClient,
-  UserPoolClientIdentityProvider,
   UserPoolDomain,
   UserPoolOperation,
 } from 'aws-cdk-lib/aws-cognito';
@@ -46,13 +41,11 @@ const PRECEDENCE: Record<(typeof USER_GROUPS)[number], number> = {
  * - invite-only (no self sign-up); the pre sign-up trigger checks invites for social sign-in;
  * - sign in with a passkey or email + password, MFA required (authenticator app,
  *   or a passkey with user verification, which counts as two factors);
- * - one public web client: authorization code + PKCE, 15-minute access tokens,
- *   30-day rotating refresh tokens;
+ * - the web client lives in the web stack, whose callback is the CloudFront address;
  * - pre token generation V2 adds `role`, `artistId` and `mfa_level`.
  */
 export class IdentityStack extends BmgStack {
   readonly userPool: UserPool;
-  readonly webClient: UserPoolClient;
   readonly domain: UserPoolDomain;
 
   constructor(scope: Construct, id: string, props: IdentityStackProps) {
@@ -161,46 +154,14 @@ export class IdentityStack extends BmgStack {
       });
     }
 
-    const appOrigin = `https://${names.host(cfg, env, 'app')}`;
-    const devOrigins = prod ? [] : ['http://localhost:5173'];
-    this.webClient = this.userPool.addClient('Web', {
-      userPoolClientName: `${cfg.project}-${env}-web`,
-      generateSecret: false,
-      authFlows: { user: true, userSrp: true },
-      oAuth: {
-        flows: { authorizationCodeGrant: true },
-        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-        callbackUrls: [appOrigin, ...devOrigins].map((o) => `${o}/auth/callback`),
-        logoutUrls: [appOrigin, ...devOrigins].map((o) => `${o}/signed-out`),
-      },
-      supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
-      accessTokenValidity: Duration.minutes(15),
-      idTokenValidity: Duration.minutes(15),
-      refreshTokenValidity: Duration.days(30),
-      refreshTokenRotationGracePeriod: Duration.seconds(10),
-      enableTokenRevocation: true,
-      preventUserExistenceErrors: true,
-      readAttributes: new ClientAttributes()
-        .withStandardAttributes({ email: true, emailVerified: true })
-        .withCustomAttributes('artistId'),
-      writeAttributes: new ClientAttributes().withStandardAttributes({ email: true }),
-    });
-
     this.domain = this.userPool.addDomain('Domain', {
       cognitoDomain: { domainPrefix },
       managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
-    });
-    // Managed login v2 needs a style per client; BMG branding is applied in Phase 6.
-    new CfnManagedLoginBranding(this, 'Branding', {
-      userPoolId: this.userPool.userPoolId,
-      clientId: this.webClient.userPoolClientId,
-      useCognitoProvidedValues: true,
     });
 
     const params: Record<string, string> = {
       'identity/user-pool-id': this.userPool.userPoolId,
       'identity/user-pool-arn': this.userPool.userPoolArn,
-      'identity/web-client-id': this.webClient.userPoolClientId,
       'identity/login-domain': loginHost,
       'identity/issuer': `https://cognito-idp.${this.region}.amazonaws.com/${this.userPool.userPoolId}`,
     };
@@ -210,10 +171,6 @@ export class IdentityStack extends BmgStack {
         stringValue: value,
       });
     }
-    // The API used to import this client's id. Keep the export for one release
-    // so deploying this stack first doesn't fail while the API still imports it;
-    // remove this line (and the client) once the API reads the web stack's client.
-    this.exportValue(this.webClient.userPoolClientId);
     new CfnOutput(this, 'UserPoolId', { value: this.userPool.userPoolId });
     new CfnOutput(this, 'LoginDomain', { value: loginHost });
 
