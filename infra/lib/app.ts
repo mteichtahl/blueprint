@@ -186,6 +186,10 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       restApiId: api.api.restApiId,
       realtime: { httpDns: api.realtime.httpDns, realtimeDns: api.realtime.realtimeDns },
       uploadOrigin: `https://${names.bucket(cfg, envName, 'quarantine')}.s3.${cfg.account.homeRegion}.amazonaws.com`,
+      downloadOrigins: (['artist-data', 'org-data'] as const).map(
+        (k) =>
+          `https://${names.bucket(cfg, envName, k)}.s3.${cfg.account.homeRegion}.amazonaws.com`,
+      ),
       description: `BMG ${envName} web app: CloudFront, site bucket, web client`,
     });
     return { foundation, data, identity, keys, audit, files, kb, newsroom, ai, api, notify, web };

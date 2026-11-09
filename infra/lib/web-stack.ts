@@ -45,6 +45,8 @@ export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly restApiId: string;
   /** The quarantine bucket the browser uploads to (presigned POST). */
   readonly uploadOrigin: string;
+  /** Where downloads come from (artist-data and org-data buckets): asset thumbnails and previews. */
+  readonly downloadOrigins: string[];
   /** AppSync Events domains for realtime inbox nudges. */
   readonly realtime: { httpDns: string; realtimeDns: string };
 }
@@ -108,7 +110,8 @@ export class WebStack extends BmgStack {
             "script-src 'self'",
             "style-src 'self'",
             "font-src 'self'",
-            "img-src 'self' data:",
+            `img-src 'self' data: blob: ${props.downloadOrigins.join(' ')}`,
+            `media-src 'self' ${props.downloadOrigins.join(' ')}`,
             `connect-src 'self' ${cognitoIdp} ${props.uploadOrigin} wss://${props.realtime.realtimeDns}`,
             "frame-ancestors 'none'",
             "base-uri 'none'",

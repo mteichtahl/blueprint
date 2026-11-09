@@ -13,6 +13,7 @@ import { DataAccessSessions, isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   ArtistFilePatch,
+  AssetMetaSchema,
   ArtistUpload,
   contentDisposition,
   deleteAllowed,
@@ -267,6 +268,15 @@ export const handler = handle(async (event) => {
         contentType: body.contentType,
         status: 'pending',
         visibility: body.visibility,
+        ...(body.asset
+          ? {
+              asset: {
+                ...body.asset,
+                updatedBy: principal.sub,
+                updatedAt: new Date().toISOString(),
+              },
+            }
+          : {}),
         uploadedBy: principal.sub,
         uploaderRole: principal.role,
         createdAt: new Date().toISOString(),
@@ -318,6 +328,52 @@ export const handler = handle(async (event) => {
         fileId: f.fileId,
       });
       return json(200, show({ ...f, visibility: patch.visibility }));
+    }
+
+    case 'PUT /artists/{artistId}/files/{fileId}/asset': {
+      // Add a file to the asset library, or change its details and approvals.
+      // The artist and Blueprint can both do this (design: assets are shared work).
+      const artistId = artistIdParam(event);
+      const f = await load(artistPk(artistId), fileIdParam(event));
+      ensure(canArtistFile(principal, 'write', artistId, f));
+      const asset = {
+        ...parseBody(event, AssetMetaSchema),
+        updatedBy: principal.sub,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.send(
+        new UpdateCommand({
+          TableName: table(),
+          Key: { PK: f.PK, SK: f.SK },
+          UpdateExpression: 'SET asset = :a',
+          ConditionExpression: 'attribute_exists(PK)',
+          ExpressionAttributeValues: { ':a': asset },
+        }),
+      );
+      await audit(event, 'asset.update', 'success', {
+        artistId,
+        fileId: f.fileId,
+        approvedFor: asset.approvedFor.join(','),
+      });
+      return json(200, show({ ...f, asset }));
+    }
+
+    case 'DELETE /artists/{artistId}/files/{fileId}/asset': {
+      // Take a file out of the asset library (the file itself stays).
+      const artistId = artistIdParam(event);
+      const f = await load(artistPk(artistId), fileIdParam(event));
+      ensure(canArtistFile(principal, 'write', artistId, f));
+      await db.send(
+        new UpdateCommand({
+          TableName: table(),
+          Key: { PK: f.PK, SK: f.SK },
+          UpdateExpression: 'REMOVE asset',
+          ConditionExpression: 'attribute_exists(PK)',
+        }),
+      );
+      const rest = { ...f };
+      delete rest.asset;
+      return json(200, show(rest));
     }
 
     case 'POST /artists/{artistId}/files/{fileId}/download': {

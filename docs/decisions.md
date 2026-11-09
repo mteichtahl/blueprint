@@ -219,3 +219,16 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Ticks:** one slate tick = sent; two slate = every other member has opened the app since (a `PRESENCE#` row, written when the chat list loads); two coral = everyone has read it. The broadcast has no member list, so it shows "sent".
 - **Message payloads are versioned** (`v:2`: text, reply quote, in-bubble card, system flag) and sealed as before. Older plain-text messages still open. Cards carry ids and titles only; opening one goes through the usual access checks.
 - **System notes** ("Kyra created this group", "added", "removed", "changed the name") are written as sealed messages, so they share the chat's key and history.
+
+## Notes: Assets and brand kit (9 Nov 2026)
+
+- **Assets are artist files with extra details** (`asset` on the file record: kind, title, credit, "Approved for" press / social / website, status draft → in review → approved, image size). They are uploaded, scanned, encrypted and shared exactly like other files, so visibility rules and download links don't change. "Remove from assets" keeps the file in the library.
+- **Previews:** thumbnails and players use the same 5-minute presigned links as downloads. The web CSP now allows `img-src` and `media-src` from the two file buckets only.
+- **"Copy link" is the 5-minute download link**, and the button says so. A longer-lived public share link would bypass the visibility rules, so it isn't offered.
+- **Replace** uploads the new version with the same details (an approved asset goes back to "in review"), then removes the old one when the scan passes.
+- **Brand kit** lives at `ARTIST#<id> / BRAND`. The artist and Blueprint both edit it; saves carry the version they edited, and a clash returns 409 so nobody overwrites anyone silently. Logos and photo-style images must be this artist's own files.
+- **Socials are kept in the brand kit**, because the profile has no socials fields.
+- **Fonts are names, not files.** The CSP blocks Google Fonts, so the preview uses the font only if the device has it; designers use the real files.
+- **Contrast check:** text, primary and accent on the background, and background on primary, graded against WCAG AA (4.5:1, or 3:1 for large text).
+- **Export PDF** is the browser's print-to-PDF with print styles that show only the kit.
+- **No new Lambdas:** the routes reuse the workspace and files functions, keeping the API stack under 500 resources (now 105 routes).

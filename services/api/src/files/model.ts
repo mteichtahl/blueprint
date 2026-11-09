@@ -46,6 +46,51 @@ export interface FileRecord {
   uploaderRole: 'artist' | 'bmg-admin' | 'bmg-staff';
   createdAt: string;
   availableAt?: string;
+  /** Set when the file is part of the artist's asset library. */
+  asset?: AssetMeta;
+}
+
+// ── Assets (screens doc "Assets") ────────────────────────────────────────
+/**
+ * An asset is an artist file with a little more about it: what kind of asset
+ * it is, a credit, and what it is approved for. It is stored, scanned and
+ * protected exactly like any other artist file.
+ */
+export const ASSET_CATEGORIES = [
+  'press-photo',
+  'artwork',
+  'logo',
+  'video',
+  'audio',
+  'other',
+] as const;
+export const ASSET_USES = ['press', 'social', 'website'] as const;
+export const ASSET_STATUSES = ['draft', 'in-review', 'approved'] as const;
+
+export const AssetMetaSchema = z
+  .object({
+    category: z.enum(ASSET_CATEGORIES),
+    title: z.string().trim().min(1).max(120),
+    credit: z.string().trim().max(120).optional(),
+    approvedFor: z.array(z.enum(ASSET_USES)).max(ASSET_USES.length).default([]),
+    status: z.enum(ASSET_STATUSES).default('draft'),
+    width: z.number().int().min(1).max(100_000).optional(),
+    height: z.number().int().min(1).max(100_000).optional(),
+    durationSeconds: z.number().min(0).max(86_400).optional(),
+  })
+  .strict();
+export type AssetMeta = z.infer<typeof AssetMetaSchema> & {
+  updatedBy?: string;
+  updatedAt?: string;
+};
+
+/** The category an upload most likely belongs to, from its type (the person can change it). */
+export function guessCategory(contentType: string): (typeof ASSET_CATEGORIES)[number] {
+  if (contentType.startsWith('video/')) return 'video';
+  if (contentType.startsWith('audio/')) return 'audio';
+  if (contentType === 'image/svg+xml') return 'logo';
+  if (contentType.startsWith('image/')) return 'press-photo';
+  return 'other';
 }
 
 export const LIBRARY_PK = 'ORG#library';
@@ -104,6 +149,8 @@ export const ArtistUpload = z.object({
   size: Size,
   contentType: ContentType.default('application/octet-stream'),
   visibility: z.enum(['normal', 'bmg-only', 'private']).default('normal'),
+  /** Upload straight into the asset library. */
+  asset: AssetMetaSchema.optional(),
 });
 
 const ArtistIds = z.array(z.string().regex(new RegExp(`^${ARTIST}$`))).max(200);
@@ -223,5 +270,6 @@ export function publicFile(f: FileRecord & { uploadedBy: string }, viewerSub: st
     uploaderRole: f.uploaderRole,
     createdAt: f.createdAt,
     availableAt: f.availableAt ?? null,
+    asset: f.asset ?? null,
   };
 }
