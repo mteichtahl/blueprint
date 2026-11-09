@@ -234,7 +234,16 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_not_exists(PK)',
         }),
       );
-      await domainEvent('submission.created', { artistId, submissionId, priority: sub.priority });
+      const profile = await db.send(
+        new GetCommand({ TableName: table(), Key: { PK: artistPk(artistId), SK: 'PROFILE' } }),
+      );
+      await domainEvent('submission.created', {
+        artistId,
+        submissionId,
+        priority: sub.priority,
+        title: sub.title,
+        artistName: profile.Item?.displayName,
+      });
       return json(201, publicSubmission(sub));
     }
 
@@ -302,6 +311,7 @@ export const handler = handle(async (event) => {
         await domainEvent('submission.updated', {
           artistId,
           submissionId: sub.submissionId,
+          title: next.title,
           priority: next.priority,
           neededBy: next.neededBy,
           byRole: principal.role,
@@ -387,6 +397,7 @@ export const handler = handle(async (event) => {
       await domainEvent('submission.feedbackGiven', {
         artistId,
         submissionId: sub.submissionId,
+        title: sub.title,
         todos: todos.length,
       });
       await audit(event, 'submission.feedback', 'success', {

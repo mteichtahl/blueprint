@@ -443,7 +443,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(43);
+    expect(routed.length).toBe(47);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -543,17 +543,13 @@ describe('environment web app', () => {
 describe('environment notifications and branded email', () => {
   const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.notify));
 
-  it('sends workspace events to the notifier with retries and a dead-letter queue', () => {
+  it('sends to-do events to the notifier with retries and a dead-letter queue', () => {
     for (const t of [staging!, prod!]) {
+      // Submission events go only to the API stack's notifier, so nobody is emailed twice.
       t.hasResourceProperties('AWS::Events::Rule', {
         EventPattern: {
           source: ['bmg.workspace'],
-          'detail-type': [
-            'todo.updated',
-            'todo.reminder',
-            'submission.updated',
-            'submission.feedbackGiven',
-          ],
+          'detail-type': ['todo.updated', 'todo.reminder'],
         },
         Targets: [
           Match.objectLike({

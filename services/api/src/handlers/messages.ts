@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
+import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import {
   BatchGetCommand,
   GetCommand,
@@ -39,6 +40,7 @@ import { ROSTER_GSI1PK } from '../workspace/model.ts';
 import { authContext, db, env, handle, HttpError, json, parseBody, principalFor } from '../lib.ts';
 
 const kms = new KMSClient({});
+const events = new EventBridgeClient({});
 const sessions = new DataAccessSessions();
 const table = () => env('MAIN_TABLE');
 
@@ -454,6 +456,28 @@ export const handler = handle(async (event) => {
       );
       await markRead(viewer, conv.conversationId);
       await publish(channelsFor(conv), { conversationId: conv.conversationId, at });
+      // For notifications: ids, the sender's name and the group name only, never the text.
+      await events.send(
+        new PutEventsCommand({
+          Entries: [
+            {
+              EventBusName: env('EVENT_BUS'),
+              Source: 'bmg.workspace',
+              DetailType: 'message.created',
+              Detail: JSON.stringify({
+                id: randomUUID(),
+                at,
+                conversationId: conv.conversationId,
+                conversationType: conv.type,
+                artistIds: conv.artistIds,
+                senderSub: principal.sub,
+                senderName,
+                ...(conv.type === 'group' && conv.title ? { title: conv.title } : {}),
+              }),
+            },
+          ],
+        }),
+      );
       return json(201, { messageId, createdAt: at });
     }
 

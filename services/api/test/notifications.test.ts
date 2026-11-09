@@ -1,0 +1,111 @@
+import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_PREFERENCES,
+  emailText,
+  inQuietHours,
+  plan,
+  type Recipient,
+} from '../src/notifications/model.ts';
+
+const A = 'art_aaaaaaaaaaaa';
+const B = 'art_bbbbbbbbbbbb';
+const people: Recipient[] = [
+  { sub: 'kyra', role: 'bmg-admin', email: 'k@x' },
+  { sub: 'staffA', role: 'bmg-staff', assignedArtistIds: [A] },
+  { sub: 'staffB', role: 'bmg-staff', assignedArtistIds: [B] },
+  { sub: 'chloe', role: 'artist', artistId: A },
+  { sub: 'sarun', role: 'artist', artistId: B },
+];
+const subs = (r?: { to: Recipient[] }) => r?.to.map((x) => x.sub).sort();
+
+describe('who hears about what', () => {
+  it('tells Blueprint (admins and the assigned staff) about a new submission', () => {
+    expect(
+      subs(plan({ type: 'submission.created', artistId: A, submissionId: 's' }, people)),
+    ).toEqual(['kyra', 'staffA']);
+  });
+  it('tells the artist when Blueprint changes timing or gives feedback', () => {
+    expect(
+      subs(
+        plan(
+          {
+            type: 'submission.updated',
+            artistId: A,
+            submissionId: 's',
+            priority: 'high',
+            neededBy: '2026-12-01',
+          },
+          people,
+        ),
+      ),
+    ).toEqual(['chloe']);
+    expect(
+      subs(
+        plan(
+          { type: 'submission.feedbackGiven', artistId: B, submissionId: 's', todos: 2 },
+          people,
+        ),
+      ),
+    ).toEqual(['sarun']);
+  });
+  it('never tells Blueprint about artist-to-artist messages, and never the sender', () => {
+    const e = {
+      type: 'message.created' as const,
+      conversationId: 'aa-x',
+      conversationType: 'artist-to-artist' as const,
+      artistIds: [A, B],
+      senderSub: 'chloe',
+      senderName: 'Chloe',
+    };
+    expect(subs(plan(e, people))).toEqual(['sarun']);
+  });
+  it('tells the artist and Blueprint about a direct chat, minus the sender', () => {
+    const e = {
+      type: 'message.created' as const,
+      conversationId: `dm-${A}`,
+      conversationType: 'bmg-artist' as const,
+      artistIds: [A],
+      senderSub: 'chloe',
+      senderName: 'Chloe',
+    };
+    expect(subs(plan(e, people))).toEqual(['kyra', 'staffA']);
+  });
+  it('never puts message text in a notification', () => {
+    const d = plan(
+      {
+        type: 'message.created',
+        conversationId: `dm-${A}`,
+        conversationType: 'bmg-artist',
+        artistIds: [A],
+        senderSub: 'kyra',
+        senderName: 'Blueprint',
+      },
+      people,
+    )!.draft;
+    expect(d.body).toBe('Open the app to read it.');
+    expect(d.throttleKey).toBe(`dm-${A}`);
+  });
+});
+
+describe('quiet hours (Melbourne time)', () => {
+  it('holds email overnight and sends during the day', () => {
+    // 2026-11-09 12:30Z = 23:30 AEDT; 02:00Z = 13:00 AEDT
+    expect(inQuietHours(DEFAULT_PREFERENCES, new Date('2026-11-09T12:30:00Z'))).toBe(true);
+    expect(inQuietHours(DEFAULT_PREFERENCES, new Date('2026-11-09T02:00:00Z'))).toBe(false);
+    expect(
+      inQuietHours({ ...DEFAULT_PREFERENCES, quietHours: null }, new Date('2026-11-09T12:30:00Z')),
+    ).toBe(false);
+  });
+});
+
+describe('email', () => {
+  it('escapes names in the HTML', () => {
+    const m = emailText(
+      { kind: 'review', title: 'A <b>', body: 'x & y', link: 'review' },
+      'https://app',
+    );
+    expect(m.html).toContain('A &lt;b&gt;');
+    expect(m.html).toContain('x &amp; y');
+    expect(m.text).toContain('https://app');
+  });
+});

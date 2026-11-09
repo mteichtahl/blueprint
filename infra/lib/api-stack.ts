@@ -18,7 +18,13 @@ import {
 } from 'aws-cdk-lib/aws-appsync';
 import type { IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
-import type { IEventBus } from 'aws-cdk-lib/aws-events';
+import { Rule, type IEventBus } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
+import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
+import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
+import type { ITopic } from 'aws-cdk-lib/aws-sns';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import type { IKey } from 'aws-cdk-lib/aws-kms';
 import { CfnScheduleGroup } from 'aws-cdk-lib/aws-scheduler';
@@ -28,7 +34,7 @@ import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
 import type { Construct } from 'constructs';
 import { names, TAG_ENV, type EnvironmentName } from '@bmg/config';
-import { acknowledge, BmgStack, type BmgStackProps } from './common.ts';
+import { acknowledge, BmgStack, KMS_GRANT_FINDINGS, type BmgStackProps } from './common.ts';
 import { BmgFunction } from './function.ts';
 
 export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
@@ -39,6 +45,7 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly consentTable: ITable;
   readonly sessionsTable: ITable;
   readonly bus: IEventBus;
+  readonly alarmTopic: ITopic;
   readonly onboarding: IStateMachine;
   /** The files stack's quarantine key; the buckets have fixed names (names.bucket). */
   readonly quarantineKey: IKey;
@@ -65,6 +72,7 @@ export function onSubscribe(ctx) {
   const target = ctx.info.channel.segments[1] || '';
   const bmg = claims.role === 'bmg-admin' || claims.role === 'bmg-staff';
   if (target === 'bmg' && bmg) return;
+  if (ctx.identity && ctx.identity.sub && target === 'user-' + ctx.identity.sub) return;
   if (claims.role === 'artist' && (target === 'all-artists' || target === 'artist-' + claims.artistId)) return;
   util.unauthorized();
 }
@@ -226,6 +234,7 @@ export class ApiStack extends BmgStack {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
       EVENTS_HTTP_DOMAIN: this.realtime.httpDns,
     });
+    const notifications = fn('Notifications', 'notifications', 'notifications and preferences');
     const review = fn('Review', 'review', 'submissions and the review queue', {
       PROJECT: cfg.project,
       BMG_ENV: env,
@@ -414,6 +423,132 @@ export class ApiStack extends BmgStack {
       ),
     );
     allow(
+      notifications,
+      'OwnNotificationsAndPreferences',
+      ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+      [main],
+    );
+    putEvents(messages);
+
+    // ── Notifications: domain events → in-app items, realtime nudges, email (design 7.4) ──
+    const queueOpts = {
+      encryption: QueueEncryption.KMS,
+      encryptionMasterKey: props.platformKey,
+      enforceSSL: true,
+    };
+    const mailDlq = new Queue(this, 'MailDeadLetters', {
+      ...queueOpts,
+      queueName: `${p}-mail-dlq`,
+      retentionPeriod: Duration.days(14),
+    });
+    acknowledge(mailDlq, 'This is the dead-letter queue itself.', 'AwsSolutions-SQS3');
+    const mailQueue = new Queue(this, 'MailQueue', {
+      ...queueOpts,
+      queueName: `${p}-mail`,
+      visibilityTimeout: Duration.minutes(2),
+      deadLetterQueue: { queue: mailDlq, maxReceiveCount: 5 },
+    });
+    const notifier = new BmgFunction(this, 'Notifier', {
+      entry: 'services/api/src/handlers/notifier.ts',
+      description: `BMG ${env}: turn domain events into notifications`,
+      timeout: Duration.seconds(30),
+      prod,
+      environment: {
+        ...common,
+        USER_POOL_ID: props.userPool.userPoolId,
+        MAIL_QUEUE_URL: mailQueue.queueUrl,
+        EVENTS_HTTP_DOMAIN: this.realtime.httpDns,
+      },
+    });
+    allow(
+      notifier,
+      'FindRecipients',
+      ['cognito-idp:ListUsersInGroup'],
+      [props.userPool.userPoolArn],
+    );
+    allow(notifier, 'WriteNotifications', ['dynamodb:PutItem', 'dynamodb:BatchGetItem'], [main]);
+    mailQueue.grantSendMessages(notifier);
+    acknowledge(
+      notifier.role!,
+      'CDK queue grant on the encrypted mail queue (platform key).',
+      ...KMS_GRANT_FINDINGS,
+    );
+    this.realtime.grantPublish(notifier);
+    props.platformKey.grant(notifier, 'kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey');
+    const notifierDlq = new Queue(this, 'NotifierDeadLetters', {
+      ...queueOpts,
+      queueName: `${p}-notifier-dlq`,
+      retentionPeriod: Duration.days(14),
+    });
+    acknowledge(notifierDlq, 'This is the dead-letter queue itself.', 'AwsSolutions-SQS3');
+    new Rule(this, 'DomainEventsToNotifier', {
+      eventBus: props.bus,
+      description: 'Workspace events that notify someone',
+      eventPattern: {
+        source: ['bmg.workspace'],
+        detailType: [
+          'submission.created',
+          'submission.updated',
+          'submission.feedbackGiven',
+          'message.created',
+          'file.rejected',
+        ],
+      },
+      targets: [
+        new LambdaFunction(notifier, {
+          deadLetterQueue: notifierDlq,
+          retryAttempts: 4,
+          maxEventAge: Duration.hours(2),
+        }),
+      ],
+    });
+
+    const mailer = new BmgFunction(this, 'Mailer', {
+      entry: 'services/api/src/handlers/mailer.ts',
+      description: `BMG ${env}: send notification email through Gmail SMTP`,
+      timeout: Duration.seconds(30),
+      prod,
+      environment: { SMTP_SECRET_ID: names.smtpSecret(cfg, env), APP_URL_PARAM: webUrlParam },
+    });
+    allow(mailer, 'ReadSmtpSecret', ['secretsmanager:GetSecretValue'], [smtpSecretArn]);
+    allow(
+      mailer,
+      'ReadWebUrl',
+      ['ssm:GetParameter'],
+      [`arn:aws:ssm:${this.region}:${this.account}:parameter${webUrlParam}`],
+    );
+    props.platformKey.grant(mailer, 'kms:Decrypt');
+    // Two at a time at most (the SQS minimum), one email per message: well inside Gmail's limits.
+    mailer.addEventSource(new SqsEventSource(mailQueue, { batchSize: 1, maxConcurrency: 2 }));
+    acknowledge(
+      mailer.role!,
+      'The Secrets Manager ARN ends in a random suffix, so the secret name is matched with -*.',
+      `AwsSolutions-IAM5[Resource::${smtpSecretArn}]`,
+    );
+    acknowledge(
+      notifier.role!,
+      'Publishes per-user inbox nudges (ids only) to channels in this API.',
+      ...['aws', '<AWS::Partition>'].map(
+        (partition) =>
+          `AwsSolutions-IAM5[Resource::arn:${partition}:appsync:${this.region}:${this.account}:apis/<${this.getLogicalId(this.realtime.node.defaultChild as never)}.ApiId>/channelNamespace/*]`,
+      ),
+    );
+    for (const [id, q] of [
+      ['MailFailures', mailDlq],
+      ['NotifierFailures', notifierDlq],
+    ] as const) {
+      new Alarm(this, id, {
+        alarmName: `${p}-${id.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}`,
+        alarmDescription: 'Notifications could not be delivered (see the DLQ).',
+        metric: q.metricApproximateNumberOfMessagesVisible({ period: Duration.minutes(5) }),
+        threshold: 0,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+        evaluationPeriods: 1,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }).addAlarmAction(new SnsAction(props.alarmTopic));
+    }
+
+    allow(
       artists,
       'StartOnboarding',
       ['states:StartExecution'],
@@ -432,10 +567,20 @@ export class ApiStack extends BmgStack {
       [props.userPool.userPoolArn],
     );
     putEvents(artists);
-    for (const f of [authorizerFn, me, consent, artists, workspace, files, review, messages]) {
+    for (const f of [
+      authorizerFn,
+      me,
+      consent,
+      artists,
+      workspace,
+      files,
+      review,
+      messages,
+      notifications,
+    ]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
-    for (const f of [consent, stepUp, artists, workspace, files, review, messages]) {
+    for (const f of [consent, stepUp, artists, workspace, files, review, messages, notifications]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
     props.platformKey.grant(stepUp, 'kms:Decrypt');
@@ -560,6 +705,10 @@ export class ApiStack extends BmgStack {
     route('GET', '/conversations/{conversationId}/messages', messages);
     route('POST', '/conversations/{conversationId}/messages', messages);
     route('GET', '/directory', messages);
+    route('GET', '/notifications', notifications);
+    route('POST', '/notifications/read', notifications);
+    route('GET', '/preferences', notifications);
+    route('PUT', '/preferences', notifications);
     route('GET', '/library/files', files);
     route('POST', '/library/files', files);
     route('GET', '/library/files/{fileId}', files);

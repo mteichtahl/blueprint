@@ -186,6 +186,25 @@ export async function handler(event: ScanResultEvent): Promise<void> {
     await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
     await setStatus(ref, 'rejected', reason);
     await auditEvent('file.rejected', 'success', { ...ids, reason });
+    // Tell the uploader and Blueprint (notifications).
+    await events.send(
+      new PutEventsCommand({
+        Entries: [
+          {
+            EventBusName: env('EVENT_BUS'),
+            Source: 'bmg.workspace',
+            DetailType: 'file.rejected',
+            Detail: JSON.stringify({
+              id: randomUUID(),
+              ...ids,
+              uploadedBy: rec.uploadedBy,
+              name: rec.name,
+              reason,
+            }),
+          },
+        ],
+      }),
+    );
     log('files.promote.rejected', { fileId: ref.fileId });
   };
 

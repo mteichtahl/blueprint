@@ -81,6 +81,8 @@ export function BmgShell({
   theme,
   onTheme,
   onSignOut,
+  onProfile,
+  bell,
   topActions,
   children,
 }: {
@@ -92,6 +94,8 @@ export function BmgShell({
   theme: Theme;
   onTheme: (t: Theme) => void;
   onSignOut: () => void;
+  onProfile: () => void;
+  bell?: ReactNode;
   topActions?: ReactNode;
   children: ReactNode;
 }) {
@@ -148,11 +152,17 @@ export function BmgShell({
         <AppearanceSwitch theme={theme} onChange={onTheme} />
       </div>
       <div className="ws mt-2.5">
-        <Avatar name={userName} size={34} className="!rounded-lg !bg-cta !text-white" />
-        <span className="min-w-0 flex-1">
-          <b className="block truncate text-[15px]">{userName}</b>
-          <span className="block text-[13px] text-[#D3D8DE]">{roleLabel}</span>
-        </span>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          onClick={() => go('profile')}
+        >
+          <Avatar name={userName} size={34} className="!rounded-lg !bg-cta !text-white" />
+          <span className="min-w-0 flex-1">
+            <b className="block truncate text-[15px]">{userName}</b>
+            <span className="block text-[13px] text-[#D3D8DE]">{roleLabel} · Profile</span>
+          </span>
+        </button>
         <button
           type="button"
           onClick={onSignOut}
@@ -211,16 +221,11 @@ export function BmgShell({
             <span className="kbd">/</span>
           </label>
           <div className="ml-auto flex items-center gap-2.5">
-            <button
-              type="button"
-              className="ibtn"
-              aria-label="Notifications"
-              title="Notifications arrive in the next release"
-            >
-              <Icon name="bell" size={20} />
-            </button>
+            {bell}
             {topActions}
-            <Avatar name={userName} size={36} className="!bg-cta !text-white" />
+            <button type="button" aria-label="Profile & preferences" onClick={onProfile}>
+              <Avatar name={userName} size={36} className="!bg-cta !text-white" />
+            </button>
           </div>
         </header>
         <main className="flex flex-col gap-5 px-8 pt-6 pb-11 max-sm:px-4">{children}</main>

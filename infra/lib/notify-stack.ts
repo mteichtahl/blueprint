@@ -24,12 +24,12 @@ export interface NotifyStackProps extends Omit<BmgStackProps, 'envTag' | 'qualif
   readonly alarmTopic: ITopic;
 }
 
-/** Workspace events that become branded emails (services/notify). */
+/** To-do events that become branded emails (services/notify). */
 export const NOTIFY_DETAIL_TYPES = [
   'todo.updated',
   'todo.reminder',
-  'submission.updated',
-  'submission.feedbackGiven',
+  // Submission events go to the API stack's notifier (bell, preferences, quiet hours),
+  // so an artist gets one email per change, not two.
 ];
 
 /**
