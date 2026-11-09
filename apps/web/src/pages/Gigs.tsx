@@ -14,6 +14,7 @@ import {
   TextArea,
 } from '../components/ui.tsx';
 import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
+import { VenuePicker } from './Venues.tsx';
 
 /** Gigs (screens: workspace Gigs tab, BMG Artist gigs, artist My gigs / Plan a gig). */
 
@@ -28,6 +29,7 @@ export interface Gig {
   startTime?: string;
   endTime?: string;
   venue?: string;
+  venueId?: string;
   notes?: string;
   status: GigStatus;
   deal: GigDeal;
@@ -171,7 +173,6 @@ function GigForm({
     date: gig?.date ?? '',
     startTime: gig?.startTime ?? '',
     endTime: gig?.endTime ?? '',
-    venue: gig?.venue ?? '',
     status: gig?.status ?? ('idea' as GigStatus),
     deal: gig?.deal ?? ('tbc' as GigDeal),
     dealNote: gig?.dealNote ?? '',
@@ -179,6 +180,9 @@ function GigForm({
     notes: gig?.notes ?? '',
     shared: gig?.shared ?? true,
   });
+  const [venue, setVenue] = useState<{ venueId: string | null; name: string } | null>(
+    gig?.venue ? { venueId: gig.venueId ?? null, name: gig.venue } : null,
+  );
   const [topics, setTopics] = useState<HelpTopic[]>([]);
   const [helpText, setHelpText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -204,7 +208,11 @@ function GigForm({
       status: f.status,
       deal: f.deal,
       ...(f.deal === 'other' ? { dealNote: f.dealNote.trim() } : {}),
-      ...(f.venue ? { venue: f.venue } : {}),
+      ...(gig
+        ? { venue: venue?.name ?? '', venueId: venue?.venueId ?? null }
+        : venue
+          ? { venue: venue.name, ...(venue.venueId ? { venueId: venue.venueId } : {}) }
+          : {}),
       ...(f.ticketUrl ? { ticketUrl: f.ticketUrl } : {}),
       ...(f.notes ? { notes: f.notes } : {}),
       ...(isArtist ? { shared: f.shared } : {}),
@@ -243,7 +251,7 @@ function GigForm({
               ? { hint: 'Finishes after midnight' }
               : {})}
         />
-        <Field label="Venue" value={f.venue} onChange={set('venue')} />
+        <VenuePicker cfg={cfg} token={token} isBmg={!isArtist} value={venue} onChange={setVenue} />
         <Select label="Deal" value={f.deal} onChange={set('deal')} options={DEAL_OPTIONS} />
         {f.deal === 'other' && (
           <Field

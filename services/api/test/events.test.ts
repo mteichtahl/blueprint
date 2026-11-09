@@ -269,3 +269,19 @@ describe('money: tickets, takings, costs and profit', () => {
     expect(s.profitCents).toBe(220000);
   });
 });
+
+describe('venues picked from the list', () => {
+  it('keeps the venue id with the name on gigs and events', () => {
+    expect(
+      GigCreate.parse({ title: 'X', date: '2026-12-11', venue: 'Corner', venueId: 'v0000000001' })
+        .venueId,
+    ).toBe('v0000000001');
+    expect(GigCreate.safeParse({ title: 'X', date: '2026-12-11', venueId: 'nope!' }).success).toBe(
+      false,
+    );
+    expect(GigPatch.parse({ venueId: null })).toEqual({ venueId: null });
+    expect(EventBody.parse({ name: 'M', date: '2026-12-11', venueId: 'v0000000001' }).venueId).toBe(
+      'v0000000001',
+    );
+  });
+});

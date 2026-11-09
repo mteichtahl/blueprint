@@ -51,6 +51,8 @@ export interface Gig {
   /** Older gigs stored a single start time here; read as startTime. */
   time?: string;
   venue?: string;
+  /** Set when the venue was picked from the venues list (the name is kept too). */
+  venueId?: string;
   notes?: string;
   status: (typeof GIG_STATUSES)[number];
   deal: (typeof GIG_DEALS)[number];
@@ -174,6 +176,10 @@ export const GigCreate = z.object({
   startTime: Time.optional(),
   endTime: Time.optional(),
   venue: Text(160).optional(),
+  venueId: z
+    .string()
+    .regex(/^[a-z0-9]{10,40}$/)
+    .optional(),
   notes: Text(2000).optional(),
   status: z.enum(GIG_STATUSES).default('idea'),
   deal: z.enum(GIG_DEALS).default('tbc'),
@@ -193,6 +199,12 @@ export const GigPatch = z
     startTime: Time.nullable().optional(),
     endTime: Time.nullable().optional(),
     venue: Text(160).optional(),
+    /** null: the venue was typed in, not picked from the list. */
+    venueId: z
+      .string()
+      .regex(/^[a-z0-9]{10,40}$/)
+      .nullable()
+      .optional(),
     notes: Text(2000).optional(),
     status: z.enum(GIG_STATUSES).optional(),
     deal: z.enum(GIG_DEALS).optional(),
@@ -254,6 +266,11 @@ export const EventBody = z.object({
   name: z.string().trim().min(1, 'Name the event').max(120),
   date: IsoDate,
   venue: Text(200).default(''),
+  /** Set when the venue was picked from the venues list. */
+  venueId: z
+    .string()
+    .regex(/^[a-z0-9]{10,40}$/)
+    .optional(),
   capacity: z.number().int().min(0).max(100000).default(0),
   ticketTarget: z.number().int().min(0).max(100000).default(0),
   ticketPriceCents: z.number().int().min(0).max(10_000_000).default(0),
