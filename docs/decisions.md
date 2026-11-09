@@ -232,3 +232,13 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Contrast check:** text, primary and accent on the background, and background on primary, graded against WCAG AA (4.5:1, or 3:1 for large text).
 - **Export PDF** is the browser's print-to-PDF with print styles that show only the kit.
 - **No new Lambdas:** the routes reuse the workspace and files functions, keeping the API stack under 500 resources (now 105 routes).
+
+## Notes: Phase 6 accessibility (10 Nov 2026)
+
+- **WCAG 2.2 AA is checked in CI.** axe-core runs on 42 rendered screens and states, plus a contrast test on the CSS colours. The full audit is in [accessibility.md](accessibility.md).
+- **These colour changes depart from the design canvas, for contrast:**
+  - Form field borders are #7D8794, not #D3D8DE.
+  - Placeholders are #66707C.
+  - The dark-mode eyebrow is #E8726E.
+  - Focus is a solid 2px outline, not a soft glow.
+- **No `eslint-plugin-jsx-a11y`:** it doesn't support ESLint 10 yet. The axe tests cover more anyway, because they check the rendered result.

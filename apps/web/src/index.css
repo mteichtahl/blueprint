@@ -596,9 +596,26 @@ a {
 a:hover {
   color: #b5403c;
 }
+/* Focus (WCAG 2.4.7, 1.4.11): a solid 2px ring with a gap, navy on light
+   surfaces and off-white on navy and dark ones. The old 22% navy glow was
+   about 1.5:1 and vanished on the sidebar and in dark mode. */
 :focus-visible {
+  outline: 2px solid #011935;
+  outline-offset: 2px;
+}
+.bp :focus-visible,
+.dark :focus-visible {
+  outline-color: #f1f4f7;
+}
+/* Focus not obscured (2.4.11): keep a focused control clear of the sticky
+   desktop top bar (64px) and the phone's fixed bottom tab bar. */
+/* The skip link's target: focus moves there, but it isn't a control. */
+#main:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(1, 25, 53, 0.22);
+}
+html {
+  scroll-padding-top: 80px;
+  scroll-padding-bottom: 96px;
 }
 
 /* Dark mode (design: Studio HQ dark, My gigs dark). Tokens only; components follow. */
@@ -1811,4 +1828,37 @@ a:hover {
     box-shadow: none;
     appearance: none;
   }
+}
+
+/* ── Phase 6 accessibility audit (WCAG 2.2 AA) ───────────────────────────
+   Unlayered on purpose, so these win over utility classes.
+   - Form fields: the border is what identifies the field, so it needs 3:1
+     against the card and page (1.4.11). The design's #D3D8DE is 1.4:1; this
+     changes only the colour, so borderless inputs stay borderless.
+   - Placeholder text needs 4.5:1 (1.4.3); the old #8A939E was 3.1:1.
+   - The coral eyebrow (#B5403C) is 2.8:1 on dark cards; dark mode uses the
+     sidebar's lighter coral (5.3:1). */
+input:not([type='checkbox'], [type='radio'], [type='color'], [type='range']),
+select,
+textarea,
+.md-frame {
+  border-color: #7d8794;
+}
+::placeholder,
+.md .is-editor-empty:first-child::before {
+  color: #66707c;
+  opacity: 1;
+}
+.dark input:not([type='checkbox'], [type='radio'], [type='color'], [type='range']),
+.dark select,
+.dark textarea,
+.dark .md-frame {
+  border-color: #6a7e9b;
+}
+.dark ::placeholder,
+.dark .md .is-editor-empty:first-child::before {
+  color: #9aa5b3;
+}
+.dark .eyebrow {
+  color: #e8726e;
 }

@@ -186,7 +186,9 @@ export function MarkdownView({ value, className = '' }: { value: string; classNa
     contentType: 'markdown',
     editable: false,
     immediatelyRender: true,
-    editorProps: { attributes: { class: `md ${className}` } },
+    // Read-only text, not an input: without this, screen readers announce an
+    // unlabelled text box (Phase 6 accessibility audit).
+    editorProps: { attributes: { class: `md ${className}`, role: 'document' } },
   });
   useEffect(() => {
     if (editor && value !== editor.getMarkdown()) {
