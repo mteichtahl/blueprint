@@ -132,19 +132,57 @@ export function isoWeek(d: Date): number {
 
 export const storyId = (url: string) => createHash('sha256').update(url).digest('hex').slice(0, 16);
 
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+/** One pass over entities, so "&amp;lt;" becomes "&lt;" and is never decoded twice. */
+function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]{2,6});/gi, (whole, e: string) => {
+    if (e[0] === '#') {
+      const code = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+      return code > 0 && code < 0x110000 ? String.fromCodePoint(code) : ' ';
+    }
+    return ENTITIES[e.toLowerCase()] ?? whole;
+  });
+}
+
+/**
+ * Drops every tag, and the whole contents of script and style elements, by
+ * scanning characters rather than matching markup with regular expressions.
+ */
+function stripTags(s: string): string {
+  const lower = s.toLowerCase();
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const lt = s.indexOf('<', i);
+    if (lt === -1) {
+      out += s.slice(i);
+      break;
+    }
+    out += `${s.slice(i, lt)} `;
+    if (s.startsWith('<![CDATA[', lt)) {
+      const close = s.indexOf(']]>', lt + 9);
+      out += close === -1 ? s.slice(lt + 9) : s.slice(lt + 9, close);
+      i = close === -1 ? s.length : close + 3;
+      continue;
+    }
+    const gt = s.indexOf('>', lt + 1);
+    if (gt === -1) break; // an unclosed tag: drop the rest
+    const name = lower.slice(lt + 1, gt).match(/^([a-z0-9]+)/)?.[1];
+    i = gt + 1;
+    if (name === 'script' || name === 'style') {
+      // Skip to the matching end tag, whatever spacing or attributes it has.
+      const end = lower.indexOf(`</${name}`, i);
+      const endGt = end === -1 ? -1 : lower.indexOf('>', end);
+      i = endGt === -1 ? s.length : endGt + 1;
+    }
+  }
+  return out;
+}
+
+/** Plain text from feed or page markup; nothing from outside is ever treated as markup. */
 const decode = (s: string) =>
-  s
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)))
-    // Feeds often carry escaped HTML: strip it again once decoded.
-    .replace(/<[^>]*>/g, ' ')
-    // Plain text only: nothing from a feed is ever treated as markup.
+  stripTags(decodeEntities(stripTags(s)))
     .replace(/[<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -182,7 +220,7 @@ export function parseFeed(xml: string, source: string, since: Date): Story[] {
 /** Page checks: the page's title, and a hash of its text to notice a change. */
 export function pageSnapshot(html: string): { title: string; hash: string } {
   const title = tag(html, 'title') ?? '';
-  const body = decode(html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ''));
+  const body = decode(html);
   return { title: title.slice(0, 200), hash: createHash('sha256').update(body).digest('hex') };
 }
 

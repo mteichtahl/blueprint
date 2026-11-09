@@ -129,3 +129,22 @@ describe('newsroom drafts', () => {
     expect(routeOf('DELETE', '/newsroom/sites/abc/')).toMatchObject({ route: 'DELETE /sites/:id' });
   });
 });
+
+describe('newsroom text extraction', () => {
+  it('drops script and style contents however their end tags are written', () => {
+    const a = pageSnapshot(
+      '<title>T</title><script>alert(1)</script ><p>Body</p><STYLE>x{}</style\n>',
+    );
+    const b = pageSnapshot('<title>T</title><p>Body</p>');
+    expect(a.hash).toBe(b.hash);
+  });
+
+  it('decodes entities once only', () => {
+    const r = parseFeed(
+      '<item><title>Tom &amp;amp; Jerry &#8217;s</title><link>https://a.example/x</link></item>',
+      'S',
+      new Date(0),
+    );
+    expect(r[0]!.title).toBe('Tom &amp; Jerry ’s');
+  });
+});
