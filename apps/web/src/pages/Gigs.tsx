@@ -445,6 +445,8 @@ export function GigsTab({
   const { gigs, error, load, patch } = useGigs(cfg, token, `/artists/${artist.artistId}/gigs`);
   const [filter, setFilter] = useState<Filter>('upcoming');
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Gig | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const first = artist.displayName.split(' ')[0];
   const all = gigs ?? [];
@@ -490,15 +492,23 @@ export function GigsTab({
           </>
         }
       >
-        {adding && (
+        {saved && <Notice tone="success">{saved}</Notice>}
+        {(adding || editing) && (
           <GigForm
+            key={editing?.gigId ?? 'new'}
             cfg={cfg}
             token={token}
             artistId={artist.artistId}
+            {...(editing ? { gig: editing } : {})}
             isArtist={false}
-            onCancel={() => setAdding(false)}
-            onSaved={() => {
+            onCancel={() => {
               setAdding(false);
+              setEditing(null);
+            }}
+            onSaved={() => {
+              setSaved(editing ? `Saved ${editing.title}. ${first} can see the change.` : null);
+              setAdding(false);
+              setEditing(null);
               void load();
             }}
           />
@@ -511,6 +521,11 @@ export function GigsTab({
             artistName={first}
             selected={open?.gigId}
             onOpen={setOpenId}
+            onEdit={(g) => {
+              setAdding(false);
+              setSaved(null);
+              setEditing(g);
+            }}
             empty={`No ${filter === 'help' ? 'help requests' : `${filter} gigs`} for ${first} yet.`}
           />
         )}
@@ -528,7 +543,22 @@ export function GigsTab({
                 onDone={() => void patch(open, { helpDone: true })}
               />
             ) : (
-              <Card title={open.title}>
+              <Card
+                title={open.title}
+                action={
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setAdding(false);
+                      setSaved(null);
+                      setEditing(open);
+                    }}
+                  >
+                    Edit gig
+                  </Button>
+                }
+              >
                 <p className="src">
                   {when(open)}
                   {open.venue ? ` · ${open.venue}` : ''}
@@ -565,6 +595,7 @@ function GigTable({
   names,
   selected,
   onOpen,
+  onEdit,
   empty,
 }: {
   gigs: Gig[];
@@ -572,6 +603,8 @@ function GigTable({
   names?: Record<string, string>;
   selected?: string;
   onOpen: (gigId: string, artistId: string) => void;
+  /** BMG desktop: an Edit button on each row. */
+  onEdit?: (gig: Gig) => void;
   empty: string;
 }) {
   if (gigs.length === 0) return <p className="src">{empty}</p>;
@@ -587,6 +620,11 @@ function GigTable({
           <th scope="col">Checklist</th>
           <th scope="col">Planned by</th>
           <th scope="col">Help</th>
+          {onEdit && (
+            <th scope="col">
+              <span className="sr-only">Edit</span>
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -621,6 +659,21 @@ function GigTable({
               <td>{done(g)}</td>
               <td>{g.plannedBy === 'bmg' ? 'Blueprint' : who.split(' ')[0]}</td>
               <td>{helpOpen ? <Tag tone="k">{helpLabel(g)}</Tag> : '—'}</td>
+              {onEdit && (
+                <td>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Edit ${g.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(g);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                </td>
+              )}
             </tr>
           );
         })}
@@ -642,7 +695,9 @@ export function AllGigs({
   onOpenArtist: (artistId: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>('help');
-  const { gigs, error } = useGigs(cfg, token, `/gigs?filter=${filter}`);
+  const { gigs, error, load } = useGigs(cfg, token, `/gigs?filter=${filter}`);
+  const [editing, setEditing] = useState<Gig | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
   return (
     <Card
@@ -650,6 +705,23 @@ export function AllGigs({
       action={<Chips label="Filter gigs" value={filter} onChange={setFilter} options={FILTERS} />}
     >
       {error && <Notice tone="error">{error}</Notice>}
+      {saved && <Notice tone="success">{saved}</Notice>}
+      {editing && (
+        <GigForm
+          key={editing.gigId}
+          cfg={cfg}
+          token={token}
+          artistId={editing.artistId}
+          gig={editing}
+          isArtist={false}
+          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setSaved(`Saved ${editing.title}.`);
+            setEditing(null);
+            void load();
+          }}
+        />
+      )}
       {gigs === null ? (
         <p className="src">Loading…</p>
       ) : (
@@ -657,6 +729,10 @@ export function AllGigs({
           gigs={gigs}
           names={names}
           onOpen={(_, artistId) => onOpenArtist(artistId)}
+          onEdit={(g) => {
+            setSaved(null);
+            setEditing(g);
+          }}
           empty={
             filter === 'help'
               ? 'No artist is asking for help right now.'
