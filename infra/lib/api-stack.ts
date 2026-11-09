@@ -293,7 +293,7 @@ export class ApiStack extends BmgStack {
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
     });
     const gigsEvents = fn('Events', 'events', 'artist gigs and Blueprint events');
-    const prompts = fn('Prompts', 'prompts', 'Settings → AI prompts: drafts, versions, publish');
+    const prompts = fn('Prompts', 'prompts', 'Settings - AI prompts: drafts, versions, publish');
     const smtpSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.smtpSecret(cfg, env)}-*`;
     const webUrlParam = names.ssm(cfg, env, 'web/url');
     const artists = fn('Artists', 'artists', 'invite artists', {
