@@ -1,53 +1,77 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Me } from './lib/api.ts';
-import { auth, currentUser, signOut } from './lib/auth.ts';
+import { currentSession, profileOf, refresh, signOut, type Session } from './lib/auth.ts';
 import { loadConfig, type AppConfig } from './lib/config.ts';
 import { Notice } from './components/ui.tsx';
 import { Consent } from './pages/Consent.tsx';
 import { Home } from './pages/Home.tsx';
-import { SignIn } from './pages/SignIn.tsx';
+import { SignIn, type SignInReason } from './pages/SignIn.tsx';
 import { StepUp } from './pages/StepUp.tsx';
 
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'signedOut'; cfg: AppConfig }
+  | { kind: 'signedOut'; cfg: AppConfig; reason?: SignInReason }
   | { kind: 'ready'; cfg: AppConfig; token: string; me: Me; userName: string };
 
+function nameOf(s: Session): string {
+  const p = profileOf(s);
+  return (
+    [p.given_name, p.family_name].filter(Boolean).join(' ') ||
+    p.name ||
+    (p.email ?? '').split('@')[0] ||
+    'there'
+  );
+}
+
 /**
- * Sign-in → (step-up for social sign-ins) → consent on first use → workspace.
- * Every check is enforced by the API; the app only follows its answers.
+ * Sign-in (Blueprint's own screens) → (step-up for social sign-ins) → consent
+ * on first use → workspace. Every check is enforced by the API; the app only
+ * follows its answers.
  */
 export function App() {
   const [state, setState] = useState<State>({ kind: 'loading' });
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const refresh = useCallback(async (cfg: AppConfig) => {
-    const user = await currentUser(cfg);
-    if (!user) return setState({ kind: 'signedOut', cfg });
-    const me = await api<Me>(cfg, user.access_token, 'GET', '/me');
-    const p = user.profile;
-    const userName =
-      [p.given_name, p.family_name].filter(Boolean).join(' ') ||
-      p.name ||
-      (p.email ?? '').split('@')[0] ||
-      'there';
-    setState({ kind: 'ready', cfg, token: user.access_token, me, userName });
+  const enter = useCallback(async (cfg: AppConfig, session: Session) => {
+    const me = await api<Me>(cfg, session.accessToken, 'GET', '/me');
+    setState({ kind: 'ready', cfg, token: session.accessToken, me, userName: nameOf(session) });
+    // Swap in a fresh access token a minute before this one expires.
+    clearTimeout(timer.current);
+    timer.current = setTimeout(
+      () => {
+        void refresh(cfg).then((next) =>
+          next ? enter(cfg, next) : setState({ kind: 'signedOut', cfg, reason: 'expired' }),
+        );
+      },
+      Math.max(session.expiresAt - Date.now() - 60_000, 5_000),
+    );
   }, []);
+
+  const resume = useCallback(
+    async (cfg: AppConfig) => {
+      const session = await currentSession(cfg);
+      if (!session) return setState({ kind: 'signedOut', cfg });
+      await enter(cfg, session);
+    },
+    [enter],
+  );
 
   useEffect(() => {
     void (async () => {
       try {
         const cfg = await loadConfig();
-        if (window.location.pathname === '/auth/callback') {
-          await auth(cfg).signinRedirectCallback();
+        // Old hosted-UI links land here; the app signs in on its own screens now.
+        if (/^\/(auth\/callback|signed-out)/.test(window.location.pathname)) {
           window.history.replaceState({}, '', '/');
         }
-        await refresh(cfg);
+        await resume(cfg);
       } catch (e) {
         setState({ kind: 'error', message: (e as Error).message });
       }
     })();
-  }, [refresh]);
+    return () => clearTimeout(timer.current);
+  }, [resume]);
 
   if (state.kind === 'loading') {
     return <p className="p-8 text-sm text-muted-foreground">Loading…</p>;
@@ -60,16 +84,26 @@ export function App() {
     );
   }
   if (state.kind === 'signedOut') {
+    const { cfg } = state;
     return (
       <SignIn
-        signedOut={window.location.pathname === '/signed-out'}
-        onSignIn={() => void auth(state.cfg).signinRedirect()}
+        cfg={cfg}
+        reason={state.reason}
+        onSignedIn={(session) =>
+          void enter(cfg, session).catch((e: Error) =>
+            setState({ kind: 'error', message: e.message }),
+          )
+        }
       />
     );
   }
 
   const { cfg, token, me, userName } = state;
-  const reload = () => void refresh(cfg);
+  const reload = () => void resume(cfg);
+  const leave = (reason: SignInReason) => {
+    clearTimeout(timer.current);
+    void signOut(cfg).then(() => setState({ kind: 'signedOut', cfg, reason }));
+  };
   if (me.stepUpRequired) return <StepUp cfg={cfg} token={token} onVerified={reload} />;
   if (!me.consent)
     return (
@@ -87,9 +121,9 @@ export function App() {
       token={token}
       me={me}
       userName={userName}
-      onSignOut={() => void signOut(cfg)}
-      // Admin actions need a sign-in within 5 minutes (design 6.3); prompt=login forces a fresh one.
-      onReauth={() => void auth(cfg).signinRedirect({ prompt: 'login' })}
+      onSignOut={() => leave('signedOut')}
+      // Admin actions need a sign-in within 5 minutes (design 6.3): sign in again on our screens.
+      onReauth={() => leave('reauth')}
     />
   );
 }

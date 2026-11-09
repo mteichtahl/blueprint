@@ -148,7 +148,6 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       env: home,
       envName,
       userPool: identity.userPool,
-      loginDomain: `${names.cognitoDomainPrefix(cfg, envName)}.auth.${cfg.account.homeRegion}.amazoncognito.com`,
       restApiId: api.api.restApiId,
       realtime: { httpDns: api.realtime.httpDns, realtimeDns: api.realtime.realtimeDns },
       uploadOrigin: `https://${names.bucket(cfg, envName, 'quarantine')}.s3.${cfg.account.homeRegion}.amazonaws.com`,
