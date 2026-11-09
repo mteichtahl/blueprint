@@ -106,6 +106,7 @@ const publicTodo = (t: Todo) => ({
   notes: t.notes ?? null,
   due: t.due ?? null,
   phaseId: t.phaseId ?? null,
+  submissionId: t.submissionId ?? null,
   done: t.done,
   source: t.source,
   bmgOnly: t.visibility === 'bmg-only',

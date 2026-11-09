@@ -110,6 +110,12 @@ export class ApiStack extends BmgStack {
       // The S3 presigners aren't guaranteed to be in the Lambda runtime.
       true,
     );
+    const review = fn('Review', 'review', 'submissions and the review queue', {
+      PROJECT: cfg.project,
+      BMG_ENV: env,
+      ACCOUNT_ID: this.account,
+      DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
+    });
     const artists = fn('Artists', 'artists', 'invite artists', {
       USER_POOL_ID: props.userPool.userPoolId,
       ONBOARDING_STATE_MACHINE_ARN: props.onboarding.stateMachineArn,
@@ -163,7 +169,7 @@ export class ApiStack extends BmgStack {
       ],
       [main],
     );
-    // Roster (GSI1) and all-artist to-dos (GSI2) only; GSI3 isn't used yet.
+    // Roster (GSI1) and all-artist to-dos (GSI2); GSI3 is the review queue (review function).
     allow(
       workspace,
       'WorkspaceIndexes',
@@ -192,6 +198,23 @@ export class ApiStack extends BmgStack {
       ...[...uploadPrefixes, libraryObjects].map((r) => `AwsSolutions-IAM5[Resource::${r}]`),
     );
     allow(
+      review,
+      'SubmissionItems',
+      [
+        'dynamodb:GetItem',
+        'dynamodb:BatchGetItem',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:Query',
+      ],
+      [main],
+    );
+    // GSI3: the review queue, by status then priority and date.
+    allow(review, 'ReviewQueue', ['dynamodb:Query'], [`${main}/index/GSI3`]);
+    // Notes and feedback are sealed with the artist's key, in a data-access session.
+    allow(review, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
+    putEvents(review);
+    allow(
       artists,
       'StartOnboarding',
       ['states:StartExecution'],
@@ -204,10 +227,10 @@ export class ApiStack extends BmgStack {
       [props.userPool.userPoolArn],
     );
     putEvents(artists);
-    for (const f of [authorizerFn, me, consent, artists, workspace, files]) {
+    for (const f of [authorizerFn, me, consent, artists, workspace, files, review]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
-    for (const f of [consent, stepUp, artists, workspace, files]) {
+    for (const f of [consent, stepUp, artists, workspace, files, review]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
     props.platformKey.grant(stepUp, 'kms:Decrypt');
@@ -314,6 +337,12 @@ export class ApiStack extends BmgStack {
     route('GET', '/artists/{artistId}/files/{fileId}', files);
     route('PATCH', '/artists/{artistId}/files/{fileId}', files);
     route('POST', '/artists/{artistId}/files/{fileId}/download', files);
+    route('GET', '/review-queue', review);
+    route('GET', '/artists/{artistId}/submissions', review);
+    route('POST', '/artists/{artistId}/submissions', review);
+    route('GET', '/artists/{artistId}/submissions/{submissionId}', review);
+    route('PATCH', '/artists/{artistId}/submissions/{submissionId}', review);
+    route('POST', '/artists/{artistId}/submissions/{submissionId}/feedback', review);
     route('GET', '/library/files', files);
     route('POST', '/library/files', files);
     route('GET', '/library/files/{fileId}', files);

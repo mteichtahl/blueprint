@@ -4,6 +4,7 @@ import type { AppConfig } from '../lib/config.ts';
 import { Button, Card, Field, Notice, Wordmark } from '../components/ui.tsx';
 import { PlanTab } from './Plan.tsx';
 import { ArtistFiles, Library } from './Library.tsx';
+import { ArtistSubmissions, ReviewQueue } from './Review.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
@@ -12,21 +13,32 @@ const ROLE_LABEL: Record<Me['role'], string> = {
   artist: 'Artist',
 };
 
-type View = 'overview' | 'artists' | 'todos' | 'library' | 'plan' | 'my-todos' | 'my-library';
+type View =
+  | 'overview'
+  | 'artists'
+  | 'todos'
+  | 'review'
+  | 'library'
+  | 'plan'
+  | 'my-todos'
+  | 'submit'
+  | 'my-library';
 const BMG_NAV: { id: View; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'artists', label: 'Artists' },
   { id: 'todos', label: 'Tasks & to-dos' },
+  { id: 'review', label: 'Review queue' },
   { id: 'library', label: 'Library' },
 ];
 const ARTIST_NAV: { id: View; label: string }[] = [
   { id: 'overview', label: 'Home' },
   { id: 'plan', label: 'My plan' },
   { id: 'my-todos', label: 'To-do' },
+  { id: 'submit', label: 'Submit for review' },
   { id: 'my-library', label: 'Library' },
 ];
 /** Shown greyed out until their Phase 3 PRs land. */
-const COMING = ['Messages', 'Review queue'];
+const COMING = ['Messages'];
 
 /** App shell (design: 264px navy sidebar, sticky top bar). Workspace screens arrive in the next Phase 3 PRs. */
 export function Home({
@@ -116,6 +128,18 @@ export function Home({
               <Roster artists={artists} onOpen={setOpenArtist} />
             ))}
           {view === 'todos' && <AllTodos cfg={cfg} token={token} artists={artists} />}
+          {view === 'review' && (
+            <>
+              <h1 className="font-title text-3xl">Review queue</h1>
+              <ReviewQueue cfg={cfg} token={token} artists={artists} />
+            </>
+          )}
+          {view === 'submit' && me.artistId && (
+            <>
+              <h1 className="font-title text-3xl">Submit for review</h1>
+              <ArtistSubmissions cfg={cfg} token={token} artistId={me.artistId} isBmg={false} />
+            </>
+          )}
           {view === 'library' && (
             <>
               <h1 className="font-title text-3xl">Document library</h1>
@@ -305,9 +329,9 @@ function Roster({
   );
 }
 
-const TABS = ['Plan', 'To-do', 'Library'] as const;
+const TABS = ['Plan', 'To-do', 'Submissions', 'Library'] as const;
 
-/** Artist workspace (BMG view): header plus tabs. Chat, submissions, gigs and stats arrive in later PRs. */
+/** Artist workspace (BMG view): header plus tabs. Chat, gigs and stats arrive in later PRs. */
 function ArtistWorkspace({
   cfg,
   token,
