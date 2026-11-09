@@ -499,6 +499,14 @@ describe('environment API', () => {
 describe('environment web app', () => {
   const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.web));
 
+  it('routes app paths at the edge without rewriting API errors', () => {
+    prod!.hasResourceProperties('AWS::CloudFront::Function', {
+      FunctionCode: Match.stringLikeRegexp('/index.html'),
+    });
+    const dist = Object.values(prod!.findResources('AWS::CloudFront::Distribution'))[0]!;
+    expect(dist.Properties.DistributionConfig.CustomErrorResponses).toBeUndefined();
+  });
+
   it('serves the site privately through CloudFront with the API on the same origin', () => {
     prod!.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({
