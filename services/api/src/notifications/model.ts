@@ -44,11 +44,14 @@ export type DomainEvent =
   | {
       type: 'message.created';
       conversationId: string;
-      conversationType: 'bmg-artist' | 'group' | 'broadcast' | 'artist-to-artist';
+      conversationType: 'bmg-artist' | 'group' | 'broadcast' | 'announcement' | 'artist-to-artist';
       artistIds: string[];
       senderSub: string;
       senderName: string;
       title?: string;
+      /** Inbox members (`BMG`, `ARTIST#id`) who muted the chat. */
+      mutedMembers?: string[];
+      system?: boolean;
     }
   | {
       type: 'gig.helpRequested';
@@ -135,23 +138,32 @@ export function plan(
         },
       };
     case 'message.created': {
-      const toArtists = artistsOf(e.artistIds).filter((r) => r.sub !== e.senderSub);
+      const muted = new Set(e.mutedMembers ?? []);
+      const toArtists = artistsOf(e.artistIds).filter(
+        (r) => r.sub !== e.senderSub && !muted.has(`ARTIST#${r.artistId}`),
+      );
       const broadcast = e.conversationType === 'broadcast';
       const to = broadcast
         ? everyone.filter((r) => r.role === 'artist')
-        : e.conversationType === 'artist-to-artist'
+        : e.conversationType === 'artist-to-artist' || e.conversationType === 'announcement'
           ? toArtists
-          : [
-              ...toArtists,
-              ...everyone.filter(
-                (r) => isBmg(r) && r.sub !== e.senderSub && bmgFor(r, e.artistIds),
-              ),
-            ];
+          : muted.has('BMG')
+            ? toArtists
+            : [
+                ...toArtists,
+                ...everyone.filter(
+                  (r) => isBmg(r) && r.sub !== e.senderSub && bmgFor(r, e.artistIds),
+                ),
+              ];
       return {
         to: to.filter((r) => r.sub !== e.senderSub),
         draft: {
           kind: 'message',
-          title: broadcast ? 'New message to all artists' : `New message from ${e.senderName}`,
+          title: broadcast
+            ? 'New message to all artists'
+            : e.conversationType === 'announcement'
+              ? `Announcement from ${e.senderName}`
+              : `New message from ${e.senderName}`,
           body: e.title ? `In ${e.title}.` : 'Open the app to read it.',
           link: `chat:${e.conversationId}`,
           throttleKey: e.conversationId,

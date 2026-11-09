@@ -40,7 +40,7 @@ import { useNotifications, type AppNotification } from '../lib/notifications.ts'
 import { useDeepLink } from '../lib/push.ts';
 import { ArtistFiles, Library } from './Library.tsx';
 import { Profile } from './Profile.tsx';
-import { ArtistChats, BmgMessages, useInbox, type ConversationSummary } from './Messages.tsx';
+import { ArtistChats, BmgChat, useInbox, type ConversationSummary } from './Messages.tsx';
 import { markdownToText } from '../lib/markdown.ts';
 import { PlanStages, PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
@@ -100,35 +100,28 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
 
   const inbox = useInbox(cfg, token, me);
   const notes = useNotifications(cfg, token, me.sub);
+  const [chatTarget, setChatTarget] = useState<string | null>(null);
+  const openChat = (id: string | null) => {
+    setChatTarget(id);
+    setView('messages');
+  };
+  const LINK_VIEWS: Record<string, string> = {
+    review: 'review',
+    library: 'library',
+    submit: 'review',
+    gigs: 'gigs',
+    connectors: 'connectors',
+  };
   const goTo = (link: string) =>
-    setView(
-      link.startsWith('chat:')
-        ? 'messages'
-        : ((
-            {
-              review: 'review',
-              library: 'library',
-              submit: 'review',
-              gigs: 'gigs',
-              connectors: 'connectors',
-            } as Record<string, string>
-          )[link] ?? 'overview'),
-    );
+    link.startsWith('chat:')
+      ? openChat(link.slice('chat:'.length) || null)
+      : setView(LINK_VIEWS[link] ?? 'overview');
   useDeepLink(goTo);
   const openNotification = (n: AppNotification) => {
     void notes.markRead([n.id]);
-    setView(
-      n.link.startsWith('chat:')
-        ? 'messages'
-        : ((
-            { review: 'review', library: 'library', submit: 'review', gigs: 'gigs' } as Record<
-              string,
-              string
-            >
-          )[n.link] ?? 'overview'),
-    );
+    goTo(n.link);
   };
-  const unread = (inbox.conversations ?? []).filter((c) => c.unread).length;
+  const unread = inbox.unreadChats;
   const reviewsFor = (id: string) => openReviews.filter((s) => s.artistId === id).length;
   const sections: NavSection[] = [
     { items: [{ id: 'overview', label: 'Overview', icon: 'home' }] },
@@ -163,7 +156,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       items: [
         {
           id: 'messages',
-          label: 'Messages & groups',
+          label: 'Chat',
           icon: 'chat',
           coral: true,
           badge: unread || undefined,
@@ -246,7 +239,16 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           onInvited={() => void load()}
         />
       )}
-      {openArtist && <ArtistWorkspace cfg={cfg} token={token} me={me} artist={openArtist} />}
+      {openArtist && (
+        <ArtistWorkspace
+          cfg={cfg}
+          token={token}
+          me={me}
+          artist={openArtist}
+          onNavigate={setView}
+          onOpenChat={openChat}
+        />
+      )}
       {view === 'insights' && (
         <>
           <PageHeader
@@ -300,10 +302,17 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         <>
           <PageHeader
             eyebrow="Shared with artists"
-            title="Messages & groups"
-            sub="Direct chats, groups you create, and the all-artists broadcast."
+            title="Chat"
+            sub="Direct chats with artists, groups and announcements."
           />
-          <BmgMessages cfg={cfg} token={token} me={me} artists={artists} />
+          <BmgChat
+            cfg={cfg}
+            token={token}
+            me={me}
+            artists={artists}
+            onNavigate={setView}
+            initialConversationId={chatTarget}
+          />
         </>
       )}
       {view === 'todos' && (
@@ -504,17 +513,17 @@ function StudioHq({
 
         <Card
           className="flex-[1_1_320px]"
-          title="Messages"
+          title="Chat"
           action={
-            conversations.some((c) => c.unread) && (
-              <Tag tone="k">{conversations.filter((c) => c.unread).length} unread</Tag>
+            conversations.some((c) => c.unreadCount > 0) && (
+              <Tag tone="k">{conversations.filter((c) => c.unreadCount > 0).length} unread</Tag>
             )
           }
           footer={go('messages')}
         >
           {conversations.slice(0, 3).map((c) => (
             <div key={c.conversationId} className="flex items-center gap-3">
-              {c.type === 'broadcast' ? (
+              {c.type === 'announcement' ? (
                 <span className="av bg-[#E6E9ED] text-[11px] text-[#011935]">ALL</span>
               ) : (
                 <Avatar name={c.title} />
@@ -523,7 +532,7 @@ function StudioHq({
                 <b className="block">{c.title}</b>
                 <span className="src block truncate">{c.preview ?? 'No messages yet'}</span>
               </span>
-              {c.unread && <Tag tone="k">New</Tag>}
+              {c.unreadCount > 0 && <Tag tone="k">{c.unreadCount}</Tag>}
             </div>
           ))}
         </Card>
@@ -823,11 +832,13 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const [asking, setAsking] = useState(false);
   const notes = useNotifications(cfg, token, me.sub);
-  useDeepLink((link) =>
+  const [chatTarget, setChatTarget] = useState<string | null>(null);
+  useDeepLink((link) => {
+    if (link.startsWith('chat:')) setChatTarget(link.slice('chat:'.length) || null);
     setView(
       link.startsWith('chat:') ? 'chat' : link === 'submit' || link === 'library' ? link : 'home',
-    ),
-  );
+    );
+  });
   const [view, setView] = useState<ArtistView>(hasPendingCallback() ? 'connectors' : 'home');
   const artistId = me.artistId!;
   const first = userName.split(' ')[0];
@@ -840,7 +851,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   ];
   const headers: Record<ArtistView, { eyebrow: string; title: string }> = {
     home: { eyebrow: 'Blueprint', title: `Hi ${first}` },
-    chat: { eyebrow: 'Chats', title: 'Messages' },
+    chat: { eyebrow: 'Blueprint', title: 'Chat' },
     profile: { eyebrow: 'Profile & preferences', title: userName },
     todo: { eyebrow: 'To-do', title: 'This week' },
     library: { eyebrow: 'Library & assets', title: 'Your files' },
@@ -885,6 +896,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                   onMarkAll={() => void notes.markRead('all')}
                   onOpen={(n) => {
                     void notes.markRead([n.id]);
+                    if (n.link.startsWith('chat:'))
+                      setChatTarget(n.link.slice('chat:'.length) || null);
                     setView(
                       n.link.startsWith('chat:')
                         ? 'chat'
@@ -912,7 +925,15 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       }
     >
       {view === 'home' && <ArtistHome cfg={cfg} token={token} me={me} onNavigate={setView} />}
-      {view === 'chat' && <ArtistChats cfg={cfg} token={token} me={me} />}
+      {view === 'chat' && (
+        <ArtistChats
+          cfg={cfg}
+          token={token}
+          me={me}
+          onNavigate={(v) => setView(v as ArtistView)}
+          initialConversationId={chatTarget}
+        />
+      )}
       {view === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artistId} isBmg={false} />}
       {view === 'library' && (
         <>

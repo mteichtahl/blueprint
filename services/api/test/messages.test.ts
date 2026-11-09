@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   access,
   artistPairId,
+  canAddMembers,
+  canSend,
+  canShareFiles,
+  decodePayload,
+  encodePayload,
+  NewMessage,
+  previewOf,
+  publicType,
+  ticks,
   channelsFor,
   CONVERSATION_ID_PATTERN,
   members,
@@ -91,5 +100,78 @@ describe('sealing', () => {
       conversationId: 'aa-x',
     });
     expect(wrapContext('dm-x')).not.toHaveProperty('artistId');
+  });
+});
+
+describe('WhatsApp-style chat rules', () => {
+  const group = (settings = {}) => ({
+    type: 'group' as const,
+    artistIds: [A, B],
+    settings: {
+      onlyAdminsSend: false,
+      artistsShareFiles: true,
+      artistsAddMembers: false,
+      ...settings,
+    },
+  });
+  const ann = { type: 'announcement' as const, artistIds: [A, B] };
+
+  it('lets artists read announcements but only Blueprint post', () => {
+    expect(access(artistA, ann)).toBe('read');
+    expect(access(artistC, ann)).toBe('none');
+    expect(canSend(artistA, ann)).toBe(false);
+    expect(canSend(admin, ann)).toBe(true);
+    expect(publicType('broadcast')).toBe('announcement');
+  });
+
+  it('honours group settings', () => {
+    expect(canSend(artistA, group())).toBe(true);
+    expect(canSend(artistA, group({ onlyAdminsSend: true }))).toBe(false);
+    expect(canSend(admin, group({ onlyAdminsSend: true }))).toBe(true);
+    expect(canShareFiles(artistA, group({ artistsShareFiles: false }))).toBe(false);
+    expect(canAddMembers(artistA, group())).toBe(false);
+    expect(canAddMembers(artistA, group({ artistsAddMembers: true }))).toBe(true);
+    expect(canAddMembers(staffA, { ...group(), artistIds: [A] })).toBe(true);
+    expect(canAddMembers(staffA, group())).toBe(false);
+    expect(canAddMembers(artistA, ann)).toBe(false);
+  });
+
+  it('works out ticks from the other members', () => {
+    const at = '2026-11-09T10:00:00.000Z';
+    const later = '2026-11-09T10:05:00.000Z';
+    const earlier = '2026-11-09T09:00:00.000Z';
+    expect(ticks(at, [])).toBe('sent');
+    expect(ticks(at, [{ lastOnlineAt: earlier }])).toBe('sent');
+    expect(ticks(at, [{ lastOnlineAt: later }])).toBe('delivered');
+    expect(ticks(at, [{ lastReadAt: later }, { lastOnlineAt: later }])).toBe('delivered');
+    expect(ticks(at, [{ lastReadAt: later }, { lastReadAt: later }])).toBe('read');
+  });
+
+  it('round-trips the payload and still reads old plain-text messages', () => {
+    const p = {
+      text: 'see this',
+      replyTo: { messageId: 'm1', senderName: 'Kyra', text: 'hi' },
+      attachment: { kind: 'file' as const, id: 'doc_1', title: 'Rider.pdf' },
+    };
+    expect(decodePayload(encodePayload(p))).toEqual(p);
+    expect(decodePayload('just text')).toEqual({ text: 'just text' });
+    expect(previewOf({ text: '', attachment: p.attachment })).toContain('Rider.pdf');
+  });
+
+  it('needs text or an attachment', () => {
+    expect(NewMessage.safeParse({ text: '' }).success).toBe(false);
+    expect(
+      NewMessage.safeParse({ attachment: { kind: 'todo', id: 't1', title: 'Book flights' } })
+        .success,
+    ).toBe(true);
+  });
+
+  it('keeps groups and announcements to Blueprint', () => {
+    const req = { kind: 'group' as const, title: 'Tour', artistIds: [B, A] };
+    expect(planConversation(artistA, req)).toMatchObject({ ok: false });
+    expect(planConversation(admin, req)).toMatchObject({ ok: true, artistIds: [A, B] });
+    expect(
+      planConversation(admin, { kind: 'announcement', title: 'News', artistIds: [A] }),
+    ).toMatchObject({ ok: true, type: 'announcement' });
   });
 });

@@ -70,6 +70,36 @@ describe('who hears about what', () => {
     };
     expect(subs(plan(e, people))).toEqual(['kyra', 'staffA']);
   });
+  it('skips members who muted the chat', () => {
+    const e = {
+      type: 'message.created' as const,
+      conversationId: 'grp-x',
+      conversationType: 'group' as const,
+      artistIds: [A, B],
+      senderSub: 'kyra',
+      senderName: 'Blueprint',
+      mutedMembers: [`ARTIST#${B}`],
+    };
+    expect(subs(plan(e, people))).toEqual(['chloe']);
+    expect(subs(plan({ ...e, senderSub: 'chloe', mutedMembers: ['BMG'] }, people))).toEqual([
+      'sarun',
+    ]);
+  });
+  it('sends announcements to the listed artists only', () => {
+    const d = plan(
+      {
+        type: 'message.created',
+        conversationId: 'ann-xxxxxxxxxx',
+        conversationType: 'announcement',
+        artistIds: [A],
+        senderSub: 'kyra',
+        senderName: 'Kyra',
+      },
+      people,
+    )!;
+    expect(subs(d)).toEqual(['chloe']);
+    expect(d.draft.title).toBe('Announcement from Kyra');
+  });
   it('never puts message text in a notification', () => {
     const d = plan(
       {

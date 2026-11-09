@@ -194,3 +194,14 @@ The full design is in the [solution design document](https://claude.ai/artifact/
     - **Reconciliation runs hourly** rather than daily. It fixes any drift and raises the `ai-consent-drift` alarm, so an opted-out artist is gone within the hour even if an event was lost.
     - The `ai-kb-count` alarm fires at 40 per environment, because the limit is 100 per Region and staging and prod share it.
   - **The BMG knowledge base** is created by the first reconciliation run, within an hour of the first deploy. Artists don't search Blueprint's library yet. That needs per-artist sharing on chunks, which comes later.
+
+## Notes: WhatsApp-style Chat (9 Nov 2026)
+
+- **"Messages & groups" is now "Chat"**: one list for direct chats, groups and announcements, with WhatsApp's look (`.wa-*` styles). The API contract is in [chat-api.md](chat-api.md).
+- **Announcements replace the all-artists broadcast.** Blueprint picks the artists; they can read but not post, and a reply goes to their private chat with Blueprint. The old broadcast is still served, reported as an announcement.
+- **Groups and announcements are Blueprint's to create** (staff only from their own artists). The group settings are "Only admins can send messages", "Artists can share files" and "Artists can add members". Only an admin can delete a group, and deleting hides it rather than erasing the sealed history.
+- **Artist-to-artist chats stay private.** Their keys only open in an artist session, as before.
+- **Per-person state lives on the inbox row:** pinned, muted, archived, cleared and starred. Muted members get no email or push for that chat. "Clear chat" hides what came before, for that person only.
+- **Ticks:** one slate tick = sent; two slate = every other member has opened the app since (a `PRESENCE#` row, written when the chat list loads); two coral = everyone has read it. The broadcast has no member list, so it shows "sent".
+- **Message payloads are versioned** (`v:2`: text, reply quote, in-bubble card, system flag) and sealed as before. Older plain-text messages still open. Cards carry ids and titles only; opening one goes through the usual access checks.
+- **System notes** ("Kyra created this group", "added", "removed", "changed the name") are written as sealed messages, so they share the chat's key and history.

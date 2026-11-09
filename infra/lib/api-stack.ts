@@ -231,7 +231,7 @@ export class ApiStack extends BmgStack {
       },
     });
 
-    const messages = fn('Messages', 'messages', 'messages and groups', {
+    const messages = fn('Messages', 'messages', 'chat', {
       PROJECT: cfg.project,
       BMG_ENV: env,
       ACCOUNT_ID: this.account,
@@ -630,6 +630,7 @@ export class ApiStack extends BmgStack {
         'dynamodb:BatchGetItem',
         'dynamodb:PutItem',
         'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
         'dynamodb:Query',
         'dynamodb:ConditionCheckItem',
       ],
@@ -1021,6 +1022,11 @@ export class ApiStack extends BmgStack {
     route('GET', '/insights', connectors);
     route('GET', '/conversations', messages);
     route('POST', '/conversations', messages);
+    route('PATCH', '/conversations/{conversationId}', messages);
+    route('DELETE', '/conversations/{conversationId}', messages);
+    route('PATCH', '/conversations/{conversationId}/me', messages);
+    route('POST', '/conversations/{conversationId}/members', messages);
+    route('DELETE', '/conversations/{conversationId}/members/{artistId}', messages);
     route('GET', '/conversations/{conversationId}/messages', messages);
     route('POST', '/conversations/{conversationId}/messages', messages);
     route('GET', '/directory', messages);
