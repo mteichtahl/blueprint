@@ -292,6 +292,7 @@ export class ApiStack extends BmgStack {
       ACCOUNT_ID: this.account,
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
     });
+    const gigsEvents = fn('Events', 'events', 'artist gigs and Blueprint events');
     const smtpSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.smtpSecret(cfg, env)}-*`;
     const webUrlParam = names.ssm(cfg, env, 'web/url');
     const artists = fn('Artists', 'artists', 'invite artists', {
@@ -447,6 +448,21 @@ export class ApiStack extends BmgStack {
     allow(review, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
     putEvents(review);
     allow(
+      gigsEvents,
+      'GigAndEventItems',
+      [
+        'dynamodb:GetItem',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
+        'dynamodb:Query',
+      ],
+      [main],
+    );
+    // GSI3 also holds every shared gig (GSI3PK GIGS) for Blueprint's "Artist gigs".
+    allow(gigsEvents, 'SharedGigs', ['dynamodb:Query'], [`${main}/index/GSI3`]);
+    putEvents(gigsEvents);
+    allow(
       messages,
       'ConversationItems',
       [
@@ -550,6 +566,7 @@ export class ApiStack extends BmgStack {
           'submission.feedbackGiven',
           'message.created',
           'file.rejected',
+          'gig.helpRequested',
         ],
       },
       targets: [
@@ -635,10 +652,21 @@ export class ApiStack extends BmgStack {
       review,
       messages,
       notifications,
+      gigsEvents,
     ]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
-    for (const f of [consent, stepUp, artists, workspace, files, review, messages, notifications]) {
+    for (const f of [
+      consent,
+      stepUp,
+      artists,
+      workspace,
+      files,
+      review,
+      messages,
+      notifications,
+      gigsEvents,
+    ]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
     props.platformKey.grant(stepUp, 'kms:Decrypt');
@@ -758,6 +786,17 @@ export class ApiStack extends BmgStack {
     route('GET', '/artists/{artistId}/submissions/{submissionId}', review);
     route('PATCH', '/artists/{artistId}/submissions/{submissionId}', review);
     route('POST', '/artists/{artistId}/submissions/{submissionId}/feedback', review);
+    route('GET', '/gigs', gigsEvents);
+    route('GET', '/artists/{artistId}/gigs', gigsEvents);
+    route('POST', '/artists/{artistId}/gigs', gigsEvents);
+    route('PATCH', '/artists/{artistId}/gigs/{gigId}', gigsEvents);
+    route('GET', '/events', gigsEvents);
+    route('POST', '/events', gigsEvents);
+    route('GET', '/events/{eventId}', gigsEvents);
+    route('PATCH', '/events/{eventId}', gigsEvents);
+    route('POST', '/events/{eventId}/{part}', gigsEvents);
+    route('PATCH', '/events/{eventId}/{part}/{itemId}', gigsEvents);
+    route('DELETE', '/events/{eventId}/{part}/{itemId}', gigsEvents);
     route('GET', '/conversations', messages);
     route('POST', '/conversations', messages);
     route('GET', '/conversations/{conversationId}/messages', messages);

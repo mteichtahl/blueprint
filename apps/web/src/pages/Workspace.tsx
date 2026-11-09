@@ -11,6 +11,7 @@ import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
 import { markdownToText } from '../lib/markdown.ts';
 import { Avatar, Bar, Button, Card, shortDate, Tag } from '../components/ui.tsx';
+import { GigsTab } from './Gigs.tsx';
 import { ArtistFiles } from './Library.tsx';
 import { ArtistChatTab } from './Messages.tsx';
 import { PlanTab } from './PlanLazy.tsx';
@@ -24,7 +25,7 @@ const TABS = [
   { id: 'plan', label: 'Plan' },
   { id: 'todo', label: 'To-do' },
   { id: 'submissions', label: 'Submissions' },
-  { id: 'gigs', label: 'Gigs', soon: true },
+  { id: 'gigs', label: 'Gigs' },
   { id: 'library', label: 'Library' },
   { id: 'assets', label: 'Assets', soon: true },
   { id: 'brand', label: 'Brand kit', soon: true },
@@ -171,6 +172,7 @@ export function ArtistWorkspace({
       {tab === 'submissions' && (
         <ArtistSubmissions cfg={cfg} token={token} artistId={artist.artistId} isBmg />
       )}
+      {tab === 'gigs' && <GigsTab cfg={cfg} token={token} artist={artist} />}
       {tab === 'library' && (
         <ArtistFiles
           cfg={cfg}

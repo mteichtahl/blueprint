@@ -105,3 +105,15 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - Each person turns push on per device in Profile. The device is stored under a hash of its endpoint and removed when the push service says it's gone (404/410).
   - Pushes carry the notification's title, body and link only, and follow the same quiet hours as email.
   - On iPhone, web push works only once Blueprint is added to the Home Screen (iOS 16.4+). Profile says so.
+
+## Phase 4: events, insights and connectors
+
+- **Gigs** are stored per artist at `ARTIST#id / GIG#id`. Artists plan their own in My gigs, and each gig is shared with Blueprint unless they turn sharing off. An unshared gig is marked `private`, so authz hides it from Blueprint. Gigs Blueprint adds for an artist are always shared, and only the artist can change whether a gig is shared.
+- Shared gigs also go into GSI3 (`GSI3PK = GIGS`, sorted by date, artist and gig). That index is how "Artist gigs" lists gigs across all artists without scanning the table.
+- **Help requests:** an artist asks for help with the pitch email, budget, promo or set list, and can add a note. Asking also shares the gig. A `gig.helpRequested` event notifies Blueprint (admins, plus staff assigned to that artist) through the bell, email and push.
+  - On the help card, Blueprint can reply in the artist's chat (the direct conversation) or turn a topic into a to-do due on the gig date. Either the artist or Blueprint can mark the help as done.
+- **Events** (the Industry Mixer Night and later events) are BMG-only. Each event is stored at `ORG#events / EVENT#id`, with its parts under `EVENT#id`: guests, speakers, crew, run sheet and budget.
+  - The four headline cards (tickets, industry comps, in the room, budget) are calculated by the API.
+  - Ticket sales are typed in until the Humanitix connector links the event (`humanitixEventId`).
+  - Money is stored in cents.
+- **Patches only change what was sent.** Zod's `.partial()` still fills in default values, so a patch could reset fields nobody touched. Patch schemas therefore come from `patchOf()`, which makes every field optional, removes defaults and rejects unknown fields.

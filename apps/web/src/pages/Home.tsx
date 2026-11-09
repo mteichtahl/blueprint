@@ -41,6 +41,8 @@ import { markdownToText } from '../lib/markdown.ts';
 import { PlanStages, PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
+import { Events } from './Events.tsx';
+import { AllGigs, ArtistGigs } from './Gigs.tsx';
 import { ArtistWorkspace } from './Workspace.tsx';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
@@ -75,14 +77,17 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [view, setView] = useState('overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
   const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
+  const [gigHelp, setGigHelp] = useState(0);
 
   const load = useCallback(async () => {
-    const [roster, queue] = await Promise.all([
+    const [roster, queue, help] = await Promise.all([
       api<{ artists: ArtistSummary[] }>(cfg, token, 'GET', '/artists'),
       api<{ submissions: SubmissionSummary[] }>(cfg, token, 'GET', '/review-queue?status=open'),
+      api<{ gigs: unknown[] }>(cfg, token, 'GET', '/gigs?filter=help').catch(() => ({ gigs: [] })),
     ]);
     setArtists(roster.artists);
     setOpenReviews(queue.submissions);
+    setGigHelp(help.gigs.length);
   }, [cfg, token]);
   useEffect(() => void load().catch(() => undefined), [load]);
 
@@ -92,9 +97,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     setView(
       link.startsWith('chat:')
         ? 'messages'
-        : (({ review: 'review', library: 'library', submit: 'review' } as Record<string, string>)[
-            link
-          ] ?? 'overview'),
+        : ((
+            { review: 'review', library: 'library', submit: 'review', gigs: 'gigs' } as Record<
+              string,
+              string
+            >
+          )[link] ?? 'overview'),
     );
   useDeepLink(goTo);
   const openNotification = (n: AppNotification) => {
@@ -102,9 +110,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     setView(
       n.link.startsWith('chat:')
         ? 'messages'
-        : (({ review: 'review', library: 'library', submit: 'review' } as Record<string, string>)[
-            n.link
-          ] ?? 'overview'),
+        : ((
+            { review: 'review', library: 'library', submit: 'review', gigs: 'gigs' } as Record<
+              string,
+              string
+            >
+          )[n.link] ?? 'overview'),
     );
   };
   const unread = (inbox.conversations ?? []).filter((c) => c.unread).length;
@@ -120,7 +131,13 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           avatar: a.displayName,
           badge: reviewsFor(a.artistId) || undefined,
         })),
-        { id: 'gigs', label: 'Artist gigs', icon: 'mic', soon: true },
+        {
+          id: 'gigs',
+          label: 'Artist gigs',
+          icon: 'mic',
+          badge: gigHelp ? `${gigHelp} need help` : undefined,
+          badgeTone: 'w',
+        },
         {
           id: 'artists',
           label: 'Artists & applications',
@@ -156,7 +173,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     {
       label: 'BMG ONLY',
       items: [
-        { id: 'events', label: 'Events', icon: 'calendar', soon: true },
+        { id: 'events', label: 'Events', icon: 'calendar' },
         { id: 'newsroom', label: 'Newsroom', icon: 'mail', soon: true },
         { id: 'connectors', label: 'Connectors', icon: 'plug', soon: true },
         { id: 'access', label: 'Access & permissions', icon: 'lock', soon: true },
@@ -272,6 +289,22 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           <ReviewQueue cfg={cfg} token={token} artists={artists} onChanged={() => void load()} />
         </>
       )}
+      {view === 'gigs' && (
+        <>
+          <PageHeader
+            eyebrow="Artist workspaces"
+            title="Artist gigs"
+            sub="Gigs artists share with Blueprint, with help requests first."
+          />
+          <AllGigs
+            cfg={cfg}
+            token={token}
+            artists={artists}
+            onOpenArtist={(id) => setView(`artist:${id}`)}
+          />
+        </>
+      )}
+      {view === 'events' && <Events cfg={cfg} token={token} />}
       {view === 'library' && (
         <>
           <PageHeader
@@ -713,7 +746,7 @@ function InviteArtist({
 
 // ═════════════════════════════ Artist phone app ═════════════════════════════
 
-type ArtistView = 'home' | 'chat' | 'todo' | 'library' | 'submit' | 'plan' | 'profile';
+type ArtistView = 'home' | 'chat' | 'todo' | 'gigs' | 'library' | 'submit' | 'plan' | 'profile';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
@@ -730,7 +763,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     { id: 'home', label: 'Home', icon: 'home' as const },
     { id: 'chat', label: 'Chat', icon: 'chat' as const },
     { id: 'todo', label: 'To-do', icon: 'todo' as const },
-    { id: 'gigs', label: 'Gigs', icon: 'mic' as const, soon: true },
+    { id: 'gigs', label: 'Gigs', icon: 'mic' as const },
     { id: 'library', label: 'Library', icon: 'folder' as const },
   ];
   const headers: Record<ArtistView, { eyebrow: string; title: string }> = {
@@ -741,6 +774,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     library: { eyebrow: 'Library & assets', title: 'Your files' },
     submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
     plan: { eyebrow: 'My plan', title: 'Your plan' },
+    gigs: { eyebrow: 'Gigs', title: 'My gigs' },
   };
   const back = view === 'submit' || view === 'plan' || view === 'profile';
 
@@ -809,6 +843,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
         <ArtistSubmissions cfg={cfg} token={token} artistId={artistId} isBmg={false} />
       )}
       {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
+      {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} />}
       {view === 'profile' && (
         <Profile
           cfg={cfg}

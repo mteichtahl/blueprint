@@ -140,3 +140,24 @@ describe('web push', () => {
     expect(Object.keys(p).sort()).toEqual(['body', 'link', 'tag', 'title']);
   });
 });
+
+describe('gig help', () => {
+  it('tells Blueprint what the artist needs a hand with', () => {
+    const p = plan(
+      {
+        type: 'gig.helpRequested',
+        artistId: 'art_aaaaaaaaaaaa',
+        gigId: 'g1',
+        title: 'Headline set',
+        topics: ['pitch', 'budget'],
+        artistName: 'Chloe Poli',
+      },
+      [
+        { sub: 'a', role: 'bmg-admin' },
+        { sub: 'c', role: 'artist', artistId: 'art_aaaaaaaaaaaa' },
+      ] as never,
+    );
+    expect(p?.to.map((r) => r.sub)).toEqual(['a']);
+    expect(p?.draft.body).toBe('“Headline set”: help with the pitch email, the budget.');
+  });
+});
