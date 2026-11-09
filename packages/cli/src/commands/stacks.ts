@@ -6,7 +6,7 @@ import { executePlan, ok, type GlobalOptions, type PlanStep } from '../lib/runti
 import { failedCreate, removeFailedCreate } from '../lib/stacks.ts';
 
 /**
- * `bmg stacks repair`: removes BMG stacks whose first create failed
+ * `blueprint stacks repair`: removes BMG stacks whose first create failed
  * (ROLLBACK_COMPLETE, ROLLBACK_FAILED or REVIEW_IN_PROGRESS). They hold no
  * resources, but termination protection stops CloudFormation (and the
  * pipeline) from replacing them, so the next deploy can't run until they're gone.

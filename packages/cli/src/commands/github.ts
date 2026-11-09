@@ -21,7 +21,7 @@ import {
 
 const CONNECTION_NAME = 'bmg-github';
 
-/** `bmg github connect`: CodeConnections link so CodeBuild can host the GitHub runners. */
+/** `blueprint github connect`: CodeConnections link so CodeBuild can host the GitHub runners. */
 export async function githubConnect(opts: GlobalOptions): Promise<void> {
   const cfg = readConfig();
   await assertAccount(cfg);
@@ -76,7 +76,7 @@ export async function githubConnect(opts: GlobalOptions): Promise<void> {
     }
   }
   if (status !== 'AVAILABLE') {
-    warn(`Connection is ${status}. Re-run \`bmg github connect\` after approving it.`);
+    warn(`Connection is ${status}. Re-run \`blueprint github connect\` after approving it.`);
     process.exitCode = 1;
   } else {
     ok(`Connection AVAILABLE: ${arn}`);
@@ -90,7 +90,7 @@ async function ghUserId(login: string): Promise<number> {
   return Number(r.stdout.trim());
 }
 
-/** `bmg github protect`: repo settings for a public repo on self-hosted runners (16.2-16.4). */
+/** `blueprint github protect`: repo settings for a public repo on self-hosted runners (16.2-16.4). */
 export async function githubProtect(opts: GlobalOptions): Promise<void> {
   const cfg = readConfig();
   const reviewerIds = await Promise.all(cfg.github.productionReviewers.map(ghUserId));

@@ -21,9 +21,9 @@ export interface BuildAppOptions {
 
 /**
  * Stack layout (one AWS account, design section 4):
- *   bmg-account-guardrails  home region  admin-deployed (`bmg account setup`)
+ *   bmg-account-guardrails  home region  admin-deployed (`blueprint account setup`)
  *   bmg-account-global      us-east-1    admin-deployed (root alarm, budget)
- *   bmg-tooling             home region  admin-deployed (`bmg pipeline deploy`)
+ *   bmg-tooling             home region  admin-deployed (`blueprint pipeline deploy`)
  *   bmg-<env>-foundation    home region  pipeline-deployed (platform key, alarms)
  *   bmg-<env>-data          home region  pipeline-deployed (DynamoDB tables)
  *   bmg-<env>-identity      home region  pipeline-deployed (Cognito, triggers)

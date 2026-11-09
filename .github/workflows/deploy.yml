@@ -39,7 +39,7 @@ jobs:
           cache: npm
       - name: Require committed bmg.config.json
         run: |
-          test -f bmg.config.json || { echo "::error::Run 'npm run bmg -- init' and commit bmg.config.json"; exit 1; }
+          test -f bmg.config.json || { echo "::error::Run 'blueprint init' and commit bmg.config.json"; exit 1; }
       - run: npm ci --no-audit --no-fund
       - name: Build web app
         run: npm run build -w @bmg/web

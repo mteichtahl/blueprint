@@ -10,7 +10,7 @@ import { BmgStack, type BmgStackProps } from './common.ts';
 
 export interface EnvFoundationStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   readonly envName: EnvironmentName;
-  /** Git commit being deployed, recorded for `bmg status`. */
+  /** Git commit being deployed, recorded for `blueprint status`. */
   readonly version?: string;
 }
 

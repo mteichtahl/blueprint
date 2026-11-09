@@ -15,7 +15,7 @@ import { verifyIsolation } from './commands/verify.ts';
 import { fail, type GlobalOptions } from './lib/runtime.ts';
 
 const program = new Command()
-  .name('bmg')
+  .name('blueprint')
   .description(
     'One-time setup for the BMG platform. First run, in order:\n' +
       '  init → doctor → bootstrap → account setup → github connect → github protect\n' +
