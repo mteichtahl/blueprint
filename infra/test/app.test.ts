@@ -1,10 +1,11 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
 import { names, parseConfig } from '@bmg/config';
 import { buildApp } from '../lib/app.ts';
+import { REPO_ROOT } from '../lib/function.ts';
 
 const cfg = parseConfig(
   JSON.parse(readFileSync(resolve(import.meta.dirname, '../../bmg.config.example.json'), 'utf8')),
@@ -612,6 +613,19 @@ describe('environment assistant (AI stack)', () => {
       Properties: Record<string, unknown>;
     };
     expect(runtime.Properties.AuthorizerConfiguration).toBeUndefined();
+  });
+
+  it('gives AgentCore a .js entry point, marked as an ES module', () => {
+    // NODE_22 rejects any other extension ("Entrypoint file type does not match").
+    staging!.hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
+      AgentRuntimeArtifact: {
+        CodeConfiguration: Match.objectLike({ EntryPoint: ['server.js'] }),
+      },
+    });
+    const dir = join(REPO_ROOT, 'infra', '.agent-build', 'staging');
+    expect(existsSync(join(dir, 'server.js'))).toBe(true);
+    expect(existsSync(join(dir, 'server.mjs'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).type).toBe('module');
   });
 
   it('guards against prompt attacks through the Sydney-only guardrail profile', () => {

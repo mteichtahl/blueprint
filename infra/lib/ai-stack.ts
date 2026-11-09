@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CfnOutput, RemovalPolicy } from 'aws-cdk-lib';
 import {
@@ -117,11 +117,18 @@ export class AiStack extends BmgStack {
     });
 
     // ── The agent, bundled at synth (esbuild, like the Lambdas) ──
+    // AgentCore's NODE_22 runtime only accepts a `.js` entry point, so the ESM
+    // bundle is `server.js` beside a package.json that marks it as a module.
     const outDir = join(REPO_ROOT, 'infra', '.agent-build', env);
+    rmSync(outDir, { recursive: true, force: true });
     mkdirSync(outDir, { recursive: true });
+    writeFileSync(
+      join(outDir, 'package.json'),
+      `${JSON.stringify({ name: 'bmg-agent', private: true, type: 'module' }, null, 2)}\n`,
+    );
     buildSync({
       entryPoints: [join(REPO_ROOT, 'services/agent/src/server.ts')],
-      outfile: join(outDir, 'server.mjs'),
+      outfile: join(outDir, 'server.js'),
       bundle: true,
       platform: 'node',
       target: 'node22',
@@ -141,7 +148,7 @@ export class AiStack extends BmgStack {
       agentRuntimeArtifact: AgentRuntimeArtifact.fromCodeAsset({
         path: outDir,
         runtime: AgentCoreRuntime.NODE_22,
-        entrypoint: ['server.mjs'],
+        entrypoint: ['server.js'],
       }),
       // Only IAM callers (the API's chat function); people never call it directly.
       authorizerConfiguration: RuntimeAuthorizerConfiguration.usingIAM(),
