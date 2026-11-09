@@ -166,6 +166,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
     - library files under the platform key.
 
     It then sends the file inline. Bedrock therefore needs no access to any artist key, and the per-artist "AI grant" from the design isn't needed. Consent is checked before every read, and the knowledge base of an opted-out artist doesn't exist.
+
   - **What goes in:**
     - Private items never go in, so no knowledge base can return them to Blueprint. The cost is that an artist's own assistant can't search their private files either.
     - Blueprint-only items are filtered out of an artist's own searches by code: `visibility != bmg-only`, set server-side.
