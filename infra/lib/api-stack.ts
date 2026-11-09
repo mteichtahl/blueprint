@@ -900,6 +900,7 @@ export class ApiStack extends BmgStack {
     route('POST', '/ai/actions/confirm', aiActions);
     route('GET', '/ai/tools/artists', aiTools);
     route('GET', '/ai/tools/workspace', aiTools);
+    route('GET', '/ai/tools/search', aiTools);
     route('GET', '/conversations', messages);
     route('POST', '/conversations', messages);
     route('GET', '/conversations/{conversationId}/messages', messages);
