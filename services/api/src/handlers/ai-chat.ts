@@ -62,6 +62,21 @@ function today() {
 }
 
 /** Stable per person and conversation; AgentCore needs at least 33 characters. */
+/**
+ * What an error says, for logs. AWS service errors (they carry $metadata) also
+ * give their status and message, which name the failing action and resource,
+ * never prompt or reply text. Anything else is logged by type only.
+ */
+export function describeError(err: unknown): Record<string, unknown> {
+  const e = err as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+  const out: Record<string, unknown> = { error: e?.name ?? 'Error' };
+  if (e?.$metadata) {
+    out.status = e.$metadata.httpStatusCode;
+    out.detail = String(e.message ?? '').slice(0, 300);
+  }
+  return out;
+}
+
 const runtimeSession = (sub: string, sid: string) =>
   createHash('sha256').update(`${sub}:${sid}`).digest('hex');
 
@@ -159,7 +174,7 @@ export const handler = handle(async (event) => {
     reply = JSON.parse(text) as AgentReply;
   } catch (err) {
     console.error(
-      JSON.stringify({ level: 'error', msg: 'agent call failed', error: (err as Error).name }),
+      JSON.stringify({ level: 'error', msg: 'agent call failed', ...describeError(err) }),
     );
     await audit(event, 'ai.chat', 'failed', { sessionId: sid });
     throw new HttpError(502, 'The assistant is unavailable right now. Try again in a moment.');
