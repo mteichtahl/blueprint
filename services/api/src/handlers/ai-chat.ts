@@ -154,7 +154,8 @@ export const handler = handle(async (event) => {
       new InvokeAgentRuntimeCommand({
         agentRuntimeArn: env('AGENT_RUNTIME_ARN'),
         runtimeSessionId: runtimeSession(ctx.sub, sid),
-        runtimeUserId: ctx.sub,
+        // No runtimeUserId: it needs InvokeAgentRuntimeForUser, and the agent
+        // acts with the caller's own token (in the payload), not a delegated identity.
         contentType: 'application/json',
         accept: 'application/json',
         payload: new TextEncoder().encode(
