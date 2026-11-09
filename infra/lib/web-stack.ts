@@ -37,6 +37,8 @@ export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly loginDomain: string;
   /** API Gateway REST API id; its `v1` stage is served under /v1/* on the same origin. */
   readonly restApiId: string;
+  /** The quarantine bucket the browser uploads to (presigned POST). */
+  readonly uploadOrigin: string;
 }
 
 const WEB_DIST = resolve(REPO_ROOT, 'apps/web/dist');
@@ -98,7 +100,7 @@ export class WebStack extends BmgStack {
             "style-src 'self'",
             "font-src 'self'",
             "img-src 'self' data:",
-            `connect-src 'self' ${cognitoIdp} ${loginOrigin}`,
+            `connect-src 'self' ${cognitoIdp} ${loginOrigin} ${props.uploadOrigin}`,
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "form-action 'self' " + loginOrigin,

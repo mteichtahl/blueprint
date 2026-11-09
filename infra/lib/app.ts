@@ -7,6 +7,7 @@ import { AuditStack } from './audit-stack.ts';
 import { AccountGuardrailsStack } from './account-guardrails-stack.ts';
 import { DataStack } from './data-stack.ts';
 import { EnvFoundationStack } from './env-foundation-stack.ts';
+import { FilesStack } from './files-stack.ts';
 import { IdentityStack } from './identity-stack.ts';
 import { KeysStack } from './keys-stack.ts';
 import { WebStack } from './web-stack.ts';
@@ -29,6 +30,7 @@ export interface BuildAppOptions {
  *   bmg-<env>-identity      home region  pipeline-deployed (Cognito, triggers)
  *   bmg-<env>-keys          home region  pipeline-deployed (per-artist KMS, onboarding, isolation gate)
  *   bmg-<env>-audit         home region  pipeline-deployed (event bus, Object Lock audit archive)
+ *   bmg-<env>-files         home region  pipeline-deployed (quarantine, malware scan, file buckets)
  *   bmg-<env>-api           home region  pipeline-deployed (REST API, authorizer, WAF)
  *   bmg-<env>-web           home region  pipeline-deployed (web app on CloudFront, web client)
  * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
@@ -99,6 +101,20 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       alarmTopic: foundation.alarmTopic,
       description: `BMG ${envName} event bus and Object Lock audit archive`,
     });
+    const files = new FilesStack(app, `${cfg.project}-${envName}-files`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      mainTable: data.tables.main,
+      bus: audit.bus,
+      alarmTopic: foundation.alarmTopic,
+      dataAccessRoleArn: `arn:aws:iam::${cfg.account.id}:role/${cfg.project}-${envName}-data-access`,
+      description: `BMG ${envName} files: quarantine, GuardDuty malware scan, artist and org file buckets`,
+      ...(opts.version ? { version: opts.version } : {}),
+    });
+    // The data-access role (keys stack) gets its file permissions here.
+    files.addDependency(keys);
     const api = new ApiStack(app, `${cfg.project}-${envName}-api`, {
       config: cfg,
       env: home,
@@ -110,6 +126,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       sessionsTable: data.tables.sessions,
       bus: audit.bus,
       onboarding: keys.onboarding,
+      quarantineKey: files.quarantineKey,
       description: `BMG ${envName} REST API: authorizer, consent, step-up, invites`,
     });
     const web = new WebStack(app, `${cfg.project}-${envName}-web`, {
@@ -119,9 +136,10 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       userPool: identity.userPool,
       loginDomain: `${names.cognitoDomainPrefix(cfg, envName)}.auth.${cfg.account.homeRegion}.amazoncognito.com`,
       restApiId: api.api.restApiId,
+      uploadOrigin: `https://${names.bucket(cfg, envName, 'quarantine')}.s3.${cfg.account.homeRegion}.amazonaws.com`,
       description: `BMG ${envName} web app: CloudFront, site bucket, web client`,
     });
-    return { foundation, data, identity, keys, audit, api, web };
+    return { foundation, data, identity, keys, audit, files, api, web };
   });
 
   Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));

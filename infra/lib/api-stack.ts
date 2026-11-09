@@ -32,6 +32,8 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly sessionsTable: ITable;
   readonly bus: IEventBus;
   readonly onboarding: IStateMachine;
+  /** The files stack's quarantine key; the buckets have fixed names (names.bucket). */
+  readonly quarantineKey: IKey;
 }
 
 /**
@@ -69,12 +71,14 @@ export class ApiStack extends BmgStack {
       entry: string,
       description: string,
       extra: Record<string, string> = {},
+      bundleAwsSdk = false,
     ) =>
       new BmgFunction(this, name, {
         entry: `services/api/src/handlers/${entry}.ts`,
         description: `BMG ${env} API: ${description}`,
         roleName: `${p}-api-${entry}`,
         prod,
+        bundleAwsSdk,
         environment: { ...common, ...extra },
       });
 
@@ -88,6 +92,24 @@ export class ApiStack extends BmgStack {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
     });
     const workspace = fn('Workspace', 'workspace', 'artists, plans and to-dos');
+    const dataAccessRoleArn = `arn:aws:iam::${this.account}:role/${p}-data-access`;
+    const bucket = (kind: 'quarantine' | 'artist-data' | 'org-data') =>
+      names.bucket(cfg, env, kind);
+    const objects = (kind: 'quarantine' | 'org-data', prefix: string) =>
+      `arn:aws:s3:::${bucket(kind)}/${prefix}`;
+    const files = fn(
+      'Files',
+      'files',
+      'file uploads, sharing and downloads',
+      {
+        QUARANTINE_BUCKET: bucket('quarantine'),
+        ARTIST_BUCKET: bucket('artist-data'),
+        LIBRARY_BUCKET: bucket('org-data'),
+        DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
+      },
+      // The S3 presigners aren't guaranteed to be in the Lambda runtime.
+      true,
+    );
     const artists = fn('Artists', 'artists', 'invite artists', {
       USER_POOL_ID: props.userPool.userPoolId,
       ONBOARDING_STATE_MACHINE_ARN: props.onboarding.stateMachineArn,
@@ -149,6 +171,27 @@ export class ApiStack extends BmgStack {
       [`${main}/index/GSI1`, `${main}/index/GSI2`],
     );
     allow(
+      files,
+      'FileRecords',
+      ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+      [main],
+    );
+    // Signs presigned POSTs: S3 checks the signer may put the object and use the quarantine key.
+    const uploadPrefixes = [objects('quarantine', 'artists/*'), objects('quarantine', 'library/*')];
+    allow(files, 'SignUploads', ['s3:PutObject'], uploadPrefixes);
+    props.quarantineKey.grant(files, 'kms:GenerateDataKey');
+    // Library downloads are signed with this role (platform key); artist
+    // downloads with a data-access session for the artist.
+    const libraryObjects = objects('org-data', 'library/*');
+    allow(files, 'SignLibraryDownloads', ['s3:GetObject'], [libraryObjects]);
+    allow(files, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
+    putEvents(files);
+    acknowledge(
+      files.role!,
+      'Uploads are signed for the artists/ and library/ prefixes of the quarantine bucket; library downloads for library/ in org-data.',
+      ...[...uploadPrefixes, libraryObjects].map((r) => `AwsSolutions-IAM5[Resource::${r}]`),
+    );
+    allow(
       artists,
       'StartOnboarding',
       ['states:StartExecution'],
@@ -161,10 +204,10 @@ export class ApiStack extends BmgStack {
       [props.userPool.userPoolArn],
     );
     putEvents(artists);
-    for (const f of [authorizerFn, me, consent, artists, workspace]) {
+    for (const f of [authorizerFn, me, consent, artists, workspace, files]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
-    for (const f of [consent, stepUp, artists, workspace]) {
+    for (const f of [consent, stepUp, artists, workspace, files]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
     props.platformKey.grant(stepUp, 'kms:Decrypt');
@@ -266,6 +309,16 @@ export class ApiStack extends BmgStack {
     route('POST', '/artists/{artistId}/todos', workspace);
     route('PATCH', '/artists/{artistId}/todos/{todoId}', workspace);
     route('GET', '/todos', workspace);
+    route('GET', '/artists/{artistId}/files', files);
+    route('POST', '/artists/{artistId}/files', files);
+    route('GET', '/artists/{artistId}/files/{fileId}', files);
+    route('PATCH', '/artists/{artistId}/files/{fileId}', files);
+    route('POST', '/artists/{artistId}/files/{fileId}/download', files);
+    route('GET', '/library/files', files);
+    route('POST', '/library/files', files);
+    route('GET', '/library/files/{fileId}', files);
+    route('PATCH', '/library/files/{fileId}', files);
+    route('POST', '/library/files/{fileId}/download', files);
 
     acknowledge(
       this.api,

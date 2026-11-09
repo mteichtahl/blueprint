@@ -20,6 +20,12 @@ export interface BmgFunctionProps {
   readonly prod: boolean;
   /** Fixed role name, for roles other policies refer to by ARN (key policies, trust policies). */
   readonly roleName?: string;
+  /**
+   * Bundle the AWS SDK instead of using the copy in the Lambda runtime. For
+   * functions that need SDK packages the runtime doesn't guarantee (the S3
+   * presigners), so the code runs against the exact version it was tested with.
+   */
+  readonly bundleAwsSdk?: boolean;
 }
 
 /**
@@ -70,8 +76,8 @@ export class BmgFunction extends NodejsFunction {
         target: 'node24',
         sourceMap: true,
         minify: true,
-        // The Lambda runtime provides the AWS SDK v3.
-        externalModules: ['@aws-sdk/*'],
+        // The Lambda runtime provides the AWS SDK v3 (unless bundleAwsSdk).
+        externalModules: props.bundleAwsSdk ? [] : ['@aws-sdk/*'],
         // ESM bundles need a `require` shim for any CommonJS dependency.
         banner:
           "import { createRequire as __bmgCreateRequire } from 'module'; const require = __bmgCreateRequire(import.meta.url);",

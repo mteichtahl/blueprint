@@ -302,6 +302,7 @@ describe('environment keys (per-artist KMS)', () => {
               ArnLike: {
                 'aws:PrincipalArn': [
                   `arn:aws:iam::${cfg.account.id}:role/bmg-prod-isolation-gate`,
+                  `arn:aws:iam::${cfg.account.id}:role/bmg-prod-files-gate`,
                   `arn:aws:iam::${cfg.account.id}:role/bmg-prod-api-*`,
                 ],
               },
@@ -387,13 +388,62 @@ describe('environment audit trail', () => {
   });
 });
 
+describe('environment files', () => {
+  const [staging] = stacks.environments.map((e) => Template.fromStack(e.files));
+
+  it('keeps uploads in a 7-day quarantine under its own key, open to browser POSTs only', () => {
+    staging!.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: names.bucket(cfg, 'staging', 'quarantine'),
+      LifecycleConfiguration: { Rules: [Match.objectLike({ ExpirationInDays: 7 })] },
+      CorsConfiguration: { CorsRules: [Match.objectLike({ AllowedMethods: ['POST'] })] },
+      BucketEncryption: {
+        ServerSideEncryptionConfiguration: [
+          Match.objectLike({
+            ServerSideEncryptionByDefault: Match.objectLike({ SSEAlgorithm: 'aws:kms' }),
+          }),
+        ],
+      },
+    });
+  });
+
+  it('scans the quarantine bucket with GuardDuty and tags the result', () => {
+    staging!.hasResourceProperties('AWS::GuardDuty::MalwareProtectionPlan', {
+      Actions: { Tagging: { Status: 'ENABLED' } },
+      ProtectedResource: { S3Bucket: { BucketName: Match.anyValue() } },
+    });
+    staging!.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: Match.objectLike({
+        source: ['aws.guardduty'],
+        'detail-type': ['GuardDuty Malware Protection Object Scan Result'],
+      }),
+    });
+  });
+
+  it('only lets data-access sessions touch artist objects, always with SSE-KMS', () => {
+    const json = JSON.stringify(staging!.toJSON());
+    expect(json).toContain('ArtistObjectsOnlyThroughDataAccessSessions');
+    expect(json).toContain('ArtistObjectsUseKms');
+    expect(json).toContain('artists/${aws:PrincipalTag/artistId}/*');
+    staging!.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: names.bucket(cfg, 'staging', 'artist-data'),
+      BucketEncryption: {
+        ServerSideEncryptionConfiguration: [Match.objectLike({ BucketKeyEnabled: false })],
+      },
+    });
+  });
+
+  it('lets only the scanner and the promoter read unscanned uploads', () => {
+    expect(JSON.stringify(staging!.toJSON())).toContain('OnlyScannerAndPromoterRead');
+  });
+});
+
 describe('environment API', () => {
   const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.api));
 
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(14);
+    expect(routed.length).toBe(24);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 

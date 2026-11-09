@@ -172,7 +172,13 @@ export const names = {
    */
   cognitoDomainPrefix: (cfg: BmgConfig, env: EnvironmentName) =>
     `${cfg.project}-${env}-${cfg.account.id}`,
+  /** File buckets (design 9.2). S3 names are global, so the account id is appended. */
+  bucket: (cfg: BmgConfig, env: EnvironmentName, kind: FileBucketKind) =>
+    `${cfg.project}-${env}-${kind}-${cfg.account.id}`,
 };
+
+export const FILE_BUCKET_KINDS = ['quarantine', 'artist-data', 'org-data'] as const;
+export type FileBucketKind = (typeof FILE_BUCKET_KINDS)[number];
 
 export const TABLE_KINDS = ['main', 'consent', 'sessions', 'idempotency'] as const;
 export type TableKind = (typeof TABLE_KINDS)[number];

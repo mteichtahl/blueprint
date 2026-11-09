@@ -31,13 +31,21 @@ export class DataAccessSessions {
 
   constructor(private readonly sts: STSClient = new STSClient({})) {}
 
-  async credentials(scope: DataAccessScope): Promise<AwsCredentialIdentity> {
+  /**
+   * `minRemainingMs` is how long the credentials must still be valid. Presigned
+   * URLs signed with them stop working when they expire, so URL signers ask for
+   * at least the URL's lifetime (default: a 2-minute margin).
+   */
+  async credentials(
+    scope: DataAccessScope,
+    { minRemainingMs = 120_000 }: { minRemainingMs?: number } = {},
+  ): Promise<AwsCredentialIdentity> {
     const artistId = assertArtistId(scope.artistId);
     if (!SESSION_ROLES.includes(scope.role)) throw new Error('Invalid session role');
     const cacheKey = `${scope.roleArn}|${artistId}|${scope.role}`;
     const hit = this.cache.get(cacheKey);
-    // Keep a 2-minute margin so a credential never expires mid-request.
-    if (hit && hit.expiresAt - Date.now() > 120_000) return hit.credentials;
+    // Keep a margin so a credential never expires mid-request.
+    if (hit && hit.expiresAt - Date.now() > minRemainingMs) return hit.credentials;
 
     const res = await this.sts.send(
       new AssumeRoleCommand({
