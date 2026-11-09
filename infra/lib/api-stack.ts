@@ -53,6 +53,8 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   /** The assistant (AI stack): its runtime and the key that signs "Do it" tokens. */
   readonly agentRuntimeArn: string;
   readonly actionKey: IKey;
+  /** The newsroom stack's draft function ("Regenerate"). */
+  readonly newsroomDraftArn: string;
 }
 
 /**
@@ -323,6 +325,13 @@ export class ApiStack extends BmgStack {
       ACTION_KEY_ID: props.actionKey.keyArn,
     });
     const aiConsent = fn('AiConsent', 'ai-consent', "record each artist's AI choice");
+    const newsroom = fn(
+      'Newsroom',
+      'newsroom',
+      'newsletter drafts, settings and industry sites',
+      { DRAFT_FUNCTION: props.newsroomDraftArn },
+      true,
+    );
     const smtpSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.smtpSecret(cfg, env)}-*`;
     const webUrlParam = names.ssm(cfg, env, 'web/url');
     const artists = fn('Artists', 'artists', 'invite artists', {
@@ -535,6 +544,20 @@ export class ApiStack extends BmgStack {
     props.actionKey.grant(aiActions, 'kms:VerifyMac');
     putEvents(aiActions);
     allow(aiConsent, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
+    allow(
+      newsroom,
+      'NewsroomItems',
+      [
+        'dynamodb:GetItem',
+        'dynamodb:Query',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
+      ],
+      [main],
+    );
+    allow(newsroom, 'Regenerate', ['lambda:InvokeFunction'], [props.newsroomDraftArn]);
+    putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
     new Rule(this, 'AiConsentChanges', {
       eventBus: props.bus,
@@ -740,6 +763,7 @@ export class ApiStack extends BmgStack {
       aiTools,
       aiActions,
       aiConsent,
+      newsroom,
     ]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
@@ -758,6 +782,7 @@ export class ApiStack extends BmgStack {
       aiActions,
       aiConsent,
       me,
+      newsroom,
     ]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
@@ -901,6 +926,16 @@ export class ApiStack extends BmgStack {
     route('GET', '/ai/tools/artists', aiTools);
     route('GET', '/ai/tools/workspace', aiTools);
     route('GET', '/ai/tools/search', aiTools);
+    // Newsroom: one function under a proxy resource (this stack is near CloudFormation's 500-resource limit).
+    const newsroomRes = this.api.root.addResource('newsroom');
+    newsroomRes.addMethod('GET', new LambdaIntegration(newsroom), {
+      authorizer,
+      requestValidator: validator,
+    });
+    newsroomRes.addResource('{proxy+}').addMethod('ANY', new LambdaIntegration(newsroom), {
+      authorizer,
+      requestValidator: validator,
+    });
     route('GET', '/conversations', messages);
     route('POST', '/conversations', messages);
     route('GET', '/conversations/{conversationId}/messages', messages);

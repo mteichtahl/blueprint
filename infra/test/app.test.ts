@@ -444,7 +444,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(73);
+    expect(routed.length).toBe(75);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -682,6 +682,17 @@ describe('environment knowledge bases (KB stack)', () => {
     staging!.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(1 hour)' });
     staging!.hasResourceProperties('AWS::CloudWatch::Alarm', {
       AlarmName: 'bmg-staging-ai-consent-drift',
+    });
+  });
+});
+
+describe('environment newsroom', () => {
+  const [staging] = stacks.environments.map((e) => Template.fromStack(e.newsroom));
+
+  it('drafts the newsletter on Sunday at 6 am Melbourne time', () => {
+    staging!.hasResourceProperties('AWS::Scheduler::Schedule', {
+      ScheduleExpression: 'cron(0 6 ? * SUN *)',
+      ScheduleExpressionTimezone: 'Australia/Melbourne',
     });
   });
 });

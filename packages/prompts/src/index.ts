@@ -55,17 +55,19 @@ You can search across the workspaces of artists who opted in to AI. If asked abo
     id: 'newsroom.weekly',
     label: 'Newsroom · weekly newsletter',
     usedBy: 'Drafting the weekly newsletter for approval',
-    variables: ['today', 'weekOf', 'artistNews', 'industryNews'],
-    defaultText: `Draft Blueprint Music Group's weekly newsletter for the week of {{weekOf}}.
+    variables: ['today', 'weekOf', 'blueprintNews', 'artistNews', 'industryNews', 'lookFor'],
+    defaultText: `Draft Blueprint Music Group's weekly newsletter, "Build, Connect, Grow", for the week of {{weekOf}}.
 
-Write two sections:
-1. "From our artists": one short paragraph per item below. Use only these items.
+From Blueprint: one or two short items from Blueprint's own news below (events, new templates). Give each a heading.
+{{blueprintNews}}
+
+From our artists: one short paragraph per artist item below. Use only these items.
 {{artistNews}}
 
-2. "Industry": three to five short items, each with its source, chosen from:
+Industry: pick the most useful stories for emerging Melbourne artists from the list below, favouring {{lookFor}}. Write a one-sentence summary for each.
 {{industryNews}}
 
-Warm, clear and upbeat, in Australian English. No hype words. Under 400 words. A person approves this draft before anything is sent.`,
+Warm, clear and upbeat, in Australian English. No hype words. Under 400 words in total. A person approves this draft before anything is sent.`,
   },
   {
     id: 'summary.thread',
