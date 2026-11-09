@@ -20,7 +20,7 @@ async function githubUserId(login: string): Promise<string | undefined> {
   }
 }
 
-/** `bmg init`: write bmg.config.json (non-secret settings only — the repo is public). */
+/** `blueprint init`: write bmg.config.json (non-secret settings only — the repo is public). */
 export async function init(opts: GlobalOptions): Promise<void> {
   const path = configPath(REPO_ROOT);
   const base: BmgConfig = parseConfig(
@@ -127,5 +127,5 @@ export async function init(opts: GlobalOptions): Promise<void> {
   });
   saveConfig(next, path);
   ok(`Wrote ${path}`);
-  log('Commit bmg.config.json — it holds no secrets. Next: `npm run bmg -- doctor`.');
+  log('Commit bmg.config.json — it holds no secrets. Next: `blueprint doctor`.');
 }

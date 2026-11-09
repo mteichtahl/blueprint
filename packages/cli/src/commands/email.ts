@@ -68,7 +68,7 @@ export async function verifySmtp(secret: SmtpSecret, testTo?: string): Promise<v
 }
 
 /**
- * `bmg email setup`: app email goes out through Gmail SMTP as the configured
+ * `blueprint email setup`: app email goes out through Gmail SMTP as the configured
  * sender (design 7.4). No Google Cloud project is involved. The Gmail app
  * password is stored only in Secrets Manager (bmg/<env>/gmail-smtp), encrypted
  * with that environment's platform key, and is never printed or logged.

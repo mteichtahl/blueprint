@@ -7,7 +7,7 @@ import { DataAccessSessions, type SessionRole } from '@bmg/crypto';
  * Phase 2 gate (design §19): "a cross-tenant decrypt attempt is denied by KMS".
  * Runs real KMS calls against two permanent test artists in staging, on every
  * staging deploy (as a CloudFormation custom resource) and on demand
- * (`bmg verify isolation`). Any check that doesn't get the expected answer
+ * (`blueprint verify isolation`). Any check that doesn't get the expected answer
  * fails the deploy.
  */
 

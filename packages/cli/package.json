@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "bmg — one-time setup CLI for the BMG platform (design section 17)",
+  "description": "blueprint — one-time setup CLI for the BMG platform (design section 17)",
   "bin": {
-    "bmg": "./src/index.ts"
+    "blueprint": "./bin/blueprint.mjs"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",

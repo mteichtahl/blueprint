@@ -41,26 +41,27 @@ Prerequisites:
 
 ```bash
 npm ci
-npm run bmg -- init              # writes bmg.config.json (non-secret; commit it)
-npm run bmg -- doctor            # read-only checks: credentials, Bedrock AU profiles, AgentCore, S3 Vectors, quotas
-npm run bmg -- bootstrap         # CDK bootstrap for the tooling qualifier (Sydney + us-east-1)
-npm run bmg -- account setup --users marc,kyra
-                                 # S3 public block, password policy, EBS encryption,
-                                 # guardrail stacks, staging/prod bootstraps, admin users
-npm run bmg -- github connect    # CodeConnections link (approve once in the AWS console)
-npm run bmg -- github protect    # makes the repo public and locks it down
-npm run bmg -- pipeline deploy   # CodeBuild runner projects
-git push origin main             # pipeline deploys staging, then prod after approval
-                                 # (creates each environment's platform KMS key)
+npm run cli:link            # once: puts the `blueprint` command on your PATH
+blueprint init              # writes bmg.config.json (non-secret; commit it)
+blueprint doctor            # read-only checks: credentials, Bedrock AU profiles, AgentCore, S3 Vectors, quotas
+blueprint bootstrap         # CDK bootstrap for the tooling qualifier (Sydney + us-east-1)
+blueprint account setup --users marc,kyra
+                            # S3 public block, password policy, EBS encryption,
+                            # guardrail stacks, staging/prod bootstraps, admin users
+blueprint github connect    # CodeConnections link (approve once in the AWS console)
+blueprint github protect    # makes the repo public and locks it down
+blueprint pipeline deploy   # CodeBuild runner projects
+git push origin main        # pipeline deploys staging, then prod after approval
+                            # (creates each environment's platform KMS key)
 # After the Deploy workflow has finished for an environment:
-npm run bmg -- secrets set <name> --env prod
-npm run bmg -- email setup --env prod --test-to you@example.com
-                                 # Gmail SMTP as kyra@: stores the app password in Secrets Manager
-npm run bmg -- admin create --env staging --email kyra@blueprintmusic.group
-                                 # first bmg-admin; Cognito emails a temporary password
-npm run bmg -- verify isolation  # staging: proves KMS refuses cross-artist access
-npm run bmg -- stacks repair     # removes stacks whose first create failed, so deploys can run
-npm run bmg -- status
+blueprint secrets set <name> --env prod
+blueprint email setup --env prod --test-to you@example.com
+                            # Gmail SMTP as kyra@: stores the app password in Secrets Manager
+blueprint admin create --env staging --email kyra@blueprintmusic.group
+                            # first bmg-admin; Cognito emails a temporary password
+blueprint verify isolation  # staging: proves KMS refuses cross-artist access
+blueprint stacks repair     # removes stacks whose first create failed, so deploys can run
+blueprint status
 ```
 
 Every command that changes something shows its plan and asks before applying it. `--dry-run` shows the plan without applying it, and `--yes` skips the prompt.

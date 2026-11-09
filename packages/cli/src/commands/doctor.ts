@@ -175,7 +175,7 @@ const checks: Check[] = [
   },
 ];
 
-/** `bmg doctor`: read-only prerequisite checks. */
+/** `blueprint doctor`: read-only prerequisite checks. */
 export async function doctor(): Promise<void> {
   const cfg = readConfig();
   heading(`Checking prerequisites for account ${cfg.account.id} in ${cfg.account.homeRegion}`);

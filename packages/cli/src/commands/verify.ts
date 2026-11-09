@@ -10,7 +10,7 @@ interface GateReport {
 }
 
 /**
- * `bmg verify isolation`: runs the Phase 2 gate on demand. Real KMS calls prove
+ * `blueprint verify isolation`: runs the Phase 2 gate on demand. Real KMS calls prove
  * one artist's session can't use another artist's key, and BMG roles can't
  * decrypt items an artist marked private (design 9.1). Read-only apart from
  * the two permanent test keys it uses in staging.

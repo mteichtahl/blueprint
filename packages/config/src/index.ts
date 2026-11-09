@@ -5,7 +5,7 @@ import { z } from 'zod';
 /**
  * bmg.config.json holds NON-SECRET settings only. The repo is public, so
  * anything secret (API keys, client secrets, signing material) lives in
- * AWS Secrets Manager and is set with `bmg secrets set`.
+ * AWS Secrets Manager and is set with `blueprint secrets set`.
  */
 
 const awsAccountId = z.string().regex(/^\d{12}$/, 'must be a 12-digit AWS account id');
@@ -41,7 +41,7 @@ export const BmgConfigSchema = z.object({
     backupRegion: awsRegion.default('ap-southeast-4'),
     /**
      * Account-level security services that already existed before BMG (one per
-     * region is allowed). Written by `bmg account setup`; the guardrails stack
+     * region is allowed). Written by `blueprint account setup`; the guardrails stack
      * reuses these instead of creating its own, however it is deployed.
      */
     existingServices: z
@@ -64,7 +64,7 @@ export const BmgConfigSchema = z.object({
   github: z.object({
     owner: z.string().min(1),
     repo: z.string().min(1),
-    /** Set by `bmg github connect`. */
+    /** Set by `blueprint github connect`. */
     connectionArn: z.string().startsWith('arn:aws:codeconnections:').optional(),
     /**
      * Numeric GitHub user ids allowed to trigger CodeBuild runners. The repo is
@@ -90,7 +90,7 @@ export const BmgConfigSchema = z.object({
   }),
   /**
    * App email goes out through Gmail SMTP as the sender below (design 7.4).
-   * The Gmail app password lives in Secrets Manager (`bmg email setup`), never here.
+   * The Gmail app password lives in Secrets Manager (`blueprint email setup`), never here.
    */
   email: z.object({
     senderAddress: z.email(),
@@ -129,7 +129,7 @@ export function parseConfig(raw: unknown): BmgConfig {
 
 export function loadConfig(path = configPath()): BmgConfig {
   if (!existsSync(path)) {
-    throw new Error(`${path} not found. Run \`npm run bmg -- init\` first.`);
+    throw new Error(`${path} not found. Run \`blueprint init\` first.`);
   }
   return parseConfig(JSON.parse(readFileSync(path, 'utf8')));
 }

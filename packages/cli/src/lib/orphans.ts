@@ -53,7 +53,7 @@ export async function toolingOrphanCleanup(cfg: BmgConfig): Promise<PlanStep[]> 
     if (images.length > 0) {
       throw new Error(
         `ECR repository ${repository} exists outside any stack and holds images. ` +
-          'Delete or rename it yourself, then run `bmg pipeline deploy` again.',
+          'Delete or rename it yourself, then run `blueprint pipeline deploy` again.',
       );
     }
     steps.push({

@@ -11,7 +11,7 @@ import { isNotFound, readConfig } from '../lib/aws.ts';
 import { ENVIRONMENTS, ENV_STACK_SUFFIXES, accountStacks, partitionAlarms } from '../lib/plans.ts';
 import { fail, heading, log, ok, warn } from '../lib/runtime.ts';
 
-/** `bmg status`: read-only overview of stacks, runners, alarms and deployed versions. */
+/** `blueprint status`: read-only overview of stacks, runners, alarms and deployed versions. */
 export async function status(): Promise<void> {
   const cfg = readConfig();
   const region = cfg.account.homeRegion;

@@ -30,9 +30,9 @@ export function envBootstrapSteps(cfg: BmgConfig): PlanStep[] {
 }
 
 /**
- * `bmg bootstrap`: CDK bootstrap with one qualifier per purpose (design 4.1).
+ * `blueprint bootstrap`: CDK bootstrap with one qualifier per purpose (design 4.1).
  * The tooling bootstrap comes first; staging and prod are bootstrapped once the
- * account permission boundary exists (created by `bmg account setup`).
+ * account permission boundary exists (created by `blueprint account setup`).
  */
 export async function bootstrap(opts: GlobalOptions): Promise<void> {
   const cfg = readConfig();
@@ -42,7 +42,7 @@ export async function bootstrap(opts: GlobalOptions): Promise<void> {
     steps.push(...envBootstrapSteps(cfg));
   } else {
     warn(
-      'Staging/prod bootstraps wait for the permission boundary. `bmg account setup` runs them next.',
+      'Staging/prod bootstraps wait for the permission boundary. `blueprint account setup` runs them next.',
     );
   }
   await executePlan('CDK bootstrap', steps, opts);
