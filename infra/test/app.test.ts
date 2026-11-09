@@ -450,7 +450,10 @@ describe('environment API', () => {
 
   it('lets Scheduler assume the reminder role from the reminder schedule group (WP0)', () => {
     const roles = Object.values(prod!.findResources('AWS::IAM::Role')).filter((r) =>
-      JSON.stringify(r.Properties.AssumeRolePolicyDocument).includes('scheduler.amazonaws.com'),
+      r.Properties.AssumeRolePolicyDocument.Statement.some(
+        (st: { Principal?: { Service?: string } }) =>
+          st.Principal?.Service === 'scheduler.amazonaws.com',
+      ),
     );
     expect(roles).toHaveLength(1);
     const cond = roles[0]!.Properties.AssumeRolePolicyDocument.Statement[0].Condition;
