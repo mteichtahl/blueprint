@@ -31,7 +31,7 @@ import { acknowledge, BmgStack, KMS_GRANT_FINDINGS, type BmgStackProps } from '.
 import { createPermissionBoundary } from './permission-boundary.ts';
 
 export interface AccountGuardrailsStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
-  /** Skip services already enabled in the account (detected by `bmg account setup`). */
+  /** Skip services already enabled in the account (detected by `blueprint account setup`). */
   readonly skip?: {
     guardDuty?: boolean;
     securityHub?: boolean;
@@ -42,7 +42,7 @@ export interface AccountGuardrailsStackProps extends Omit<BmgStackProps, 'envTag
 
 /**
  * Account-level guardrails for the single BMG AWS account (design 4.2, 13.2, 15).
- * Deployed by an admin with `bmg account setup`, never by the pipeline.
+ * Deployed by an admin with `blueprint account setup`, never by the pipeline.
  */
 export class AccountGuardrailsStack extends BmgStack {
   readonly alertsTopic: Topic;

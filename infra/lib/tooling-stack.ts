@@ -56,7 +56,7 @@ export class ToolingStack extends BmgStack {
     const connectionArn = cfg.github.connectionArn;
     if (!connectionArn) {
       throw new Error(
-        'github.connectionArn is not set. Run `npm run bmg -- github connect` first.',
+        'github.connectionArn is not set. Run `blueprint github connect` first.',
       );
     }
 

@@ -44,7 +44,7 @@ export async function assertPlatformKey(cfg: BmgConfig, env: EnvironmentName): P
     if (!isNotFound(err)) throw err;
     throw new Error(
       `${alias} does not exist yet. It is created by the ${cfg.project}-${env}-foundation stack, ` +
-        'which the pipeline deploys. First run `bmg pipeline deploy`, then push to main and let the ' +
+        'which the pipeline deploys. First run `blueprint pipeline deploy`, then push to main and let the ' +
         `Deploy workflow finish${env === 'prod' ? ' (including the production approval)' : ' for staging'}. ` +
         'Then re-run this command.',
       { cause: err },

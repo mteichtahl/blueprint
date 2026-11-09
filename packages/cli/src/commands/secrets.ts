@@ -17,7 +17,7 @@ export interface SecretsSetOptions extends GlobalOptions {
 }
 
 /**
- * `bmg secrets set <name>`: store a secret in Secrets Manager under
+ * `blueprint secrets set <name>`: store a secret in Secrets Manager under
  * bmg/<env>/<name>, encrypted with that environment's platform key. The value is
  * read from a hidden prompt or a file and is never printed or logged.
  */

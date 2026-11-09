@@ -12,4 +12,4 @@ Please do **not** open a public issue. Report it privately through GitHub's **Re
 - The AWS account. A permission boundary sits on every role; GuardDuty, Security Hub, CloudTrail and Config are always on.
 - The pipeline. Ephemeral CodeBuild runners, actor-ID webhook filters, fork-PR approval, SHA-pinned actions, and no secrets in GitHub.
 
-Never commit secrets. `bmg.config.json` holds non-secret settings only. Secrets live in AWS Secrets Manager (`npm run bmg -- secrets set`).
+Never commit secrets. `bmg.config.json` holds non-secret settings only. Secrets live in AWS Secrets Manager (`blueprint secrets set`).

@@ -1,7 +1,10 @@
 {
   "name": "blueprint",
   "private": true,
-  "description": "BMG App \u2014 Blueprint Music Group platform (AWS, TypeScript, CDK)",
+  "description": "BMG App — Blueprint Music Group platform (AWS, TypeScript, CDK)",
+  "bin": {
+    "blueprint": "packages/cli/bin/blueprint.mjs"
+  },
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.12.0"
@@ -22,7 +25,8 @@
     "format:check": "prettier --check .",
     "policy": "npm run --workspace @bmg/ci-policy check -- .github/workflows",
     "synth": "npm run --workspace @bmg/infra synth",
-    "bmg": "tsx packages/cli/src/index.ts"
+    "blueprint": "node packages/cli/bin/blueprint.mjs",
+    "cli:link": "npm link"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

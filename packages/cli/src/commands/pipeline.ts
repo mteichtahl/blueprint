@@ -12,12 +12,12 @@ import {
 } from '../lib/stacks.ts';
 import { cdk, executePlan, log, ok, type GlobalOptions, type PlanStep } from '../lib/runtime.ts';
 
-/** `bmg pipeline deploy`: deploy the CodeBuild runner projects. After this, GitHub drives every change. */
+/** `blueprint pipeline deploy`: deploy the CodeBuild runner projects. After this, GitHub drives every change. */
 export async function pipelineDeploy(opts: GlobalOptions): Promise<void> {
   const cfg = readConfig();
   await assertAccount(cfg);
   if (!cfg.github.connectionArn) {
-    throw new Error('Run `bmg github connect` first (github.connectionArn is not set).');
+    throw new Error('Run `blueprint github connect` first (github.connectionArn is not set).');
   }
   // CodeBuild rejects a project whose connection is not AVAILABLE with a
   // misleading "not authorized" error, so check first.
@@ -29,7 +29,7 @@ export async function pipelineDeploy(opts: GlobalOptions): Promise<void> {
   if (connection?.ConnectionStatus !== 'AVAILABLE') {
     throw new Error(
       `GitHub connection is ${connection?.ConnectionStatus ?? 'missing'}, not AVAILABLE. ` +
-        'Run `bmg github connect` and finish the approval in the AWS console first.',
+        'Run `blueprint github connect` and finish the approval in the AWS console first.',
     );
   }
   ok(`GitHub connection ${connection.ConnectionName} is AVAILABLE`);

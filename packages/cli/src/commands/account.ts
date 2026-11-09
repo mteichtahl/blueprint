@@ -32,7 +32,7 @@ export interface AccountSetupOptions extends GlobalOptions {
   users?: string;
 }
 
-/** `bmg account setup`: apply the guardrails in design section 4.2. */
+/** `blueprint account setup`: apply the guardrails in design section 4.2. */
 export async function accountSetup(opts: AccountSetupOptions): Promise<void> {
   const cfg = readConfig();
   await assertAccount(cfg);

@@ -14,7 +14,7 @@ export interface AdminCreateOptions extends GlobalOptions {
   env: 'staging' | 'prod';
 }
 
-/** `bmg admin create`: the first bmg-admin user (Kyra). MFA and passkey are set up at first sign-in. */
+/** `blueprint admin create`: the first bmg-admin user (Kyra). MFA and passkey are set up at first sign-in. */
 export async function adminCreate(opts: AdminCreateOptions): Promise<void> {
   const cfg = readConfig();
   await assertAccount(cfg);

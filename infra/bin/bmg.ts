@@ -4,7 +4,7 @@ import { loadConfig } from '@bmg/config';
 import { buildApp } from '../lib/app.ts';
 
 // BMG_CONFIG lets CI synthesize against bmg.config.example.json before
-// `bmg init` has committed the real (non-secret) bmg.config.json.
+// `blueprint init` has committed the real (non-secret) bmg.config.json.
 const configFile = resolve(
   import.meta.dirname,
   '..',
