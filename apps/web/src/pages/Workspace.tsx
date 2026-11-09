@@ -98,11 +98,17 @@ export function ArtistWorkspace({
   token,
   me,
   artist,
+  onNavigate,
+  onOpenChat,
 }: {
   cfg: AppConfig;
   token: string;
   me: Me;
   artist: ArtistSummary;
+  /** Opens a Studio HQ view (chat attachment cards). */
+  onNavigate?: (view: string) => void;
+  /** "Open in Chat": the full Chat page on this conversation. */
+  onOpenChat?: (conversationId: string) => void;
 }) {
   const [tab, setTab] = useState<TabId>('overview');
   const [plan, setPlan] = useState<PlanResponse | null>(null);
@@ -158,7 +164,16 @@ export function ArtistWorkspace({
       {tab === 'overview' && (
         <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
       )}
-      {tab === 'chat' && <ArtistChatTab cfg={cfg} token={token} me={me} artist={artist} />}
+      {tab === 'chat' && (
+        <ArtistChatTab
+          cfg={cfg}
+          token={token}
+          me={me}
+          artist={artist}
+          onNavigate={onNavigate}
+          onOpenChat={onOpenChat}
+        />
+      )}
       {tab === 'plan' && (
         <PlanTab
           cfg={cfg}

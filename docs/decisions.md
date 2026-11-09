@@ -208,3 +208,14 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - **Who can do what:** staff edit drafts. Approval, Regenerate, settings and the site list are admin-only with a fresh step-up, and approval, Regenerate and site changes are audited. An approved issue can't be edited, and Regenerate never overwrites it.
   - **Mailchimp isn't connected yet**, so approving marks the issue approved and "Copy as HTML" puts it on the clipboard to paste into a Mailchimp campaign. The subscriber counts, test send and scheduled send arrive with the Mailchimp connector.
   - **One proxy resource:** the newsroom API is a single function under `/newsroom/{proxy+}`, to keep the API stack under CloudFormation's 500-resource limit. It is now at about 466.
+
+## Notes: WhatsApp-style Chat (9 Nov 2026)
+
+- **"Messages & groups" is now "Chat"**: one list for direct chats, groups and announcements, with WhatsApp's look (`.wa-*` styles). The API contract is in [chat-api.md](chat-api.md).
+- **Announcements replace the all-artists broadcast.** Blueprint picks the artists; they can read but not post, and a reply goes to their private chat with Blueprint. The old broadcast is still served, reported as an announcement.
+- **Groups and announcements are Blueprint's to create** (staff only from their own artists). The group settings are "Only admins can send messages", "Artists can share files" and "Artists can add members". Only an admin can delete a group, and deleting hides it rather than erasing the sealed history.
+- **Artist-to-artist chats stay private.** Their keys only open in an artist session, as before.
+- **Per-person state lives on the inbox row:** pinned, muted, archived, cleared and starred. Muted members get no email or push for that chat. "Clear chat" hides what came before, for that person only.
+- **Ticks:** one slate tick = sent; two slate = every other member has opened the app since (a `PRESENCE#` row, written when the chat list loads); two coral = everyone has read it. The broadcast has no member list, so it shows "sent".
+- **Message payloads are versioned** (`v:2`: text, reply quote, in-bubble card, system flag) and sealed as before. Older plain-text messages still open. Cards carry ids and titles only; opening one goes through the usual access checks.
+- **System notes** ("Kyra created this group", "added", "removed", "changed the name") are written as sealed messages, so they share the chat's key and history.
