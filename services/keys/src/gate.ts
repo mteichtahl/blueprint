@@ -211,7 +211,7 @@ function depsFromEnv(): GateDeps {
   };
 }
 
-interface CfnEvent {
+export interface CfnEvent {
   RequestType: 'Create' | 'Update' | 'Delete';
   ResponseURL: string;
   StackId: string;
@@ -220,7 +220,7 @@ interface CfnEvent {
   PhysicalResourceId?: string;
 }
 
-async function respond(
+export async function respond(
   event: CfnEvent,
   status: 'SUCCESS' | 'FAILED',
   reason: string,

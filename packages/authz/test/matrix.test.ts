@@ -31,6 +31,11 @@ const sharedToB: Resource = {
 };
 const library: Resource = { kind: 'org-shared', visibility: 'normal' };
 const bmgOnlyLibrary: Resource = { kind: 'org-shared', visibility: 'bmg-only' };
+const libraryForA: Resource = {
+  kind: 'org-shared',
+  visibility: 'bmg-only',
+  sharedWithArtistIds: [A],
+};
 const settings: Resource = { kind: 'org-admin' };
 const a2aChat: Resource = {
   kind: 'conversation',
@@ -78,6 +83,15 @@ const matrix: Row[] = [
   ['artist cannot change a file shared with them', artistB, 'write', sharedToB, false],
   ['artist reads the shared library', artistA, 'read', library, true],
   ['artist cannot read BMG-only library items', artistA, 'read', bmgOnlyLibrary, false],
+  ['artist reads a library file shared with them', artistA, 'read', libraryForA, true],
+  [
+    'artist cannot read a library file shared with someone else',
+    artistB,
+    'read',
+    libraryForA,
+    false,
+  ],
+  ['artist cannot change a library file shared with them', artistA, 'write', libraryForA, false],
   ['artist cannot change the library', artistA, 'write', library, false],
   ['artist reads a chat they are in', artistA, 'read', a2aChat, true],
   ['artist cannot open settings', artistA, 'read', settings, false],

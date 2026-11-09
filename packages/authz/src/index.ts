@@ -34,8 +34,16 @@ export type Resource =
       /** Artist ids a BMG item has been explicitly shared with (shared library). */
       sharedWithArtistIds?: readonly string[];
     }
-  /** BMG's own org content: shared library, events, newsroom draft. */
-  | { kind: 'org-shared'; visibility: Exclude<Visibility, 'private'> }
+  /**
+   * BMG's own org content: shared library, events, newsroom draft. `normal`
+   * items are for every artist; `bmg-only` items can still be shared with
+   * named artists (per-file sharing in the document library).
+   */
+  | {
+      kind: 'org-shared';
+      visibility: Exclude<Visibility, 'private'>;
+      sharedWithArtistIds?: readonly string[];
+    }
   /** Billing, settings, connectors, prompts, user management. */
   | { kind: 'org-admin' }
   | {
@@ -86,10 +94,15 @@ export function authorize(
       if (principal.role === 'bmg-admin' || principal.role === 'bmg-staff') {
         return allow('BMG staff see shared org content');
       }
+      if (action !== 'read') return deny('artists cannot change org content');
+      if (
+        !!principal.artistId &&
+        (resource.sharedWithArtistIds ?? []).includes(principal.artistId)
+      ) {
+        return allow('shared with this artist');
+      }
       if (resource.visibility === 'bmg-only') return deny('BMG-only item');
-      return action === 'read'
-        ? allow('artists can read shared org content')
-        : deny('artists cannot change org content');
+      return allow('artists can read shared org content');
 
     case 'conversation': {
       const member = resource.participantSubs.includes(principal.sub);

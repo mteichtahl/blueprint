@@ -3,6 +3,7 @@ import { api, ApiError, type ArtistSummary, type Me } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { Button, Card, Field, Notice, Wordmark } from '../components/ui.tsx';
 import { PlanTab } from './Plan.tsx';
+import { ArtistFiles, Library } from './Library.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
@@ -11,19 +12,21 @@ const ROLE_LABEL: Record<Me['role'], string> = {
   artist: 'Artist',
 };
 
-type View = 'overview' | 'artists' | 'todos' | 'plan' | 'my-todos';
+type View = 'overview' | 'artists' | 'todos' | 'library' | 'plan' | 'my-todos' | 'my-library';
 const BMG_NAV: { id: View; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'artists', label: 'Artists' },
   { id: 'todos', label: 'Tasks & to-dos' },
+  { id: 'library', label: 'Library' },
 ];
 const ARTIST_NAV: { id: View; label: string }[] = [
   { id: 'overview', label: 'Home' },
   { id: 'plan', label: 'My plan' },
   { id: 'my-todos', label: 'To-do' },
+  { id: 'my-library', label: 'Library' },
 ];
 /** Shown greyed out until their Phase 3 PRs land. */
-const COMING = ['Messages', 'Review queue', 'Library'];
+const COMING = ['Messages', 'Review queue'];
 
 /** App shell (design: 264px navy sidebar, sticky top bar). Workspace screens arrive in the next Phase 3 PRs. */
 export function Home({
@@ -113,6 +116,20 @@ export function Home({
               <Roster artists={artists} onOpen={setOpenArtist} />
             ))}
           {view === 'todos' && <AllTodos cfg={cfg} token={token} artists={artists} />}
+          {view === 'library' && (
+            <>
+              <h1 className="font-title text-3xl">Document library</h1>
+              <Library cfg={cfg} token={token} isBmg artists={artists} />
+            </>
+          )}
+          {view === 'my-library' && me.artistId && (
+            <>
+              <h1 className="font-title text-3xl">Library</h1>
+              <ArtistFiles cfg={cfg} token={token} artistId={me.artistId} isBmg={false} />
+              <h2 className="pt-4 font-title text-2xl">Shared by Blueprint</h2>
+              <Library cfg={cfg} token={token} isBmg={false} artists={[]} />
+            </>
+          )}
           {view === 'plan' && me.artistId && (
             <>
               <h1 className="font-title text-3xl">My plan</h1>
@@ -288,9 +305,9 @@ function Roster({
   );
 }
 
-const TABS = ['Plan', 'To-do'] as const;
+const TABS = ['Plan', 'To-do', 'Library'] as const;
 
-/** Artist workspace (BMG view): header plus tabs. Chat, submissions, gigs, library and stats arrive in later PRs. */
+/** Artist workspace (BMG view): header plus tabs. Chat, submissions, gigs and stats arrive in later PRs. */
 function ArtistWorkspace({
   cfg,
   token,
@@ -324,6 +341,9 @@ function ArtistWorkspace({
       </div>
       {tab === 'Plan' && <PlanTab cfg={cfg} token={token} artistId={artist.artistId} canEdit />}
       {tab === 'To-do' && <ArtistTodos cfg={cfg} token={token} artistId={artist.artistId} isBmg />}
+      {tab === 'Library' && (
+        <ArtistFiles cfg={cfg} token={token} artistId={artist.artistId} isBmg />
+      )}
     </div>
   );
 }

@@ -66,7 +66,12 @@ export class KeysStack extends BmgStack {
       maxSessionDuration: Duration.hours(1),
       assumedBy: new AccountPrincipal(this.account).withSessionTags().withConditions({
         ArnLike: {
-          'aws:PrincipalArn': [roleArn(gateRoleName), roleArn(`${p}-api-*`)],
+          'aws:PrincipalArn': [
+            roleArn(gateRoleName),
+            // The staging files gate (files stack) runs the same kind of checks against S3.
+            roleArn(`${p}-files-gate`),
+            roleArn(`${p}-api-*`),
+          ],
         },
         // Both tags are required and nothing else may be set (no tag overrides).
         Null: { 'aws:RequestTag/artistId': 'false', 'aws:RequestTag/role': 'false' },

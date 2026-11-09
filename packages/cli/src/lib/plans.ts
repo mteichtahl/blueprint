@@ -118,6 +118,7 @@ export const ENV_STACK_SUFFIXES = [
   'identity',
   'keys',
   'audit',
+  'files',
   'api',
   'web',
 ] as const;
