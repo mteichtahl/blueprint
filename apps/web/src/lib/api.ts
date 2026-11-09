@@ -100,3 +100,38 @@ export const TODO_FILTERS = [
   { id: 'own', label: "Artist's own" },
   { id: 'done', label: 'Done' },
 ] as const;
+
+export type Priority = 'high' | 'medium' | 'low';
+export const SUBMISSION_TYPES = [
+  { id: 'demo', label: 'Demo' },
+  { id: 'mix', label: 'Mix' },
+  { id: 'master', label: 'Master' },
+  { id: 'lyrics', label: 'Lyrics' },
+  { id: 'artwork', label: 'Artwork' },
+  { id: 'photo', label: 'Photo' },
+  { id: 'video', label: 'Video' },
+  { id: 'press', label: 'Press' },
+  { id: 'social-post', label: 'Social post' },
+  { id: 'other', label: 'Other' },
+] as const;
+
+export interface SubmissionSummary {
+  submissionId: string;
+  artistId: string;
+  title: string;
+  type: (typeof SUBMISSION_TYPES)[number]['id'];
+  priority: Priority;
+  neededBy: string;
+  phaseId: string | null;
+  fileIds: string[];
+  status: 'open' | 'reviewed';
+  createdAt: string;
+  changedByBmgAt: string | null;
+  reviewedAt: string | null;
+  feedbackTodoIds: string[];
+}
+
+export interface SubmissionDetail extends SubmissionSummary {
+  note: string;
+  feedback: string | null;
+}

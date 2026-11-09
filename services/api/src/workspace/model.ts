@@ -129,6 +129,8 @@ export interface Todo {
   notes?: string;
   due?: string;
   phaseId?: string;
+  /** Set on to-dos made from review feedback (design F3). */
+  submissionId?: string;
   done: boolean;
   source: (typeof TODO_SOURCES)[number];
   visibility: 'normal' | 'bmg-only';

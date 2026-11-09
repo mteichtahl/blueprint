@@ -56,3 +56,8 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - **The document library** (BMG's files, `org-data` bucket, platform key) is shared per file: BMG only, all artists, or named artists.
   - **Files gate (staging):** every staging deploy also runs 12 real S3 checks through data-access sessions (cross-artist read and write, wrong key, wrong context, no encryption, private files for BMG roles). `blueprint verify isolation` runs it alongside the keys gate.
   - Infected or unscannable uploads are deleted and shown as rejected. Telling the uploader and BMG by message or email arrives with notifications.
+- **Review queue:**
+  - Submissions live in the artist's partition (`ARTIST#id / SUB#id`). GSI3 is the queue: one partition per status, sorted by priority, then needed-by date. Reviewed items sort by review time.
+  - The submission note and BMG's feedback comment are encrypted with the artist's own key (AWS Encryption SDK, in a data-access session for the caller), as design F3 asks. Lists show metadata only; the note is decrypted on the detail view.
+  - Artists submit and can change their own priority, date, title and note while a submission is open. BMG can change priority and date. When it does, a `submission.updated` event goes to the bus and the artist sees a banner; push and email arrive with notifications.
+  - "Provide feedback" closes the submission and creates one to-do per action point (source "feedback", linked to the submission and its phase) in a single DynamoDB transaction. Files attached to a submission must be ready, non-private files from the artist's library.
