@@ -8,7 +8,15 @@ import {
   ContactPatch,
   findDuplicate,
   normalisePhone,
+  applyVenuePatch,
+  findDuplicateVenue,
+  VenueBody,
+  venueFor,
+  venueMatches,
+  VenuePatch,
+  venuesUsing,
   type Contact,
+  type Venue,
 } from '../src/address-book/model.ts';
 import { routeOf } from '../src/handlers/address-book.ts';
 
@@ -100,5 +108,65 @@ describe('contacts', () => {
       route: 'PATCH /contacts/:id',
       id: 'abc123',
     });
+  });
+});
+
+describe('venues', () => {
+  const venue = (over: Partial<Venue> = {}): Venue => ({
+    ...VenueBody.parse({ name: 'The Corner Hotel', suburb: 'Richmond', capacity: 800 }),
+    venueId: 'v0000000001',
+    createdBy: 'u-a',
+    createdByRole: 'artist',
+    createdAt: '2026-11-10T00:00:00Z',
+    ...over,
+  });
+
+  it('takes the brief fields with sensible defaults', () => {
+    const v = VenueBody.parse({ name: 'Northcote Social Club' });
+    expect(v).toMatchObject({ capacity: 0, backline: false, managerContactId: null });
+    expect(VenueBody.safeParse({ name: '' }).success).toBe(false);
+    expect(VenueBody.safeParse({ name: 'X', capacity: -1 }).success).toBe(false);
+    expect(VenueBody.safeParse({ name: 'X', managerContactId: 'Bob' }).success).toBe(false);
+    expect(VenuePatch.parse({ backline: true })).toEqual({ backline: true });
+  });
+
+  it('shows the manager and booker as contact cards, without Blueprint notes for artists', () => {
+    const sam = { ...ContactBody.parse({ firstName: 'Sam', email: 's@x.com' }) } as Contact;
+    Object.assign(sam, { contactId: 'c1', createdBy: 'u', createdByRole: 'bmg', createdAt: '' });
+    const v = venue({ managerContactId: 'c1', bookerContactId: 'gone', bmgNotes: 'secret' });
+    const out = venueFor(v, false, true, new Map([['c1', sam]]));
+    expect(out.manager).toMatchObject({ name: 'Sam', email: 's@x.com' });
+    expect(out.booker).toBeNull();
+    expect('bmgNotes' in out).toBe(false);
+    expect(venueFor(v, true, false, new Map()).bmgNotes).toBe('secret');
+  });
+
+  it('filters by name, capacity and backline', () => {
+    const v = venue({ backline: true });
+    expect(venueMatches(v, { q: 'corner' })).toBe(true);
+    expect(venueMatches(v, { q: 'richmond' })).toBe(true);
+    expect(venueMatches(v, { minCapacity: 500, maxCapacity: 1000 })).toBe(true);
+    expect(venueMatches(v, { maxCapacity: 300 })).toBe(false);
+    expect(venueMatches(v, { backline: false })).toBe(false);
+  });
+
+  it('spots the same venue typed differently', () => {
+    const all = [venue()];
+    expect(findDuplicateVenue(all, { name: 'corner hotel', suburb: '' })).toBeDefined();
+    expect(
+      findDuplicateVenue(all, { name: 'The Corner Hotel', suburb: 'Fitzroy' }),
+    ).toBeUndefined();
+    expect(
+      findDuplicateVenue(all, { name: 'Corner Hotel', suburb: '' }, 'v0000000001'),
+    ).toBeUndefined();
+  });
+
+  it('knows which venues use a contact', () => {
+    const all = [venue({ bookerContactId: 'c1' }), venue({ venueId: 'v2' })];
+    expect(venuesUsing(all, 'c1')).toHaveLength(1);
+  });
+
+  it('keeps Blueprint notes away from artist edits', () => {
+    expect(applyVenuePatch(venue({ bmgNotes: 'k' }), { bmgNotes: 'x' }, false).bmgNotes).toBe('k');
   });
 });

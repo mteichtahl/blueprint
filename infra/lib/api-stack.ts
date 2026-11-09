@@ -1078,7 +1078,7 @@ export class ApiStack extends BmgStack {
       requestValidator: validator,
     });
     // Contacts (and venues): one function under proxy resources, to keep the stack small.
-    for (const root of ['contacts']) {
+    for (const root of ['contacts', 'venues']) {
       const res = this.api.root.addResource(root);
       res.addMethod('ANY', integrationFor(addressBook), {
         authorizer,
