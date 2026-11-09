@@ -528,16 +528,18 @@ describe('environment web app', () => {
     expect(JSON.stringify(csp)).not.toContain('unsafe-inline');
   });
 
-  it('owns the web client, with localhost callbacks only in staging', () => {
-    const urls = (t: Template) =>
-      JSON.stringify(
-        Object.values(t.findResources('AWS::Cognito::UserPoolClient'))[0]!.Properties.CallbackURLs,
-      );
-    expect(urls(staging!)).toContain('http://localhost:5173/auth/callback');
-    expect(urls(prod!)).not.toContain('localhost');
+  it('owns the web client: our own sign-in, with no hosted UI', () => {
+    for (const t of [staging!, prod!]) {
+      const client = Object.values(t.findResources('AWS::Cognito::UserPoolClient'))[0]!.Properties;
+      // No OAuth flows, callbacks or managed login: Cognito's hosted pages can't sign anyone in.
+      expect(client.AllowedOAuthFlows).toBeUndefined();
+      expect(client.CallbackURLs).toBeUndefined();
+      // Refresh tokens rotate, so refreshing uses GetTokensFromRefreshToken, not a flow.
+      expect(client.ExplicitAuthFlows).toEqual(['ALLOW_USER_AUTH']);
+      t.resourceCountIs('AWS::Cognito::ManagedLoginBranding', 0);
+    }
     prod!.hasResourceProperties('AWS::Cognito::UserPoolClient', {
       GenerateSecret: false,
-      AllowedOAuthFlows: ['code'],
       AccessTokenValidity: 15,
       IdTokenValidity: 15,
       EnableTokenRevocation: true,
@@ -545,6 +547,19 @@ describe('environment web app', () => {
       RefreshTokenRotation: Match.objectLike({ Feature: 'ENABLED' }),
       WriteAttributes: ['email'],
     });
+  });
+
+  it('binds passkeys to the app address and keeps MFA required', () => {
+    const json = JSON.stringify(prod!.toJSON());
+    expect(json).toContain('setUserPoolMfaConfig');
+    expect(json).toContain('MULTI_FACTOR_WITH_USER_VERIFICATION');
+    expect(json).toContain('\\"MfaConfiguration\\":\\"ON\\"');
+  });
+
+  it('only lets the page talk to the Cognito API for sign-in', () => {
+    const csp = JSON.stringify(prod!.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
+    expect(csp).not.toContain('amazoncognito.com');
+    expect(csp).toContain("form-action 'self';");
   });
 });
 
