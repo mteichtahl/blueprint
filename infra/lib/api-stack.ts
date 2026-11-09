@@ -4,7 +4,8 @@ import {
   AccessLogFormat,
   EndpointType,
   IdentitySource,
-  LambdaIntegration,
+  Integration,
+  IntegrationType,
   LogGroupLogDestination,
   MethodLoggingLevel,
   RequestAuthorizer,
@@ -19,7 +20,7 @@ import {
 } from 'aws-cdk-lib/aws-appsync';
 import type { IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
-import { Rule, type IEventBus } from 'aws-cdk-lib/aws-events';
+import { Rule, Schedule, type IEventBus } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
@@ -492,6 +493,83 @@ export class ApiStack extends BmgStack {
     // GSI3 also holds every shared gig (GSI3PK GIGS) for Blueprint's "Artist gigs".
     allow(gigsEvents, 'SharedGigs', ['dynamodb:Query'], [`${main}/index/GSI3`]);
     putEvents(gigsEvents);
+
+    // ── Connectors and Insights (Phase 4) ──
+    // Org tokens are sealed under the platform key; artist tokens under the
+    // artist's key, in a data-access session (design 9.1).
+    const connectorSecretPrefix = names.connectorSecretPrefix(cfg, env);
+    const connectorSecrets = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${connectorSecretPrefix}/*`;
+    const connectorEnv = {
+      ...common,
+      PROJECT: cfg.project,
+      BMG_ENV: env,
+      ACCOUNT_ID: this.account,
+      DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
+      PLATFORM_KEY_ARN: props.platformKey.keyArn,
+      CONNECTOR_SECRET_PREFIX: connectorSecretPrefix,
+      APP_URL_PARAM: webUrlParam,
+    };
+    // Role names stay under `<p>-api-*`, which the data-access role trusts.
+    const connectors = new BmgFunction(this, 'Connectors', {
+      entry: 'services/api/src/handlers/connectors.ts',
+      description: `BMG ${env} API: connectors, stats and insights`,
+      roleName: `${p}-api-connectors`,
+      prod,
+      // Connecting calls the vendor a few times; API Gateway allows 29 s.
+      timeout: Duration.seconds(28),
+      environment: connectorEnv,
+    });
+    const connectorsSync = new BmgFunction(this, 'ConnectorsSync', {
+      entry: 'services/api/src/handlers/connectors-sync.ts',
+      description: `BMG ${env}: hourly connector sync into daily snapshots`,
+      roleName: `${p}-api-connectors-sync`,
+      prod,
+      timeout: Duration.minutes(5),
+      environment: connectorEnv,
+    });
+    for (const f of [connectors, connectorsSync]) {
+      allow(
+        f,
+        'ConnectorItems',
+        [
+          'dynamodb:GetItem',
+          'dynamodb:BatchGetItem',
+          'dynamodb:PutItem',
+          'dynamodb:BatchWriteItem',
+          'dynamodb:UpdateItem',
+          'dynamodb:DeleteItem',
+          'dynamodb:Query',
+        ],
+        [main],
+      );
+      // GSI1: roster and the list of connections; GSI3: shared gigs for the calendar.
+      allow(
+        f,
+        'ConnectorIndexes',
+        ['dynamodb:Query'],
+        [`${main}/index/GSI1`, `${main}/index/GSI3`],
+      );
+      allow(f, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
+      allow(f, 'ReadConnectorApps', ['secretsmanager:GetSecretValue'], [connectorSecrets]);
+      allow(
+        f,
+        'ReadAppUrl',
+        ['ssm:GetParameter'],
+        [`arn:aws:ssm:${this.region}:${this.account}:parameter${webUrlParam}`],
+      );
+      putEvents(f);
+      props.platformKey.grant(f, 'kms:Encrypt', 'kms:Decrypt', 'kms:GenerateDataKey');
+      acknowledge(
+        f.role!,
+        'One secret per connector OAuth app under bmg/<env>/connectors/; Secrets Manager also appends a random suffix.',
+        `AwsSolutions-IAM5[Resource::${connectorSecrets}]`,
+      );
+    }
+    new Rule(this, 'ConnectorsHourly', {
+      description: 'Pull connector stats into daily snapshots',
+      schedule: Schedule.rate(Duration.hours(1)),
+      targets: [new LambdaFunction(connectorsSync, { retryAttempts: 0 })],
+    });
     allow(
       prompts,
       'PromptItems',
@@ -649,6 +727,8 @@ export class ApiStack extends BmgStack {
           'message.created',
           'file.rejected',
           'gig.helpRequested',
+          'connector.reminder',
+          'connector.needsReauth',
         ],
       },
       targets: [
@@ -832,6 +912,26 @@ export class ApiStack extends BmgStack {
       validateRequestBody: true,
       validateRequestParameters: true,
     });
+    // One proxy integration and one invoke permission per function, scoped to
+    // this API. LambdaIntegration adds two permissions per route, which pushed
+    // the stack past CloudFormation's 500-resource limit.
+    const integrations = new Map<BmgFunction, Integration>();
+    const integrationFor = (handler: BmgFunction) => {
+      let i = integrations.get(handler);
+      if (!i) {
+        handler.addPermission('ApiInvoke', {
+          principal: new ServicePrincipal('apigateway.amazonaws.com'),
+          sourceArn: this.api.arnForExecuteApi('*', '/*', '*'),
+        });
+        i = new Integration({
+          type: IntegrationType.AWS_PROXY,
+          integrationHttpMethod: 'POST',
+          uri: `arn:${this.partition}:apigateway:${this.region}:lambda:path/2015-03-31/functions/${handler.functionArn}/invocations`,
+        });
+        integrations.set(handler, i);
+      }
+      return i;
+    };
     const route = (
       method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
       path: string,
@@ -841,7 +941,7 @@ export class ApiStack extends BmgStack {
         .split('/')
         .filter(Boolean)
         .reduce((r, part) => r.getResource(part) ?? r.addResource(part), this.api.root);
-      resource.addMethod(method, new LambdaIntegration(handler), {
+      resource.addMethod(method, integrationFor(handler), {
         authorizer,
         requestValidator: validator,
       });
@@ -901,6 +1001,24 @@ export class ApiStack extends BmgStack {
     route('GET', '/ai/tools/artists', aiTools);
     route('GET', '/ai/tools/workspace', aiTools);
     route('GET', '/ai/tools/search', aiTools);
+    route('GET', '/connectors', connectors);
+    route('POST', '/connectors/callback', connectors);
+    route('GET', '/connectors/humanitix/events', connectors);
+    route('POST', '/connectors/{connectorId}/connect', connectors);
+    route('PATCH', '/connectors/{connectorId}', connectors);
+    route('DELETE', '/connectors/{connectorId}', connectors);
+    route('POST', '/connectors/{connectorId}/sync', connectors);
+    route('PUT', '/events/{eventId}/humanitix', connectors);
+    route('POST', '/artists/{artistId}/connectors/remind', connectors);
+    route('GET', '/artists/{artistId}/connectors', connectors);
+    route('POST', '/artists/{artistId}/connectors/{connectorId}/connect', connectors);
+    route('PATCH', '/artists/{artistId}/connectors/{connectorId}', connectors);
+    route('DELETE', '/artists/{artistId}/connectors/{connectorId}', connectors);
+    route('POST', '/artists/{artistId}/connectors/{connectorId}/sync', connectors);
+    route('GET', '/artists/{artistId}/stats', connectors);
+    route('POST', '/artists/{artistId}/stats', connectors);
+    route('POST', '/stats', connectors);
+    route('GET', '/insights', connectors);
     route('GET', '/conversations', messages);
     route('POST', '/conversations', messages);
     route('GET', '/conversations/{conversationId}/messages', messages);

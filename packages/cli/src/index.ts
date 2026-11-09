@@ -4,6 +4,7 @@ import { accountSetup } from './commands/account.ts';
 import { adminCreate } from './commands/admin.ts';
 import { bootstrap } from './commands/bootstrap.ts';
 import { doctor } from './commands/doctor.ts';
+import { connectorsSetup, connectorsStatus } from './commands/connectors.ts';
 import { emailSetup } from './commands/email.ts';
 import { githubConnect, githubProtect } from './commands/github.ts';
 import { init } from './commands/init.ts';
@@ -87,6 +88,22 @@ email
   .option('--env <env>', 'staging or prod', 'prod')
   .option('--test-to <address>', 'send a test email after verifying the login')
   .action(wrap((o: { env: string; testTo?: string }) => emailSetup({ ...g(), ...o })));
+
+const connectorsCmd = program
+  .command('connectors')
+  .description('OAuth apps for the connectors (Google, Meta, Mailchimp, TikTok, LinkedIn)');
+connectorsCmd
+  .command('setup <provider>')
+  .description("store a connector app's client id and secret, and print its redirect URI")
+  .option('--env <env>', 'staging or prod', 'prod')
+  .action(
+    wrap((provider: string, o: { env: string }) => connectorsSetup({ ...g(), ...o, provider })),
+  );
+connectorsCmd
+  .command('status')
+  .description('show which connector apps are registered')
+  .option('--env <env>', 'staging or prod', 'prod')
+  .action(wrap((o: { env: string }) => connectorsStatus({ ...g(), ...o })));
 
 const pipeline = program.command('pipeline').description('CI/CD');
 pipeline
