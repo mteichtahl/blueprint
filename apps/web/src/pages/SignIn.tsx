@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import type { AppConfig } from '../lib/config.ts';
 import {
   associateTotp,
+  asChoice,
   choosePasskey,
   choosePassword,
   CognitoError,
@@ -14,6 +15,7 @@ import {
   respond,
   start,
   startPasskeyRegistration,
+  startWithPassword,
   verifyTotpSetup,
   type Step,
 } from '../lib/cognito.ts';
@@ -81,7 +83,7 @@ export function SignIn({
         before.kind !== 'forgot'
       ) {
         try {
-          const fresh = await start(cfg, email);
+          const fresh = asChoice(await start(cfg, email));
           if (fresh.kind === 'choose') return setScreen(fresh);
         } catch {
           // fall through to the email screen
@@ -131,7 +133,9 @@ export function SignIn({
             notice={notice}
             onSubmit={() => {
               setNotice(null);
-              void run('Checking your account…', () => start(cfg, email.trim().toLowerCase()));
+              void run('Checking your account…', async () =>
+                asChoice(await start(cfg, email.trim().toLowerCase())),
+              );
             }}
           />
         )}
@@ -142,10 +146,22 @@ export function SignIn({
             passkey={screen.passkey && passkeysSupported()}
             onChange={startOver}
             onPasskey={() =>
-              void run('Waiting for your passkey…', () => choosePasskey(cfg, screen.session, email))
+              void run('Waiting for your passkey…', () =>
+                screen.passkeyOptions
+                  ? Promise.resolve({
+                      kind: 'passkey' as const,
+                      session: screen.session,
+                      options: screen.passkeyOptions,
+                    })
+                  : choosePasskey(cfg, screen.session, email),
+              )
             }
             onPassword={(password) =>
-              void run('Signing in…', () => choosePassword(cfg, screen.session, email, password))
+              void run('Signing in…', () =>
+                screen.passkeyOptions
+                  ? startWithPassword(cfg, email, password)
+                  : choosePassword(cfg, screen.session, email, password),
+              )
             }
             onForgot={() => {
               setError(null);
@@ -330,6 +346,9 @@ function ChooseStep({
           <Button variant="cta" className="min-h-[50px] w-full" onClick={onPasskey}>
             Sign in with a passkey
           </Button>
+          <p className="-mt-1 text-sm text-muted-foreground">
+            Face ID, Touch ID, Windows Hello or your security key. No code needed.
+          </p>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <span className="h-px flex-1 bg-input" />
             or use your password
@@ -360,8 +379,11 @@ function ChooseStep({
           className="min-h-[50px] w-full"
           disabled={!password}
         >
-          Sign in
+          Sign in with password
         </Button>
+        <p className="-mt-1 text-sm text-muted-foreground">
+          Then enter the 6-digit code from your authenticator app.
+        </p>
       </form>
       <button type="button" className="self-start text-sm font-bold underline" onClick={onForgot}>
         Forgot your password?

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { friendlyError, otpauthUri, toStep } from '../src/lib/cognito.ts';
+import { asChoice, friendlyError, otpauthUri, toStep } from '../src/lib/cognito.ts';
 import { fromB64url, requestOptions, toB64url } from '../src/lib/webauthn.ts';
 import { passwordProblems } from '../src/pages/SignIn.tsx';
 
@@ -19,6 +19,27 @@ describe('sign-in steps from Cognito', () => {
         AvailableChallenges: ['PASSWORD'],
       }),
     ).toMatchObject({ passkey: false, password: true });
+  });
+
+  it('keeps the password option when Cognito goes straight to a passkey', () => {
+    const step = toStep({
+      ChallengeName: 'WEB_AUTHN',
+      Session: 's',
+      ChallengeParameters: { CREDENTIAL_REQUEST_OPTIONS: '{"challenge":"AA"}' },
+    });
+    expect(asChoice(step)).toEqual({
+      kind: 'choose',
+      session: 's',
+      passkey: true,
+      password: true,
+      passkeyOptions: '{"challenge":"AA"}',
+    });
+    const choice = toStep({
+      ChallengeName: 'SELECT_CHALLENGE',
+      Session: 's',
+      AvailableChallenges: ['PASSWORD'],
+    });
+    expect(asChoice(choice)).toBe(choice);
   });
 
   it('maps each challenge to a screen, and tokens to done', () => {
