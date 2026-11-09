@@ -12,6 +12,7 @@ import { isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   byTime,
+  checkTimes,
   DEFAULT_CHECKLIST,
   EVENT_PARTS,
   EventBody,
@@ -97,7 +98,11 @@ function strip(item: Record<string, unknown>): Record<string, unknown> {
   for (const k of ['PK', 'SK', 'GSI3PK', 'GSI3SK', 'type', 'createdBy']) delete rest[k];
   return rest;
 }
-const publicGig = (g: Gig) => strip(g as unknown as Record<string, unknown>);
+/** Older gigs kept one `time`; it's the start time. */
+function publicGig(g: Gig) {
+  const { time, ...rest } = g;
+  return strip({ ...rest, ...(rest.startTime || !time ? {} : { startTime: time }) });
+}
 
 async function loadGig(artistId: string, gigId: string): Promise<Gig> {
   const res = await db.send(
@@ -195,13 +200,16 @@ export const handler = handle(async (event) => {
       const artistId = artistParam(event);
       ensureArtist(principal, 'write', artistId);
       const body = parseBody(event, GigCreate);
+      const timeError = checkTimes(body.startTime, body.endTime);
+      if (timeError) throw new HttpError(400, timeError);
       const isArtist = principal.role === 'artist';
       const gig: Gig = {
         gigId: newId(),
         artistId,
         title: body.title,
         date: body.date,
-        ...(body.time ? { time: body.time } : {}),
+        ...(body.startTime ? { startTime: body.startTime } : {}),
+        ...(body.endTime ? { endTime: body.endTime } : {}),
         ...(body.venue ? { venue: body.venue } : {}),
         ...(body.notes ? { notes: body.notes } : {}),
         status: body.status,
@@ -227,10 +235,17 @@ export const handler = handle(async (event) => {
       const patch = parseBody(event, GigPatch);
       const refused = gigPatchAllowed(principal.role, gig, patch);
       if (refused) throw new HttpError(403, refused);
-      const { askHelp, helpDone, time, ...fields } = patch;
+      const { askHelp, helpDone, startTime, endTime, ...fields } = patch;
       const next: Gig = { ...gig, ...fields, updatedAt: now };
-      if (time === null) delete next.time;
-      else if (time !== undefined) next.time = time;
+      // Move an older single `time` across as the start time.
+      if (next.time && !next.startTime) next.startTime = next.time;
+      delete next.time;
+      if (startTime === null) delete next.startTime;
+      else if (startTime !== undefined) next.startTime = startTime;
+      if (endTime === null) delete next.endTime;
+      else if (endTime !== undefined) next.endTime = endTime;
+      const timeError = checkTimes(next.startTime, next.endTime);
+      if (timeError) throw new HttpError(400, timeError);
       if (askHelp) next.help = { ...askHelp, askedAt: now, status: 'open' };
       if (helpDone && next.help) next.help = { ...next.help, status: 'done', doneAt: now };
       if (askHelp) next.shared = true; // asking for help shares the gig

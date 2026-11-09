@@ -24,7 +24,8 @@ export interface Gig {
   artistId: string;
   title: string;
   date: string;
-  time?: string;
+  startTime?: string;
+  endTime?: string;
   venue?: string;
   notes?: string;
   status: GigStatus;
@@ -68,6 +69,19 @@ const longDate = (d: string) =>
     day: 'numeric',
     month: 'short',
   });
+/** "7:30 pm – 11:00 pm", with "(next day)" when it runs past midnight. */
+export function timeRange(start?: string, end?: string): string {
+  if (!start) return '';
+  const fmt = (t: string) =>
+    new Date(`2000-01-01T${t}:00`)
+      .toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })
+      .replace(':00', '');
+  if (!end) return fmt(start);
+  return `${fmt(start)} – ${fmt(end)}${end < start ? ' (next day)' : ''}`;
+}
+const when = (g: Gig) =>
+  [longDate(g.date), timeRange(g.startTime, g.endTime)].filter(Boolean).join(', ');
+
 const done = (g: Gig) => `${g.checklist.filter((c) => c.done).length} / ${g.checklist.length}`;
 const helpLabel = (g: Gig) =>
   g.help?.topics.length ? g.help.topics.map((t) => HELP[t]).join(' · ') : 'Help';
@@ -149,6 +163,8 @@ function GigForm({
   const [f, setF] = useState({
     title: gig?.title ?? '',
     date: gig?.date ?? '',
+    startTime: gig?.startTime ?? '',
+    endTime: gig?.endTime ?? '',
     venue: gig?.venue ?? '',
     status: gig?.status ?? ('idea' as GigStatus),
     deal: gig?.deal ?? ('other' as GigDeal),
@@ -162,11 +178,23 @@ function GigForm({
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
+  const timeError =
+    f.endTime && !f.startTime
+      ? 'Add a start time too'
+      : f.startTime && f.startTime === f.endTime
+        ? 'The end time must be after the start time'
+        : null;
 
   async function save() {
     const body = {
       title: f.title,
       date: f.date,
+      ...(gig
+        ? { startTime: f.startTime || null, endTime: f.endTime || null }
+        : {
+            ...(f.startTime ? { startTime: f.startTime } : {}),
+            ...(f.endTime ? { endTime: f.endTime } : {}),
+          }),
       status: f.status,
       deal: f.deal,
       ...(f.venue ? { venue: f.venue } : {}),
@@ -197,6 +225,18 @@ function GigForm({
       <div className="grid grid-cols-2 gap-3">
         <Field label="Date" type="date" value={f.date} onChange={set('date')} />
         <Select label="Status" value={f.status} onChange={set('status')} options={STATUS_OPTIONS} />
+        <Field label="Start time" type="time" value={f.startTime} onChange={set('startTime')} />
+        <Field
+          label="End time"
+          type="time"
+          value={f.endTime}
+          onChange={set('endTime')}
+          {...(timeError
+            ? { hint: timeError }
+            : f.startTime && f.endTime && f.endTime < f.startTime
+              ? { hint: 'Finishes after midnight' }
+              : {})}
+        />
         <Field label="Venue" value={f.venue} onChange={set('venue')} />
         <Field
           label="Set length"
@@ -262,7 +302,11 @@ function GigForm({
         </div>
       )}
       <div className="flex gap-2">
-        <Button variant="cta" disabled={!f.title.trim() || !f.date} onClick={() => void save()}>
+        <Button
+          variant="cta"
+          disabled={!f.title.trim() || !f.date || !!timeError}
+          onClick={() => void save()}
+        >
           Save
         </Button>
         <Button variant="ghost" onClick={onCancel}>
@@ -479,7 +523,7 @@ export function GigsTab({
             ) : (
               <Card title={open.title}>
                 <p className="src">
-                  {longDate(open.date)}
+                  {when(open)}
                   {open.venue ? ` · ${open.venue}` : ''}
                   {open.setLength ? ` · ${open.setLength}` : ''}
                 </p>
@@ -546,7 +590,12 @@ function GigTable({
               aria-selected={selected === g.gigId}
               onClick={() => onOpen(g.gigId, g.artistId)}
             >
-              <td>{longDate(g.date)}</td>
+              <td>
+                {longDate(g.date)}
+                {g.startTime && (
+                  <span className="src block">{timeRange(g.startTime, g.endTime)}</span>
+                )}
+              </td>
               {names && <td>{who}</td>}
               <td>
                 <button type="button" className="text-left font-bold">
@@ -739,9 +788,14 @@ function GigCard({ gig, onOpen }: { gig: Gig; onOpen: () => void }) {
           <b className="flex-1">{gig.title}</b>
           <Tag tone={tone}>{label}</Tag>
         </span>
-        {(gig.venue || gig.setLength) && (
+        {(gig.startTime || gig.venue || gig.setLength) && (
           <span className="src">
-            {[gig.venue, gig.setLength, gig.deal !== 'other' ? DEAL[gig.deal] : '']
+            {[
+              timeRange(gig.startTime, gig.endTime),
+              gig.venue,
+              gig.setLength,
+              gig.deal !== 'other' ? DEAL[gig.deal] : '',
+            ]
               .filter(Boolean)
               .join(' · ')}
           </span>
