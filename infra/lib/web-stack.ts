@@ -20,15 +20,18 @@ import {
 } from 'aws-cdk-lib/aws-cloudfront';
 import { HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
-  CfnManagedLoginBranding,
   ClientAttributes,
-  OAuthScope,
   UserPoolClient,
   UserPoolClientIdentityProvider,
   type IUserPool,
 } from 'aws-cdk-lib/aws-cognito';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
+import {
+  AwsCustomResource,
+  AwsCustomResourcePolicy,
+  PhysicalResourceId,
+} from 'aws-cdk-lib/custom-resources';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import type { Construct } from 'constructs';
 import { names, type EnvironmentName } from '@bmg/config';
@@ -38,7 +41,6 @@ import { REPO_ROOT } from './function.ts';
 export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   readonly envName: EnvironmentName;
   readonly userPool: IUserPool;
-  readonly loginDomain: string;
   /** API Gateway REST API id; its `v1` stage is served under /v1/* on the same origin. */
   readonly restApiId: string;
   /** The quarantine bucket the browser uploads to (presigned POST). */
@@ -93,7 +95,8 @@ export class WebStack extends BmgStack {
       autoDeleteObjects: !prod,
     });
 
-    const loginOrigin = `https://${props.loginDomain}`;
+    // Sign-in runs on the app's own screens against Cognito's user-pool API
+    // (no hosted UI), so the browser only talks to cognito-idp.
     const cognitoIdp = `https://cognito-idp.${this.region}.amazonaws.com`;
     const headers = new ResponseHeadersPolicy(this, 'SecurityHeaders', {
       responseHeadersPolicyName: `${p}-web-security`,
@@ -106,10 +109,10 @@ export class WebStack extends BmgStack {
             "style-src 'self'",
             "font-src 'self'",
             "img-src 'self' data:",
-            `connect-src 'self' ${cognitoIdp} ${loginOrigin} ${props.uploadOrigin} wss://${props.realtime.realtimeDns}`,
+            `connect-src 'self' ${cognitoIdp} ${props.uploadOrigin} wss://${props.realtime.realtimeDns}`,
             "frame-ancestors 'none'",
             "base-uri 'none'",
-            "form-action 'self' " + loginOrigin,
+            "form-action 'self'",
             "object-src 'none'",
           ].join('; '),
         },
@@ -175,18 +178,14 @@ export class WebStack extends BmgStack {
     });
     const origin = `https://${distribution.distributionDomainName}`;
 
-    const devOrigins = prod ? [] : ['http://localhost:5173'];
     const client = new UserPoolClient(this, 'WebClient', {
       userPool: props.userPool,
       userPoolClientName: `${p}-web-app`,
       generateSecret: false,
-      authFlows: { user: true, userSrp: true },
-      oAuth: {
-        flows: { authorizationCodeGrant: true },
-        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-        callbackUrls: [origin, ...devOrigins].map((o) => `${o}/auth/callback`),
-        logoutUrls: [origin, ...devOrigins].map((o) => `${o}/signed-out`),
-      },
+      // Choice-based sign-in (passkey or password, then the authenticator code)
+      // from the app's own screens. No OAuth, so Cognito's hosted UI can't be used.
+      authFlows: { user: true },
+      disableOAuth: true,
       supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
       accessTokenValidity: Duration.minutes(15),
       idTokenValidity: Duration.minutes(15),
@@ -199,11 +198,45 @@ export class WebStack extends BmgStack {
         .withCustomAttributes('artistId'),
       writeAttributes: new ClientAttributes().withStandardAttributes({ email: true }),
     });
-    new CfnManagedLoginBranding(this, 'Branding', {
-      userPoolId: props.userPool.userPoolId,
-      clientId: client.userPoolClientId,
-      useCognitoProvidedValues: true,
+    // Passkeys belong to the address people sign in on: the app itself, not
+    // Cognito's domain. The relying party is set with SetUserPoolMfaConfig
+    // (the same MFA settings as the identity stack, plus the RP id), because
+    // the app's address only exists once this distribution does. It is
+    // re-applied on every deploy, after the identity stack's own update.
+    const rpId = distribution.distributionDomainName;
+    const mfaConfig = {
+      service: 'CognitoIdentityServiceProvider',
+      action: 'setUserPoolMfaConfig',
+      parameters: {
+        UserPoolId: props.userPool.userPoolId,
+        MfaConfiguration: 'ON',
+        SoftwareTokenMfaConfiguration: { Enabled: true },
+        WebAuthnConfiguration: {
+          RelyingPartyId: rpId,
+          UserVerification: 'required',
+          FactorConfiguration: 'MULTI_FACTOR_WITH_USER_VERIFICATION',
+        },
+      },
+      physicalResourceId: PhysicalResourceId.of(`passkey-rp-${process.env.GITHUB_SHA ?? 'local'}`),
+    };
+    const passkeyRp = new AwsCustomResource(this, 'PasskeyRelyingParty', {
+      functionName: `${p}-passkey-rp`,
+      onCreate: mfaConfig,
+      onUpdate: mfaConfig,
+      installLatestAwsSdk: false,
+      policy: AwsCustomResourcePolicy.fromSdkCalls({ resources: [props.userPool.userPoolArn] }),
     });
+    // The handler is aws-cdk-lib's singleton; it can only call SetUserPoolMfaConfig on this pool.
+    const passkeyRpHandler = this.node.tryFindChild('AWS679f53fac002430cb0da5b7982bd2287');
+    if (passkeyRpHandler) {
+      acknowledge(
+        passkeyRpHandler,
+        "aws-cdk-lib's AwsCustomResource handler: sets the passkey relying party on this environment's user pool.",
+        'AwsSolutions-L1',
+        'AwsSolutions-IAM4[Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]',
+      );
+    }
+    void passkeyRp;
 
     // CI builds apps/web before deploying (BMG_REQUIRE_WEB_BUILD=1); unit tests use a placeholder.
     const built = existsSync(resolve(WEB_DIST, 'index.html'));
@@ -220,7 +253,6 @@ export class WebStack extends BmgStack {
           ? Source.asset(WEB_DIST, { exclude: ['config.json'] })
           : Source.data('index.html', '<!doctype html><title>BMG</title><p>Web app not built.</p>'),
         Source.jsonData('config.json', {
-          loginDomain: props.loginDomain,
           clientId: client.userPoolClientId,
           region: this.region,
           userPoolId: props.userPool.userPoolId,

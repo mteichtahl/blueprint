@@ -129,3 +129,17 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - Drafts, publishes and rollbacks are audited, including denied attempts.
   - The editor rejects variables the feature doesn't supply. A read-only "platform rules" block above each prompt lists the safety rules enforced in code.
   - Previewing against sample inputs, and "promote to prod", are deferred until the agent exists. Until then, staging and prod are edited separately.
+
+## Notes: Blueprint's own sign-in (9 Nov 2026)
+
+- **No Cognito hosted UI.** Sign-in runs on the app's own BMG-branded screens, calling Cognito's public user-pool API from the browser (`InitiateAuth` with choice-based `USER_AUTH`, `RespondToAuthChallenge`, `AssociateSoftwareToken`/`VerifySoftwareToken`, `ForgotPassword`/`ConfirmForgotPassword`). The web client has OAuth disabled and no managed login branding, so the hosted pages can't sign anyone in. The CSP lets the page reach only `cognito-idp` for sign-in, and forms post only to the app.
+- **The steps:**
+  - email, then a passkey (if the account has one) or a password;
+  - on first sign-in, a new password and authenticator set-up (QR code, link or key);
+  - after that, the 6-digit code every time (a passkey with user verification counts as both factors);
+  - a forgotten password is reset with an emailed code;
+  - after signing in another way, people are offered a passkey for this device (they can skip it, or turn the offer off for this device).
+- **Passkeys belong to the app's address.** The web stack sets the relying party to the app's domain with `SetUserPoolMfaConfig` (the same MFA settings as the identity stack) and re-applies it on every deploy. Passkeys made on Cognito's hosted domain no longer work: people sign in with password and code once, then create a new passkey when offered.
+- **Sessions:** access and ID tokens live in memory only. The refresh token is kept in session storage encrypted (AES-GCM) with a non-extractable WebCrypto key held in IndexedDB, so storage never holds a usable token in clear text; closing the tab still signs out. The app refreshes the access token a minute before it expires (`GetTokensFromRefreshToken`, because refresh tokens rotate), and signing out revokes the refresh token. Admin actions that need a recent sign-in send people back through the sign-in screens.
+- **Errors are written for people** and never say whether an account exists ("That email and password don’t match").
+- **Social sign-in** (Google, Apple, Facebook) is not on the client today. When it's added, its button will go to Cognito's `/oauth2/authorize` with `identity_provider` set, which sends people straight to the provider and back, never to a Cognito page.
