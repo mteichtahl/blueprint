@@ -109,7 +109,14 @@ interface AuthResponse {
 
 /** The next thing the user has to do, or the tokens when they're done. */
 export type Step =
-  | { kind: 'choose'; session: string; passkey: boolean; password: boolean }
+  | {
+      kind: 'choose';
+      session: string;
+      passkey: boolean;
+      password: boolean;
+      /** Set when Cognito went straight to the passkey: the request to answer with one. */
+      passkeyOptions?: string;
+    }
   | { kind: 'passkey'; session: string; options: string }
   | { kind: 'newPassword'; session: string }
   | { kind: 'mfaSetup'; session: string }
@@ -172,6 +179,32 @@ export async function respond(
       ChallengeName: challenge,
       Session: session,
       ChallengeResponses: responses,
+    }),
+  );
+}
+
+/**
+ * Cognito can skip the choice and go straight to a passkey for accounts that
+ * have one. Turn that back into a choice so a password always works too.
+ */
+export function asChoice(step: Step): Step {
+  if (step.kind !== 'passkey') return step;
+  return {
+    kind: 'choose',
+    session: step.session,
+    passkey: true,
+    password: true,
+    passkeyOptions: step.options,
+  };
+}
+
+/** Password sign-in from scratch (when the current session is a passkey one). */
+export async function startWithPassword(cfg: AppConfig, email: string, password: string) {
+  return toStep(
+    await cognito<AuthResponse>(cfg, 'InitiateAuth', {
+      ClientId: cfg.clientId,
+      AuthFlow: 'USER_AUTH',
+      AuthParameters: { USERNAME: email, PREFERRED_CHALLENGE: 'PASSWORD', PASSWORD: password },
     }),
   );
 }
