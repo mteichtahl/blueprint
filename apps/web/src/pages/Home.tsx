@@ -47,6 +47,7 @@ import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
 import { AllTodos, ArtistTodos } from './Todos.tsx';
 import { Events } from './Events.tsx';
 import { Prompts } from './Prompts.tsx';
+import { Newsroom } from './Newsroom.tsx';
 import { AllGigs, ArtistGigs } from './Gigs.tsx';
 import { ArtistWorkspace } from './Workspace.tsx';
 
@@ -177,7 +178,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       label: 'BMG ONLY',
       items: [
         { id: 'events', label: 'Events', icon: 'calendar' },
-        { id: 'newsroom', label: 'Newsroom', icon: 'mail', soon: true },
+        { id: 'newsroom', label: 'Newsroom', icon: 'mail' },
         { id: 'connectors', label: 'Connectors', icon: 'plug' },
         { id: 'access', label: 'Access & permissions', icon: 'lock', soon: true },
         { id: 'prompts', label: 'AI prompts', icon: 'sparkle' },
@@ -351,6 +352,16 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         </>
       )}
       {view === 'events' && <Events cfg={cfg} token={token} />}
+      {view === 'newsroom' && (
+        <>
+          <PageHeader
+            eyebrow="BMG only · Newsroom"
+            title="Weekly newsletter"
+            sub="Drafted every Sunday at 6:00 am. Nothing is sent until an admin approves it."
+          />
+          <Newsroom cfg={cfg} token={token} isAdmin={me.role === 'bmg-admin'} onReauth={onReauth} />
+        </>
+      )}
       {view === 'prompts' && (
         <>
           <PageHeader

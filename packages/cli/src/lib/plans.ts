@@ -120,6 +120,7 @@ export const ENV_STACK_SUFFIXES = [
   'audit',
   'files',
   'kb',
+  'newsroom',
   'ai',
   'api',
   'web',

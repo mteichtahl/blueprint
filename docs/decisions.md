@@ -194,6 +194,20 @@ The full design is in the [solution design document](https://claude.ai/artifact/
     - **Reconciliation runs hourly** rather than daily. It fixes any drift and raises the `ai-consent-drift` alarm, so an opted-out artist is gone within the hour even if an event was lost.
     - The `ai-kb-count` alarm fires at 40 per environment, because the limit is 100 per Region and staging and prod share it.
   - **The BMG knowledge base** is created by the first reconciliation run, within an hour of the first deploy. Artists don't search Blueprint's library yet. That needs per-artist sharing on chunks, which comes later.
+- **Newsroom (design 10.5, F6):**
+  - **When it runs:** EventBridge Scheduler (Australia/Melbourne, so daylight saving is handled) runs `newsroom-draft` every Sunday at 6:00 am, for the week starting Monday. An admin can also press Regenerate.
+  - **How it drafts:** it calls the summary model directly (`au.anthropic.claude-haiku-5-5`, Converse) with the published `newsroom.weekly` prompt, not the agent. The prompt has no tools and nothing to act on.
+    - Code appends the required JSON reply shape, so an edited prompt can't change it.
+    - Industry stories are kept only if their URL is one we actually fetched, so the model can't invent links.
+    - If the model can't be used, a plain draft is built from the same facts.
+  - **What goes in:**
+    - Blueprint: events in the next 45 days, and library items newly shared with all artists.
+    - Artists: shared gigs played in the last week or confirmed for the next fortnight, **only from artists who opted in to AI**. Opted-out artists are listed to "add an item by hand".
+    - Industry: the managed sites. Feeds can be RSS or Atom (https only, read as plain text and never rendered as markup). Page checks report when a page's text changes.
+    - "Look for" and "skip" words rank the stories.
+  - **Who can do what:** staff edit drafts. Approval, Regenerate, settings and the site list are admin-only with a fresh step-up, and approval, Regenerate and site changes are audited. An approved issue can't be edited, and Regenerate never overwrites it.
+  - **Mailchimp isn't connected yet**, so approving marks the issue approved and "Copy as HTML" puts it on the clipboard to paste into a Mailchimp campaign. The subscriber counts, test send and scheduled send arrive with the Mailchimp connector.
+  - **One proxy resource:** the newsroom API is a single function under `/newsroom/{proxy+}`, to keep the API stack under CloudFormation's 500-resource limit. It is now at about 466.
 
 ## Notes: WhatsApp-style Chat (9 Nov 2026)
 
