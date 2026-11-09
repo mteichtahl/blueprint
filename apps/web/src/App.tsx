@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Me } from './lib/api.ts';
 import { currentSession, profileOf, refresh, signOut, type Session } from './lib/auth.ts';
 import { loadConfig, type AppConfig } from './lib/config.ts';
+import { captureCallback } from './lib/connectors.ts';
 import { Notice } from './components/ui.tsx';
 import { Consent } from './pages/Consent.tsx';
 import { Home } from './pages/Home.tsx';
@@ -60,6 +61,8 @@ export function App() {
   useEffect(() => {
     void (async () => {
       try {
+        // A connector's sign-in returns here; keep its code for the Connectors page.
+        captureCallback();
         const cfg = await loadConfig();
         // Old hosted-UI links land here; the app signs in on its own screens now.
         if (/^\/(auth\/callback|signed-out)/.test(window.location.pathname)) {

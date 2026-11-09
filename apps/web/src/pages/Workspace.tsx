@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ArtistStats } from './Insights.tsx';
 import {
   api,
   type Me,
@@ -29,7 +30,7 @@ const TABS = [
   { id: 'library', label: 'Library' },
   { id: 'assets', label: 'Assets', soon: true },
   { id: 'brand', label: 'Brand kit', soon: true },
-  { id: 'stats', label: 'Stats', soon: true },
+  { id: 'stats', label: 'Stats' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -173,6 +174,9 @@ export function ArtistWorkspace({
         <ArtistSubmissions cfg={cfg} token={token} artistId={artist.artistId} isBmg />
       )}
       {tab === 'gigs' && <GigsTab cfg={cfg} token={token} artist={artist} />}
+      {tab === 'stats' && (
+        <ArtistStats cfg={cfg} token={token} artistId={artist.artistId} name={artist.displayName} />
+      )}
       {tab === 'library' && (
         <ArtistFiles
           cfg={cfg}

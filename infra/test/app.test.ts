@@ -444,7 +444,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(75);
+    expect(routed.length).toBe(93);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -704,5 +704,37 @@ describe('environment newsroom', () => {
       ScheduleExpression: 'cron(0 6 ? * SUN *)',
       ScheduleExpressionTimezone: 'Australia/Melbourne',
     });
+  });
+});
+
+describe('connectors', () => {
+  const prod = Template.fromStack(stacks.environments[1]!.api);
+
+  it('syncs every hour with a role the data-access role trusts', () => {
+    prod.hasResourceProperties('AWS::Events::Rule', {
+      ScheduleExpression: 'rate(1 hour)',
+    });
+    prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-connectors-sync' });
+    prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-connectors' });
+  });
+
+  it('keeps the API stacks well under the 500-resource limit', () => {
+    for (const env of stacks.environments) {
+      const count = Object.keys(Template.fromStack(env.api).toJSON().Resources).length;
+      expect(count).toBeLessThan(420);
+    }
+    // One invoke permission per function, not two per route.
+    const perms = Object.keys(prod.findResources('AWS::Lambda::Permission')).length;
+    expect(perms).toBeLessThan(40);
+  });
+
+  it('reads only the connector app secrets', () => {
+    const policies = Object.values(prod.findResources('AWS::IAM::Policy'));
+    const statements = policies.flatMap(
+      (p) => p.Properties.PolicyDocument.Statement as { Sid?: string; Resource: unknown }[],
+    );
+    const apps = statements.filter((s) => s.Sid === 'ReadConnectorApps');
+    expect(apps).toHaveLength(2);
+    expect(JSON.stringify(apps[0]!.Resource)).toContain(':secret:bmg/prod/connectors/*');
   });
 });

@@ -158,6 +158,9 @@ export const names = {
   mailerRole: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}-${env}-mailer`,
   /** Secrets Manager id of the Gmail SMTP credentials for an environment. */
   smtpSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/gmail-smtp`,
+  /** Secrets Manager id prefix for the connector OAuth apps: `<prefix>/<provider>` (Phase 4). */
+  connectorSecretPrefix: (cfg: BmgConfig, env: EnvironmentName) =>
+    `${cfg.project}/${env}/connectors`,
   ssm: (cfg: BmgConfig, env: EnvironmentName, key: string) => `/${cfg.project}/${env}/${key}`,
   /** DynamoDB table names (design 8.1). */
   table: (cfg: BmgConfig, env: EnvironmentName, kind: TableKind) => `${cfg.project}-${env}-${kind}`,

@@ -11,6 +11,9 @@ import {
 import type { AppConfig } from '../lib/config.ts';
 import type { FileItem } from '../lib/files.ts';
 import { overallProgress, phaseProgress } from '../lib/plan.ts';
+import { hasPendingCallback } from '../lib/connectors.ts';
+import { BmgConnectors, MyConnectors } from './Connectors.tsx';
+import { ArtistStats, Insights } from './Insights.tsx';
 import {
   ArtistShell,
   BmgShell,
@@ -77,7 +80,8 @@ function greeting(): string {
 
 function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme();
-  const [view, setView] = useState('overview');
+  // Back from a vendor's sign-in page: open Connectors to finish connecting.
+  const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
   const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
   const [gigHelp, setGigHelp] = useState(0);
@@ -102,10 +106,13 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       link.startsWith('chat:')
         ? 'messages'
         : ((
-            { review: 'review', library: 'library', submit: 'review', gigs: 'gigs' } as Record<
-              string,
-              string
-            >
+            {
+              review: 'review',
+              library: 'library',
+              submit: 'review',
+              gigs: 'gigs',
+              connectors: 'connectors',
+            } as Record<string, string>
           )[link] ?? 'overview'),
     );
   useDeepLink(goTo);
@@ -171,7 +178,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           badge: openReviews.length || undefined,
           badgeTone: 'w',
         },
-        { id: 'insights', label: 'Insights', icon: 'chart', soon: true },
+        { id: 'insights', label: 'Insights', icon: 'chart' },
       ],
     },
     {
@@ -179,7 +186,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       items: [
         { id: 'events', label: 'Events', icon: 'calendar' },
         { id: 'newsroom', label: 'Newsroom', icon: 'mail' },
-        { id: 'connectors', label: 'Connectors', icon: 'plug', soon: true },
+        { id: 'connectors', label: 'Connectors', icon: 'plug' },
         { id: 'access', label: 'Access & permissions', icon: 'lock', soon: true },
         { id: 'prompts', label: 'AI prompts', icon: 'sparkle' },
       ],
@@ -241,6 +248,31 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         />
       )}
       {openArtist && <ArtistWorkspace cfg={cfg} token={token} me={me} artist={openArtist} />}
+      {view === 'insights' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists · Insights"
+            title="Insights"
+            sub="Website, socials and newsletter in one place. Numbers update every hour from the connected apps."
+          />
+          <Insights cfg={cfg} token={token} onManage={() => setView('connectors')} />
+        </>
+      )}
+      {view === 'connectors' && (
+        <>
+          <PageHeader
+            eyebrow="BMG only · Connectors"
+            title="Connected apps"
+            sub="The services Blueprint's app reads from and sends to. Artists connect their own accounts separately."
+          />
+          <BmgConnectors
+            cfg={cfg}
+            token={token}
+            isAdmin={me.role === 'bmg-admin'}
+            onReauth={onReauth}
+          />
+        </>
+      )}
       {view === 'profile' && (
         <>
           <PageHeader eyebrow="Your account" title="Profile & preferences" />
@@ -786,7 +818,17 @@ function InviteArtist({
 
 // ═════════════════════════════ Artist phone app ═════════════════════════════
 
-type ArtistView = 'home' | 'chat' | 'todo' | 'gigs' | 'library' | 'submit' | 'plan' | 'profile';
+type ArtistView =
+  | 'home'
+  | 'chat'
+  | 'todo'
+  | 'gigs'
+  | 'library'
+  | 'submit'
+  | 'plan'
+  | 'profile'
+  | 'connectors'
+  | 'stats';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
@@ -797,7 +839,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       link.startsWith('chat:') ? 'chat' : link === 'submit' || link === 'library' ? link : 'home',
     ),
   );
-  const [view, setView] = useState<ArtistView>('home');
+  const [view, setView] = useState<ArtistView>(hasPendingCallback() ? 'connectors' : 'home');
   const artistId = me.artistId!;
   const first = userName.split(' ')[0];
   const tabs = [
@@ -816,8 +858,15 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
     plan: { eyebrow: 'My plan', title: 'Your plan' },
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
+    connectors: { eyebrow: 'Profile', title: 'My connectors' },
+    stats: { eyebrow: 'Socials', title: 'My stats' },
   };
-  const back = view === 'submit' || view === 'plan' || view === 'profile';
+  const back =
+    view === 'submit' ||
+    view === 'plan' ||
+    view === 'profile' ||
+    view === 'connectors' ||
+    view === 'stats';
 
   return (
     <ArtistShell
@@ -854,7 +903,9 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                           ? 'submit'
                           : n.link === 'library'
                             ? 'library'
-                            : 'home',
+                            : n.link === 'connectors'
+                              ? 'connectors'
+                              : 'home',
                     );
                   }}
                 />
@@ -886,6 +937,15 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       )}
       {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
       {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} />}
+      {view === 'connectors' && <MyConnectors cfg={cfg} token={token} artistId={artistId} />}
+      {view === 'stats' && (
+        <>
+          <ArtistStats cfg={cfg} token={token} artistId={artistId} name={userName} compact />
+          <Button variant="ghost" onClick={() => setView('connectors')}>
+            My connectors
+          </Button>
+        </>
+      )}
       {view === 'profile' && (
         <Profile
           cfg={cfg}
@@ -913,6 +973,11 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
             'Help me plan my next gig',
           ]}
         />
+      )}
+      {view === 'profile' && (
+        <Button variant="ghost" onClick={() => setView('connectors')}>
+          My connectors
+        </Button>
       )}
     </ArtistShell>
   );
@@ -1040,6 +1105,25 @@ function ArtistHome({
             <span className="truncate">{f.name}</span>
           </div>
         ))}
+      </section>
+      <section className="card gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="eyebrow">Socials</span>
+          <button
+            type="button"
+            className="ml-auto text-sm font-bold underline"
+            onClick={() => onNavigate('stats')}
+          >
+            My stats
+          </button>
+        </div>
+        <button
+          type="button"
+          className="text-left text-[15px]"
+          onClick={() => onNavigate('connectors')}
+        >
+          Connect Instagram, TikTok, Spotify and your calendar →
+        </button>
       </section>
       <Button
         variant="cta"
