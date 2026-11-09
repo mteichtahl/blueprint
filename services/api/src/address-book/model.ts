@@ -171,3 +171,127 @@ export function applyContactPatch(c: Contact, patch: ContactPatchInput, isBmg: b
   }
   return next;
 }
+
+// ── Venues ────────────────────────────────────────────────────────────────
+export const VENUES_PK = 'ORG#venues';
+export const venueSk = (id: string) => `VENUE#${id}`;
+const ContactRef = z.string().regex(/^[a-z0-9]{10,40}$/, 'Pick a contact from the list');
+
+export const VenueBody = z
+  .object({
+    name: z.string().trim().min(1, 'Name the venue').max(160),
+    capacity: z.number().int().min(0).max(200000).default(0),
+    /** Does the venue supply backline (amps, drum kit)? */
+    backline: z.boolean().default(false),
+    website: Url.default(''),
+    address: Text(300).default(''),
+    suburb: Text(80).default(''),
+    /** The venue manager and booker are people in Contacts. */
+    managerContactId: ContactRef.nullable().default(null),
+    bookerContactId: ContactRef.nullable().default(null),
+    bmgNotes: Text(2000).default(''),
+  })
+  .strict();
+export type VenueInput = z.infer<typeof VenueBody>;
+export const VenuePatch = patchOf({ shape: { ...VenueBody.shape, archived: z.boolean() } });
+export type VenuePatchInput = Partial<VenueInput> & { archived?: boolean };
+
+export interface Venue extends VenueInput {
+  venueId: string;
+  createdBy: string;
+  createdByRole: 'artist' | 'bmg';
+  createdAt: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  archived?: boolean;
+}
+
+/** The person shown on a venue: just enough to call or email them. */
+export function contactCard(c: Contact | undefined) {
+  if (!c || c.archived) return null;
+  return {
+    contactId: c.contactId,
+    name: fullName(c),
+    jobTitle: c.jobTitle,
+    email: c.email,
+    phone: c.phone,
+    linkedin: c.linkedin,
+  };
+}
+
+export function venueFor(
+  v: Venue,
+  isBmg: boolean,
+  mine: boolean,
+  contacts: ReadonlyMap<string, Contact>,
+) {
+  const out: Record<string, unknown> = {
+    venueId: v.venueId,
+    name: v.name,
+    capacity: v.capacity,
+    backline: v.backline,
+    website: v.website,
+    address: v.address,
+    suburb: v.suburb,
+    manager: contactCard(v.managerContactId ? contacts.get(v.managerContactId) : undefined),
+    booker: contactCard(v.bookerContactId ? contacts.get(v.bookerContactId) : undefined),
+    archived: !!v.archived,
+    addedByArtist: v.createdByRole === 'artist',
+    canEdit: isBmg || mine,
+    createdAt: v.createdAt,
+  };
+  if (isBmg) out.bmgNotes = v.bmgNotes;
+  return out;
+}
+
+export interface VenueFilter {
+  q?: string;
+  minCapacity?: number;
+  maxCapacity?: number;
+  backline?: boolean;
+}
+
+export function venueMatches(v: Venue, f: VenueFilter): boolean {
+  if (f.backline !== undefined && v.backline !== f.backline) return false;
+  if (f.minCapacity !== undefined && v.capacity < f.minCapacity) return false;
+  if (f.maxCapacity !== undefined && v.capacity > f.maxCapacity) return false;
+  const needle = (f.q ?? '').trim().toLowerCase();
+  if (!needle) return true;
+  return [v.name, v.suburb, v.address].join(' ').toLowerCase().includes(needle);
+}
+
+/** Same venue: same name (ignoring case, spaces and "the") in the same suburb, if known. */
+export function findDuplicateVenue(
+  all: readonly Venue[],
+  input: Pick<VenueInput, 'name' | 'suburb'>,
+  exceptId?: string,
+): Venue | undefined {
+  const key = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/^the\s+/, '')
+      .replace(/[^a-z0-9]/g, '');
+  const name = key(input.name);
+  const suburb = key(input.suburb);
+  return all.find(
+    (v) =>
+      v.venueId !== exceptId &&
+      !v.archived &&
+      key(v.name) === name &&
+      (!suburb || !v.suburb || key(v.suburb) === suburb),
+  );
+}
+
+export function applyVenuePatch(v: Venue, patch: VenuePatchInput, isBmg: boolean): Venue {
+  const next: Venue = { ...v };
+  for (const [k, val] of Object.entries(patch)) {
+    if (val === undefined) continue;
+    if (k === 'bmgNotes' && !isBmg) continue;
+    (next as unknown as Record<string, unknown>)[k] = val;
+  }
+  return next;
+}
+
+/** Venues that list this contact as manager or booker (a contact in use can't be deleted). */
+export const venuesUsing = (venues: readonly Venue[], contactId: string) =>
+  venues.filter((v) => v.managerContactId === contactId || v.bookerContactId === contactId);

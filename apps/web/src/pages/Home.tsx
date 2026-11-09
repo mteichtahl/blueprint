@@ -14,6 +14,7 @@ import { overallProgress, phaseProgress } from '../lib/plan.ts';
 import { hasPendingCallback } from '../lib/connectors.ts';
 import { BmgConnectors, MyConnectors } from './Connectors.tsx';
 import { Contacts } from './Contacts.tsx';
+import { Venues } from './Venues.tsx';
 import { ArtistStats, Insights } from './Insights.tsx';
 import {
   ArtistShell,
@@ -177,6 +178,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         },
         { id: 'insights', label: 'Insights', icon: 'chart' },
         { id: 'contacts', label: 'Contacts', icon: 'users' },
+        { id: 'venues', label: 'Venues', icon: 'mic' },
       ],
     },
     {
@@ -364,6 +366,16 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             sub="Everyone Blueprint and its artists work with. Artists can pick and add; you manage the list."
           />
           <Contacts cfg={cfg} token={token} isBmg />
+        </>
+      )}
+      {view === 'venues' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Venues"
+            sub="Capacity, backline, and who to call. Managers and bookers live in Contacts."
+          />
+          <Venues cfg={cfg} token={token} isBmg />
         </>
       )}
       {view === 'events' && <Events cfg={cfg} token={token} />}
@@ -889,9 +901,10 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
     connectors: { eyebrow: 'Profile', title: 'My connectors' },
     stats: { eyebrow: 'Socials', title: 'My stats' },
-    contacts: { eyebrow: 'Shared by Blueprint', title: 'Contacts' },
+    contacts: { eyebrow: 'Shared by Blueprint', title: 'Contacts & venues' },
   };
   const [libTab, setLibTab] = useState<'files' | 'assets'>('files');
+  const [bookTab, setBookTab] = useState<'contacts' | 'venues'>('contacts');
   const back =
     view === 'brand' ||
     view === 'submit' ||
@@ -1023,7 +1036,24 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
       {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} />}
       {view === 'connectors' && <MyConnectors cfg={cfg} token={token} artistId={artistId} />}
-      {view === 'contacts' && <Contacts cfg={cfg} token={token} isBmg={false} compact />}
+      {view === 'contacts' && (
+        <>
+          <Chips
+            label="Contacts or venues"
+            value={bookTab}
+            onChange={setBookTab}
+            options={[
+              { id: 'contacts', label: 'Contacts' },
+              { id: 'venues', label: 'Venues' },
+            ]}
+          />
+          {bookTab === 'contacts' ? (
+            <Contacts cfg={cfg} token={token} isBmg={false} compact />
+          ) : (
+            <Venues cfg={cfg} token={token} isBmg={false} compact />
+          )}
+        </>
+      )}
       {view === 'stats' && (
         <>
           <ArtistStats cfg={cfg} token={token} artistId={artistId} name={userName} compact />
@@ -1213,7 +1243,7 @@ function ArtistHome({
       </section>
       <section className="card gap-2.5">
         <div className="flex items-center gap-2">
-          <span className="eyebrow">Contacts</span>
+          <span className="eyebrow">Contacts & venues</span>
           <button
             type="button"
             className="ml-auto text-sm font-bold underline"
@@ -1227,7 +1257,7 @@ function ArtistHome({
           className="text-left text-[15px]"
           onClick={() => onNavigate('contacts')}
         >
-          Bookers, venue managers and crew, shared with Blueprint →
+          Venues, bookers and crew, shared with Blueprint →
         </button>
       </section>
       <Button
