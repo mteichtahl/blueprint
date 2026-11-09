@@ -4,6 +4,7 @@ import { BatchGetCommand, GetCommand, QueryCommand, UpdateCommand } from '@aws-s
 import { authorize, type Action, type Principal } from '@bmg/authz';
 import { isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { AppCredentials, clearApp, isProvider, listApps, saveApp } from '../connectors/apps.ts';
 import {
   ApiKeyBody,
   authorizeUrl,
@@ -196,7 +197,7 @@ const startOAuth = async (account: Account, def: ConnectorDef, sub: string) => {
   if (!creds) {
     throw new HttpError(
       409,
-      `${def.label} isn't set up yet: run \`blueprint connectors setup ${def.provider}\``,
+      `${def.label} isn't set up yet. An admin can register it under Connectors → Connector apps.`,
     );
   }
   const state = newState();
@@ -332,6 +333,30 @@ export const handler = handle(async (event) => {
         }),
       );
       return json(200, { connectors: await cards('bmg', 'bmg'), artists: rows });
+    }
+
+    // ── The vendor OAuth apps (admins register them here, not with the CLI) ──
+    case 'GET /connectors/apps': {
+      ensureOrgAdmin(principal);
+      return json(200, { apps: await listApps(await redirectUri()) });
+    }
+
+    case 'PUT /connectors/apps/{provider}': {
+      ensureOrgAdmin(principal);
+      const provider = event.pathParameters?.provider;
+      if (!isProvider(provider)) throw new HttpError(404, 'No such connector app');
+      await saveApp(provider, parseBody(event, AppCredentials));
+      await audit(event, 'connectors.app.save', 'success', { provider });
+      return json(200, { apps: await listApps(await redirectUri()) });
+    }
+
+    case 'DELETE /connectors/apps/{provider}': {
+      ensureOrgAdmin(principal);
+      const provider = event.pathParameters?.provider;
+      if (!isProvider(provider)) throw new HttpError(404, 'No such connector app');
+      await clearApp(provider);
+      await audit(event, 'connectors.app.clear', 'success', { provider });
+      return json(200, { apps: await listApps(await redirectUri()) });
     }
 
     case 'POST /connectors/{connectorId}/connect':
