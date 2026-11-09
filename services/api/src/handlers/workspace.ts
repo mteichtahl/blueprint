@@ -52,6 +52,12 @@ import {
   type Stage,
   type Todo,
   type TodoFilter,
+  CommentCreate,
+  publicComment,
+  threadOf,
+  todoCommentPrefix,
+  todoCommentSk,
+  type TodoComment,
 } from '../workspace/model.ts';
 import {
   audit,
@@ -164,6 +170,17 @@ async function scheduleReminder(todo: Todo): Promise<Todo & { reminderFailed?: t
     delete rest.remindAt;
     return { ...rest, reminderFailed: true };
   }
+}
+
+/** The to-do a thread belongs to (404 if it doesn't exist). */
+async function loadTodoFor(event: APIGatewayProxyEvent, artistId: string): Promise<Todo> {
+  const todoId = event.pathParameters?.todoId ?? '';
+  if (!/^[a-z0-9]{10,40}$/.test(todoId)) throw new HttpError(404, 'No such to-do');
+  const res = await db.send(
+    new GetCommand({ TableName: table(), Key: { PK: artistPk(artistId), SK: todoSk(todoId) } }),
+  );
+  if (!res.Item) throw new HttpError(404, 'No such to-do');
+  return res.Item as Todo;
 }
 
 /**
@@ -299,6 +316,7 @@ const publicTodo = (t: Todo & { reminderFailed?: true }) => ({
   dueTime: t.dueTime ?? null,
   reminder: t.reminder ?? null,
   remindAt: t.remindAt ?? null,
+  commentCount: (t as Todo & { commentCount?: number }).commentCount ?? 0,
   phaseId: t.phaseId ?? null,
   submissionId: t.submissionId ?? null,
   done: t.done,
@@ -736,6 +754,142 @@ export const handler = handle(async (event) => {
       }
       await audit(event, 'todo.update', 'success', { artistId, todoId, fields: changed.join(',') });
       return json(200, publicTodo(saved));
+    }
+
+    // ── To-do threads (rev 7): artist + Blueprint; BMG-only to-dos stay BMG-only ──
+    case 'GET /artists/{artistId}/todos/{todoId}/comments': {
+      const artistId = artistIdParam(event);
+      const todo = await loadTodoFor(event, artistId);
+      ensure(principal, 'read', artistId, todo.visibility);
+      const res = await db.send(
+        new QueryCommand({
+          TableName: table(),
+          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :c)',
+          ExpressionAttributeValues: {
+            ':pk': artistPk(artistId),
+            ':c': todoCommentPrefix(todo.todoId),
+          },
+          Limit: 500,
+        }),
+      );
+      const thread = threadOf((res.Items ?? []) as TodoComment[]).map((c) => ({
+        ...publicComment(c, principal.sub),
+        replies: c.replies.map((r) => publicComment(r, principal.sub)),
+      }));
+      return json(200, { thread });
+    }
+
+    case 'POST /artists/{artistId}/todos/{todoId}/comments': {
+      const artistId = artistIdParam(event);
+      const todo = await loadTodoFor(event, artistId);
+      // Anyone who can see the to-do can talk about it.
+      ensure(principal, 'read', artistId, todo.visibility);
+      const body = parseBody(event, CommentCreate);
+      if (body.parentId) {
+        const parent = await db.send(
+          new QueryCommand({
+            TableName: table(),
+            KeyConditionExpression: 'PK = :pk AND begins_with(SK, :c)',
+            FilterExpression: 'commentId = :id',
+            ExpressionAttributeValues: {
+              ':pk': artistPk(artistId),
+              ':c': todoCommentPrefix(todo.todoId),
+              ':id': body.parentId,
+            },
+          }),
+        );
+        if (!parent.Items?.length) throw new HttpError(400, 'That comment is no longer there');
+      }
+      const createdAt = new Date().toISOString();
+      const authorName =
+        principal.role === 'artist'
+          ? String(
+              (
+                await db.send(
+                  new GetCommand({
+                    TableName: table(),
+                    Key: { PK: artistPk(artistId), SK: 'PROFILE' },
+                  }),
+                )
+              ).Item?.displayName ?? 'Artist',
+            )
+          : 'Blueprint';
+      const comment: TodoComment = {
+        commentId: newId(),
+        todoId: todo.todoId,
+        artistId,
+        ...(body.parentId ? { parentId: body.parentId } : {}),
+        text: body.text,
+        authorSub: principal.sub,
+        authorRole: principal.role,
+        authorName,
+        createdAt,
+      };
+      await db.send(
+        new PutCommand({
+          TableName: table(),
+          Item: {
+            PK: artistPk(artistId),
+            SK: todoCommentSk(todo.todoId, createdAt, comment.commentId),
+            type: 'todo-comment',
+            ...comment,
+          },
+        }),
+      );
+      await db.send(
+        new UpdateCommand({
+          TableName: table(),
+          Key: { PK: artistPk(artistId), SK: todoSk(todo.todoId) },
+          UpdateExpression: 'ADD commentCount :one SET lastCommentAt = :at',
+          ConditionExpression: 'attribute_exists(PK)',
+          ExpressionAttributeValues: { ':one': 1, ':at': createdAt },
+        }),
+      );
+      await domainEvent('todo.commented', {
+        artistId,
+        todoId: todo.todoId,
+        title: todo.title,
+        authorSub: principal.sub,
+        authorName,
+        byRole: principal.role,
+        bmgOnly: todo.visibility === 'bmg-only',
+      });
+      return json(201, publicComment(comment, principal.sub));
+    }
+
+    case 'DELETE /artists/{artistId}/todos/{todoId}/comments/{commentId}': {
+      const artistId = artistIdParam(event);
+      const todo = await loadTodoFor(event, artistId);
+      ensure(principal, 'read', artistId, todo.visibility);
+      const commentId = event.pathParameters?.commentId ?? '';
+      if (!/^[a-z0-9]{10,40}$/.test(commentId)) throw new HttpError(404, 'No such comment');
+      const found = await db.send(
+        new QueryCommand({
+          TableName: table(),
+          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :c)',
+          FilterExpression: 'commentId = :id',
+          ExpressionAttributeValues: {
+            ':pk': artistPk(artistId),
+            ':c': todoCommentPrefix(todo.todoId),
+            ':id': commentId,
+          },
+        }),
+      );
+      const item = found.Items?.[0] as (TodoComment & { SK: string }) | undefined;
+      if (!item || item.deletedAt) throw new HttpError(404, 'No such comment');
+      // People remove their own comments; a BMG admin can remove any.
+      if (item.authorSub !== principal.sub && principal.role !== 'bmg-admin')
+        throw new HttpError(403, 'You can only remove your own comments');
+      await db.send(
+        new UpdateCommand({
+          TableName: table(),
+          Key: { PK: artistPk(artistId), SK: item.SK },
+          UpdateExpression: 'SET deletedAt = :at, #t = :empty',
+          ExpressionAttributeNames: { '#t': 'text' },
+          ExpressionAttributeValues: { ':at': new Date().toISOString(), ':empty': '' },
+        }),
+      );
+      return json(200, { deleted: commentId });
     }
 
     case 'GET /todos': {

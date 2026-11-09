@@ -128,6 +128,8 @@ export interface Todo {
   done: boolean;
   source: 'bmg' | 'feedback' | 'artist';
   bmgOnly: boolean;
+  /** Comments in the to-do's thread (rev 7). */
+  commentCount?: number;
   createdAt: string;
   updatedAt: string | null;
 }
