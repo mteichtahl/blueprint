@@ -4,6 +4,7 @@ import type { AppConfig } from '../lib/config.ts';
 import { Bar, Button, Card, DataTable, Field, Notice, PageHeader, Tag } from '../components/ui.tsx';
 import { aud, PRESET_COSTS } from '../components/Money.tsx';
 import { VenuePicker, type Venue } from './Venues.tsx';
+import { ContactPicker } from './Contacts.tsx';
 
 /** BMG-only events (screen: Events · Industry Mixer Night). */
 
@@ -638,39 +639,17 @@ function EventDetail({
             />
           )}
           {d.crew.length === 0 && <p className="src">No crew roles yet.</p>}
-          {d.crew.map((c) => {
-            const filled = Number(c.filled);
-            const needed = Number(c.needed);
-            return (
-              <div key={c.itemId} className="li">
-                <span className="flex-1">{String(c.role)}</span>
-                <span className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label={`One fewer for ${String(c.role)}`}
-                    className="chip min-h-8 px-2"
-                    disabled={filled <= 0}
-                    onClick={() => void patchRow('crew', c.itemId, { filled: filled - 1 })}
-                  >
-                    −
-                  </button>
-                  <Tag tone={filled >= needed ? 'n' : 'c'}>
-                    {filled} / {needed}
-                  </Tag>
-                  <button
-                    type="button"
-                    aria-label={`One more for ${String(c.role)}`}
-                    className="chip min-h-8 px-2"
-                    disabled={filled >= needed}
-                    onClick={() => void patchRow('crew', c.itemId, { filled: filled + 1 })}
-                  >
-                    +
-                  </button>
-                </span>
-                <RemoveButton onClick={() => void removeRow('crew', c.itemId)} />
-              </div>
-            );
-          })}
+          {d.crew.map((c) => (
+            <CrewRole
+              key={c.itemId}
+              cfg={cfg}
+              token={token}
+              role={c as CrewRow}
+              onPatch={(body) => patchRow('crew', c.itemId, body)}
+              onRemove={() => void removeRow('crew', c.itemId)}
+            />
+          ))}
+          <p className="src">Everyone on the crew is saved to Contacts.</p>
         </Card>
       </div>
 
@@ -971,6 +950,182 @@ function TicketsForm({ sold, onSave }: { sold: number; onSave: (n: number) => vo
         Save
       </Button>
     </span>
+  );
+}
+
+interface CrewPerson {
+  contactId?: string;
+  name: string;
+  email: string;
+  phone: string;
+  type: 'crew' | 'volunteer';
+}
+type CrewRow = Row & {
+  role: string;
+  needed: number;
+  filled: number;
+  names?: string;
+  people?: CrewPerson[];
+};
+
+/**
+ * One crew role: who is on it (name, email, phone; crew or volunteer). Adding
+ * someone saves them to Contacts, or links them if they're already there.
+ */
+function CrewRole({
+  cfg,
+  token,
+  role,
+  onPatch,
+  onRemove,
+}: {
+  cfg: AppConfig;
+  token: string;
+  role: CrewRow;
+  onPatch: (body: Record<string, unknown>) => Promise<void>;
+  onRemove: () => void;
+}) {
+  const people = role.people ?? [];
+  const filled = role.people ? people.length : Number(role.filled);
+  const needed = Number(role.needed);
+  const [adding, setAdding] = useState(false);
+  const save = (next: CrewPerson[]) => onPatch({ people: next });
+  return (
+    <div className="flex flex-col gap-1.5 border-b border-input py-2">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 font-bold">{role.role}</span>
+        <Tag tone={filled >= needed ? 'n' : 'c'}>
+          {filled} / {needed}
+        </Tag>
+        <Button size="sm" variant="ghost" onClick={() => setAdding((v) => !v)}>
+          + Person
+        </Button>
+        <RemoveButton onClick={onRemove} />
+      </div>
+      {!role.people && role.names && (
+        <span className="src">
+          Names noted: {role.names}. Add each person with their email and phone to save them to
+          Contacts.
+        </span>
+      )}
+      {people.map((p, i) => (
+        <div
+          key={`${p.contactId ?? p.email}-${i}`}
+          className="flex items-center gap-2 pl-2 text-[15px]"
+        >
+          <span className="flex-1">
+            <b>{p.name}</b>{' '}
+            <span className="src">
+              <a href={`mailto:${p.email}`}>{p.email}</a> ·{' '}
+              <a href={`tel:${p.phone.replace(/\s/g, '')}`}>{p.phone}</a>
+            </span>
+          </span>
+          <Tag tone={p.type === 'volunteer' ? 's' : 'n'}>
+            {p.type === 'volunteer' ? 'Volunteer' : 'Crew'}
+          </Tag>
+          <button
+            type="button"
+            className="src font-bold hover:text-cta"
+            aria-label={`Take ${p.name} off ${role.role}`}
+            onClick={() => void save(people.filter((_, j) => j !== i))}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      {adding && (
+        <CrewPersonForm
+          cfg={cfg}
+          token={token}
+          role={role.role}
+          onCancel={() => setAdding(false)}
+          onSave={async (p) => {
+            await save([...people, p]);
+            setAdding(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CrewPersonForm({
+  cfg,
+  token,
+  role,
+  onSave,
+  onCancel,
+}: {
+  cfg: AppConfig;
+  token: string;
+  role: string;
+  onSave: (p: CrewPerson) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [p, setP] = useState<CrewPerson>({ name: '', email: '', phone: '', type: 'crew' });
+  const [busy, setBusy] = useState(false);
+  const set = (k: 'name' | 'email' | 'phone') => (e: { target: { value: string } }) =>
+    setP({ ...p, [k]: e.target.value });
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email.trim());
+  const phoneOk = p.phone.replace(/\D/g, '').length >= 6;
+  const ready = p.name.trim() && emailOk && phoneOk;
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-input p-3">
+      <ContactPicker
+        cfg={cfg}
+        token={token}
+        isBmg
+        label={`Pick someone for ${role} from contacts`}
+        value={null}
+        defaultTags={[p.type === 'volunteer' ? 'Volunteer' : 'Crew']}
+        onChange={(c) =>
+          c && setP({ ...p, contactId: c.contactId, name: c.name, email: c.email, phone: c.phone })
+        }
+      />
+      <span className="src">…or type their details:</span>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Name" value={p.name} onChange={set('name')} />
+        <Field label="Email" type="email" value={p.email} onChange={set('email')} />
+        <Field label="Phone" type="tel" value={p.phone} onChange={set('phone')} />
+      </div>
+      <div className="flex gap-2" role="group" aria-label="Crew or volunteer">
+        {(['crew', 'volunteer'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            className="chip min-h-9"
+            aria-pressed={p.type === t}
+            onClick={() => setP({ ...p, type: t })}
+          >
+            {t === 'crew' ? 'Crew' : 'Volunteer'}
+          </button>
+        ))}
+      </div>
+      {p.name && (!emailOk || !phoneOk) && (
+        <span className="src">Crew and volunteers need a name, email and phone number.</span>
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="navy"
+          disabled={!ready || busy}
+          onClick={() => {
+            setBusy(true);
+            void onSave({
+              ...p,
+              name: p.name.trim(),
+              email: p.email.trim(),
+              phone: p.phone.trim(),
+            }).finally(() => setBusy(false));
+          }}
+        >
+          Add to {role}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
   );
 }
 

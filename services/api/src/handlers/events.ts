@@ -13,6 +13,7 @@ import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   byTime,
   checkTimes,
+  crewTag,
   dealNoteFor,
   DEFAULT_CHECKLIST,
   EVENT_PARTS,
@@ -33,12 +34,24 @@ import {
   partSk,
   patchOf,
   summarise,
+  type CrewPerson,
   type EventPart,
   type Gig,
   type GigFilter,
 } from '../events/model.ts';
 import { artistPk, newId } from '../workspace/model.ts';
-import { authContext, db, env, handle, HttpError, json, parseBody, principalFor } from '../lib.ts';
+import { allContacts, upsertPerson } from '../address-book/store.ts';
+import {
+  audit,
+  authContext,
+  db,
+  env,
+  handle,
+  HttpError,
+  json,
+  parseBody,
+  principalFor,
+} from '../lib.ts';
 
 const table = () => env('MAIN_TABLE');
 const events = new EventBridgeClient({});
@@ -159,6 +172,35 @@ async function eventParts(eventId: string) {
   }
   (parts.run as { time: string }[]).sort(byTime);
   return parts as Record<EventPart, Record<string, unknown>[]>;
+}
+
+/**
+ * Crew and volunteers go into Contacts (rev 7): each person is found by email
+ * or phone, or added, and tagged Crew or Volunteer. Returns the people with
+ * their contact ids, and the role's filled count.
+ */
+async function linkCrew(
+  event: APIGatewayProxyEvent,
+  principal: Principal,
+  people: CrewPerson[],
+): Promise<CrewPerson[]> {
+  const known = await allContacts();
+  const out: CrewPerson[] = [];
+  for (const p of people) {
+    const { contact, created } = await upsertPerson(
+      { name: p.name, email: p.email, phone: p.phone, tag: crewTag(p) },
+      { sub: principal.sub, role: 'bmg' },
+      known,
+    );
+    if (created) {
+      await audit(event, 'contact.create', 'success', {
+        contactId: contact.contactId,
+        from: 'event-crew',
+      });
+    }
+    out.push({ ...p, contactId: contact.contactId });
+  }
+  return out;
 }
 
 function partParam(event: APIGatewayProxyEvent): EventPart {
@@ -374,7 +416,11 @@ export const handler = handle(async (event) => {
       const eventId = param(event, 'eventId');
       await loadEvent(eventId);
       const part = partParam(event);
-      const body = parseBody(event, PART_SCHEMAS[part]);
+      const body: Record<string, unknown> = parseBody(event, PART_SCHEMAS[part]);
+      if (part === 'crew' && Array.isArray(body.people)) {
+        body.people = await linkCrew(event, principal, body.people as CrewPerson[]);
+        body.filled = (body.people as CrewPerson[]).length;
+      }
       const itemId = randomUUID().replace(/-/g, '').slice(0, 20);
       const item = { itemId, part, ...body, createdAt: now };
       await db.send(
@@ -391,7 +437,11 @@ export const handler = handle(async (event) => {
       const eventId = param(event, 'eventId');
       const part = partParam(event);
       const itemId = param(event, 'itemId', /^[a-z0-9]{20}$/);
-      const patch = parseBody(event, patchOf(PART_SCHEMAS[part]));
+      const patch = parseBody(event, patchOf(PART_SCHEMAS[part])) as Record<string, unknown>;
+      if (part === 'crew' && Array.isArray(patch.people)) {
+        patch.people = await linkCrew(event, principal, patch.people as CrewPerson[]);
+        patch.filled = (patch.people as CrewPerson[]).length;
+      }
       const sets = Object.keys(patch).filter(
         (k) => (patch as Record<string, unknown>)[k] !== undefined,
       );

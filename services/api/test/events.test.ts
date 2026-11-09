@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   byTime,
   checkTimes,
+  CrewPerson,
+  crewTag,
   crossesMidnight,
   dealNoteFor,
   defaultMoney,
@@ -324,5 +326,39 @@ describe('run sheet notes', () => {
       PART_SCHEMAS.run.safeParse({ time: '19:00', item: 'X', notes: 'x'.repeat(1001) }).success,
     ).toBe(false);
     expect(patchOf(PART_SCHEMAS.run).parse({ notes: 'Mic check' })).toEqual({ notes: 'Mic check' });
+  });
+});
+
+describe('crew and volunteers', () => {
+  it('needs a name, email and phone for each person', () => {
+    expect(
+      CrewPerson.safeParse({ name: 'Ali', email: 'ali@x.com', phone: '0412 345 678' }).success,
+    ).toBe(true);
+    expect(CrewPerson.safeParse({ name: 'Ali', email: 'ali@x.com', phone: '' }).success).toBe(
+      false,
+    );
+    expect(CrewPerson.safeParse({ name: 'Ali', email: 'nope', phone: '0412345678' }).success).toBe(
+      false,
+    );
+    expect(CrewPerson.safeParse({ name: '', email: 'a@x.com', phone: '0412345678' }).success).toBe(
+      false,
+    );
+    expect(crewTag({ type: 'volunteer' })).toBe('Volunteer');
+    expect(crewTag({ type: 'crew' })).toBe('Crew');
+  });
+
+  it('counts filled roles from the people on them', () => {
+    const e = EventBody.parse({ name: 'M', date: '2026-12-11' });
+    const s = summarise(e, {
+      guests: [],
+      speakers: [],
+      crew: [
+        { needed: 2, filled: 0, people: [{}, {}, {}] },
+        { needed: 3, filled: 1 },
+      ],
+      budget: [],
+    });
+    expect(s.crewFilled).toBe(3);
+    expect(s.crewNeeded).toBe(5);
   });
 });
