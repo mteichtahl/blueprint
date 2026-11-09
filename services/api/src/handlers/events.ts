@@ -13,6 +13,7 @@ import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   byTime,
   checkTimes,
+  dealNoteFor,
   DEFAULT_CHECKLIST,
   EVENT_PARTS,
   EventBody,
@@ -216,7 +217,9 @@ export const handler = handle(async (event) => {
         ...(body.notes ? { notes: body.notes } : {}),
         status: body.status,
         deal: body.deal,
-        ...(body.dealNote ? { dealNote: body.dealNote } : {}),
+        ...(dealNoteFor(body.deal, body.dealNote)
+          ? { dealNote: dealNoteFor(body.deal, body.dealNote)! }
+          : {}),
         ...(body.ticketUrl ? { ticketUrl: body.ticketUrl } : {}),
         checklist: DEFAULT_CHECKLIST.map((title, i) => ({ id: `c${i + 1}`, title, done: false })),
         plannedBy: isArtist ? 'artist' : 'bmg',
@@ -247,6 +250,9 @@ export const handler = handle(async (event) => {
       else if (endTime !== undefined) next.endTime = endTime;
       const timeError = checkTimes(next.startTime, next.endTime);
       if (timeError) throw new HttpError(400, timeError);
+      const note = dealNoteFor(next.deal, next.dealNote);
+      if (note) next.dealNote = note;
+      else delete next.dealNote;
       if (askHelp) next.help = { ...askHelp, askedAt: now, status: 'open' };
       if (helpDone && next.help) next.help = { ...next.help, status: 'done', doneAt: now };
       if (askHelp) next.shared = true; // asking for help shares the gig

@@ -17,7 +17,7 @@ import {
 /** Gigs (screens: workspace Gigs tab, BMG Artist gigs, artist My gigs / Plan a gig). */
 
 export type GigStatus = 'idea' | 'pitching' | 'confirmed' | 'booked' | 'played' | 'cancelled';
-export type GigDeal = 'free' | 'fee' | 'door-split' | 'ticketed' | 'other';
+export type GigDeal = 'tbc' | 'free' | 'fee' | 'door-split' | 'ticketed' | 'other';
 export type HelpTopic = 'pitch' | 'budget' | 'promo' | 'setlist';
 export interface Gig {
   gigId: string;
@@ -47,11 +47,12 @@ export const STATUS: Record<GigStatus, ['c' | 's' | 'n', string]> = {
   cancelled: ['s', 'Cancelled'],
 };
 const DEAL: Record<GigDeal, string> = {
+  tbc: 'Not set yet',
   free: 'Free',
   fee: 'Fixed fee',
   'door-split': 'Door split',
   ticketed: 'Ticketed',
-  other: '—',
+  other: 'Other',
 };
 export const HELP: Record<HelpTopic, string> = {
   pitch: 'Pitch email',
@@ -80,6 +81,10 @@ export function timeRange(start?: string, end?: string): string {
 }
 const when = (g: Gig) =>
   [longDate(g.date), timeRange(g.startTime, g.endTime)].filter(Boolean).join(', ');
+
+/** "Other" shows what the user wrote. */
+const dealLabel = (g: Pick<Gig, 'deal' | 'dealNote'>) =>
+  g.deal === 'other' && g.dealNote ? g.dealNote : DEAL[g.deal];
 
 const done = (g: Gig) => `${g.checklist.filter((c) => c.done).length} / ${g.checklist.length}`;
 const helpLabel = (g: Gig) =>
@@ -138,7 +143,7 @@ const STATUS_OPTIONS = (Object.keys(STATUS) as GigStatus[]).map((s) => ({
 }));
 const DEAL_OPTIONS = (Object.keys(DEAL) as GigDeal[]).map((d) => ({
   value: d,
-  label: d === 'other' ? 'Other / not set' : DEAL[d],
+  label: DEAL[d],
 }));
 
 /** Add or edit a gig: the Plan a gig fields. Artists also choose sharing and help. */
@@ -166,7 +171,8 @@ function GigForm({
     endTime: gig?.endTime ?? '',
     venue: gig?.venue ?? '',
     status: gig?.status ?? ('idea' as GigStatus),
-    deal: gig?.deal ?? ('other' as GigDeal),
+    deal: gig?.deal ?? ('tbc' as GigDeal),
+    dealNote: gig?.dealNote ?? '',
     ticketUrl: gig?.ticketUrl ?? '',
     notes: gig?.notes ?? '',
     shared: gig?.shared ?? true,
@@ -195,6 +201,7 @@ function GigForm({
           }),
       status: f.status,
       deal: f.deal,
+      ...(f.deal === 'other' ? { dealNote: f.dealNote.trim() } : {}),
       ...(f.venue ? { venue: f.venue } : {}),
       ...(f.ticketUrl ? { ticketUrl: f.ticketUrl } : {}),
       ...(f.notes ? { notes: f.notes } : {}),
@@ -236,6 +243,15 @@ function GigForm({
         />
         <Field label="Venue" value={f.venue} onChange={set('venue')} />
         <Select label="Deal" value={f.deal} onChange={set('deal')} options={DEAL_OPTIONS} />
+        {f.deal === 'other' && (
+          <Field
+            label="Describe the deal"
+            value={f.dealNote}
+            onChange={set('dealNote')}
+            maxLength={300}
+            placeholder="e.g. 70/30 door split after costs, plus rider"
+          />
+        )}
         <Field
           label="Tickets"
           type="url"
@@ -517,6 +533,11 @@ export function GigsTab({
                   {when(open)}
                   {open.venue ? ` · ${open.venue}` : ''}
                 </p>
+                {open.deal !== 'tbc' && (
+                  <p className="m-0">
+                    <b>Deal:</b> {dealLabel(open)}
+                  </p>
+                )}
                 {open.notes && <p>{open.notes}</p>}
                 {open.ticketUrl && (
                   <a className="font-bold" href={open.ticketUrl} target="_blank" rel="noreferrer">
@@ -596,7 +617,7 @@ function GigTable({
               <td>
                 <Tag tone={tone}>{label}</Tag>
               </td>
-              <td>{DEAL[g.deal]}</td>
+              <td>{dealLabel(g)}</td>
               <td>{done(g)}</td>
               <td>{g.plannedBy === 'bmg' ? 'Blueprint' : who.split(' ')[0]}</td>
               <td>{helpOpen ? <Tag tone="k">{helpLabel(g)}</Tag> : '—'}</td>
@@ -779,7 +800,7 @@ function GigCard({ gig, onOpen }: { gig: Gig; onOpen: () => void }) {
             {[
               timeRange(gig.startTime, gig.endTime),
               gig.venue,
-              gig.deal !== 'other' ? DEAL[gig.deal] : '',
+              gig.deal !== 'tbc' ? dealLabel(gig) : '',
             ]
               .filter(Boolean)
               .join(' · ')}
