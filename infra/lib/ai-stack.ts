@@ -62,6 +62,14 @@ export class AiStack extends BmgStack {
 
     // ── Guardrail (design 10.1): Standard tier through the Sydney-only profile ──
     const guardrailProfile = `arn:aws:bedrock:${home}:${this.account}:guardrail-profile/au.guardrail.v1:0`;
+    // The Australia guardrail profile can route each check to Sydney or
+    // Melbourne, and ApplyGuardrail must be allowed on the profile in every
+    // destination Region, not only the source (Bedrock user guide,
+    // "Permissions for using cross-Region inference with Amazon Bedrock Guardrails").
+    const AU_REGIONS = ['ap-southeast-2', 'ap-southeast-4'];
+    const guardrailProfiles = AU_REGIONS.map(
+      (r) => `arn:aws:bedrock:${r}:${this.account}:guardrail-profile/au.guardrail.v1:0`,
+    );
     const guardrail = new CfnGuardrail(this, 'Guardrail', {
       name: `${p}-assistant`,
       description: `BMG ${env}: assistant guardrail`,
@@ -163,9 +171,7 @@ export class AiStack extends BmgStack {
     // The Australia-only profile routes to Sydney and Melbourne (D7).
     const profileArn = `arn:aws:bedrock:${home}:${this.account}:inference-profile/${cfg.ai.assistantModelProfile}`;
     const baseModel = cfg.ai.assistantModelProfile.replace(/^au\./, '');
-    const modelArns = ['ap-southeast-2', 'ap-southeast-4'].map(
-      (r) => `arn:aws:bedrock:${r}::foundation-model/${baseModel}`,
-    );
+    const modelArns = AU_REGIONS.map((r) => `arn:aws:bedrock:${r}::foundation-model/${baseModel}`);
     this.runtime.addToRolePolicy(
       new PolicyStatement({
         sid: 'InvokeTheAssistantModel',
@@ -180,7 +186,7 @@ export class AiStack extends BmgStack {
         resources: [
           guardrail.attrGuardrailArn,
           `${guardrail.attrGuardrailArn}:*`,
-          guardrailProfile,
+          ...guardrailProfiles,
         ],
       }),
     );
