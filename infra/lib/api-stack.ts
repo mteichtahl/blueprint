@@ -992,6 +992,8 @@ export class ApiStack extends BmgStack {
     route('POST', '/artists/{artistId}/invite/resend', artists);
     route('GET', '/artists', workspace);
     route('GET', '/artists/{artistId}', workspace);
+    route('GET', '/artists/{artistId}/brand-kit', workspace);
+    route('PUT', '/artists/{artistId}/brand-kit', workspace);
     route('GET', '/artists/{artistId}/plan', workspace);
     route('PUT', '/artists/{artistId}/plan', workspace);
     route('GET', '/artists/{artistId}/todos', workspace);
@@ -1007,6 +1009,8 @@ export class ApiStack extends BmgStack {
     route('POST', '/artists/{artistId}/files', files);
     route('GET', '/artists/{artistId}/files/{fileId}', files);
     route('PATCH', '/artists/{artistId}/files/{fileId}', files);
+    route('PUT', '/artists/{artistId}/files/{fileId}/asset', files);
+    route('DELETE', '/artists/{artistId}/files/{fileId}/asset', files);
     route('POST', '/artists/{artistId}/files/{fileId}/download', files);
     route('DELETE', '/artists/{artistId}/files/{fileId}', files);
     route('GET', '/review-queue', review);

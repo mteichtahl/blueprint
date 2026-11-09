@@ -13,13 +13,15 @@ import { phaseProgress } from '../lib/plan.ts';
 import { markdownToText } from '../lib/markdown.ts';
 import { Avatar, Bar, Button, Card, shortDate, Tag } from '../components/ui.tsx';
 import { GigsTab } from './Gigs.tsx';
+import { AssetLibrary } from './Assets.tsx';
+import { BrandKit } from './BrandKit.tsx';
 import { ArtistFiles } from './Library.tsx';
 import { ArtistChatTab } from './Messages.tsx';
 import { PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG } from './Review.tsx';
 import { ArtistTodos } from './Todos.tsx';
 
-/** Workspace tabs from the screens doc; the greyed ones arrive in later phases. */
+/** Workspace tabs from the screens doc. */
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'chat', label: 'Chat' },
@@ -28,8 +30,8 @@ const TABS = [
   { id: 'submissions', label: 'Submissions' },
   { id: 'gigs', label: 'Gigs' },
   { id: 'library', label: 'Library' },
-  { id: 'assets', label: 'Assets', soon: true },
-  { id: 'brand', label: 'Brand kit', soon: true },
+  { id: 'assets', label: 'Assets' },
+  { id: 'brand', label: 'Brand kit' },
   { id: 'stats', label: 'Stats' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
@@ -153,8 +155,6 @@ export function ArtistWorkspace({
             role="tab"
             className="wtab"
             aria-selected={tab === t.id}
-            disabled={'soon' in t}
-            title={'soon' in t ? 'Coming in a later release' : undefined}
             onClick={() => setTab(t.id)}
           >
             {t.label}
@@ -199,6 +199,26 @@ export function ArtistWorkspace({
           artistId={artist.artistId}
           isBmg
           isAdmin={me.role === 'bmg-admin'}
+        />
+      )}
+      {tab === 'assets' && (
+        <AssetLibrary
+          cfg={cfg}
+          token={token}
+          artistId={artist.artistId}
+          artistName={artist.displayName}
+          isArtist={false}
+          onOpenBrandKit={() => setTab('brand')}
+        />
+      )}
+      {tab === 'brand' && (
+        <BrandKit
+          cfg={cfg}
+          token={token}
+          artistId={artist.artistId}
+          artistName={artist.displayName}
+          isArtist={false}
+          onOpenAssets={() => setTab('assets')}
         />
       )}
     </>

@@ -18,6 +18,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { authorize, type Action, type Principal, type Visibility } from '@bmg/authz';
 import { isArtistId } from '@bmg/crypto';
+import { BRAND_SK, BrandKitBody, EMPTY_KIT, referencedFiles } from '../brand/model.ts';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   alignmentGaps,
@@ -291,6 +292,83 @@ export const handler = handle(async (event) => {
       );
       if (!res.Item) throw new HttpError(404, 'No such artist');
       return json(200, publicProfile(res.Item));
+    }
+
+    // ── Brand kit (screens doc "Brand kit"): the artist and Blueprint both edit it ──
+    case 'GET /artists/{artistId}/brand-kit': {
+      const artistId = artistIdParam(event);
+      ensure(principal, 'read', artistId);
+      const res = await db.send(
+        new GetCommand({ TableName: table(), Key: { PK: artistPk(artistId), SK: BRAND_SK } }),
+      );
+      const kit = { ...((res.Item ?? EMPTY_KIT) as Record<string, unknown>) };
+      for (const k of ['PK', 'SK', 'type']) delete kit[k];
+      return json(200, kit);
+    }
+
+    case 'PUT /artists/{artistId}/brand-kit': {
+      const artistId = artistIdParam(event);
+      ensure(principal, 'write', artistId);
+      const body = parseBody(event, BrandKitBody);
+      // Logos and imagery must be this artist's own files.
+      const ids = referencedFiles(body);
+      if (ids.length) {
+        const found = await db.send(
+          new BatchGetCommand({
+            RequestItems: {
+              [table()]: {
+                Keys: ids.map((id) => ({ PK: artistPk(artistId), SK: `FILE#${id}` })),
+                ProjectionExpression: 'fileId',
+              },
+            },
+          }),
+        );
+        const have = new Set((found.Responses?.[table()] ?? []).map((i) => String(i.fileId)));
+        if (ids.some((id) => !have.has(id))) {
+          throw new HttpError(400, "Logos and imagery must come from this artist's files");
+        }
+      }
+      const { version, ...rest } = body;
+      const now = new Date().toISOString();
+      const profile =
+        principal.role === 'artist'
+          ? await db.send(
+              new GetCommand({
+                TableName: table(),
+                Key: { PK: artistPk(artistId), SK: 'PROFILE' },
+              }),
+            )
+          : undefined;
+      const kit = {
+        ...rest,
+        version: version + 1,
+        updatedAt: now,
+        updatedBy: principal.sub,
+        updatedByName:
+          principal.role === 'artist'
+            ? String(profile?.Item?.displayName ?? 'the artist')
+            : 'Blueprint',
+      };
+      try {
+        await db.send(
+          new PutCommand({
+            TableName: table(),
+            Item: { PK: artistPk(artistId), SK: BRAND_SK, type: 'brandKit', ...kit },
+            ConditionExpression:
+              version === 0 ? 'attribute_not_exists(PK) OR version = :v' : 'version = :v',
+            ExpressionAttributeValues: { ':v': version },
+          }),
+        );
+      } catch (err) {
+        if ((err as Error).name === 'ConditionalCheckFailedException') {
+          throw new HttpError(
+            409,
+            'Someone else changed this brand kit. Reload to see their changes.',
+          );
+        }
+        throw err;
+      }
+      return json(200, kit);
     }
 
     case 'GET /artists/{artistId}/plan': {

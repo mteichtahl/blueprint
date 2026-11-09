@@ -27,6 +27,7 @@ import {
   Button,
   Card,
   DataTable,
+  Chips,
   Field,
   Icon,
   Notice,
@@ -38,6 +39,8 @@ import { Assistant } from '../components/Assistant.tsx';
 import { Bell } from '../components/Bell.tsx';
 import { useNotifications, type AppNotification } from '../lib/notifications.ts';
 import { useDeepLink } from '../lib/push.ts';
+import { AssetLibrary } from './Assets.tsx';
+import { BrandKit } from './BrandKit.tsx';
 import { ArtistFiles, Library } from './Library.tsx';
 import { Profile } from './Profile.tsx';
 import { ArtistChats, BmgChat, useInbox, type ConversationSummary } from './Messages.tsx';
@@ -833,6 +836,7 @@ type ArtistView =
   | 'todo'
   | 'gigs'
   | 'library'
+  | 'brand'
   | 'submit'
   | 'plan'
   | 'profile'
@@ -866,13 +870,16 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     profile: { eyebrow: 'Profile & preferences', title: userName },
     todo: { eyebrow: 'To-do', title: 'This week' },
     library: { eyebrow: 'Library & assets', title: 'Your files' },
+    brand: { eyebrow: 'Library & assets', title: 'My brand kit' },
     submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
     plan: { eyebrow: 'My plan', title: 'Your plan' },
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
     connectors: { eyebrow: 'Profile', title: 'My connectors' },
     stats: { eyebrow: 'Socials', title: 'My stats' },
   };
+  const [libTab, setLibTab] = useState<'files' | 'assets'>('files');
   const back =
+    view === 'brand' ||
     view === 'submit' ||
     view === 'plan' ||
     view === 'profile' ||
@@ -948,10 +955,52 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       {view === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artistId} isBmg={false} />}
       {view === 'library' && (
         <>
-          <ArtistFiles cfg={cfg} token={token} artistId={artistId} isBmg={false} />
-          <div className="eyebrow pt-2 text-muted-foreground">Shared by Blueprint</div>
-          <Library cfg={cfg} token={token} isBmg={false} artists={[]} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Chips
+              label="Library"
+              value={libTab}
+              onChange={setLibTab}
+              options={[
+                { id: 'files', label: 'Files' },
+                { id: 'assets', label: 'Assets' },
+              ]}
+            />
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setView('brand')}>
+              My brand kit
+            </Button>
+          </div>
+          {libTab === 'files' ? (
+            <>
+              <ArtistFiles cfg={cfg} token={token} artistId={artistId} isBmg={false} />
+              <div className="eyebrow pt-2 text-muted-foreground">Shared by Blueprint</div>
+              <Library cfg={cfg} token={token} isBmg={false} artists={[]} />
+            </>
+          ) : (
+            <AssetLibrary
+              cfg={cfg}
+              token={token}
+              artistId={artistId}
+              artistName={userName}
+              isArtist
+              compact
+              onOpenBrandKit={() => setView('brand')}
+            />
+          )}
         </>
+      )}
+      {view === 'brand' && (
+        <BrandKit
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          artistName={userName}
+          isArtist
+          compact
+          onOpenAssets={() => {
+            setLibTab('assets');
+            setView('library');
+          }}
+        />
       )}
       {view === 'submit' && (
         <ArtistSubmissions cfg={cfg} token={token} artistId={artistId} isBmg={false} />

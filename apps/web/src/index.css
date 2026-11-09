@@ -1785,3 +1785,30 @@ a:hover {
 .dark .wa-quote b {
   filter: brightness(1.7) saturate(0.9);
 }
+
+/* Brand kit "Export PDF": print only the kit, one clean page per section. */
+@media print {
+  body:has(.brand-kit) * {
+    visibility: hidden;
+  }
+  body:has(.brand-kit) .brand-kit,
+  body:has(.brand-kit) .brand-kit * {
+    visibility: visible;
+  }
+  body:has(.brand-kit) .brand-kit {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+  .brand-kit .bk-card {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+  .brand-kit input,
+  .brand-kit textarea,
+  .brand-kit select {
+    border-color: transparent;
+    box-shadow: none;
+    appearance: none;
+  }
+}

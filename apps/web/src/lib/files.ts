@@ -17,6 +17,28 @@ export interface FileItem {
   uploaderRole: 'artist' | 'bmg-admin' | 'bmg-staff';
   createdAt: string;
   availableAt: string | null;
+  /** Set when the file is in the artist's asset library. */
+  asset: AssetMeta | null;
+}
+
+export type AssetCategory = 'press-photo' | 'artwork' | 'logo' | 'video' | 'audio' | 'other';
+export type AssetUse = 'press' | 'social' | 'website';
+export interface AssetMeta {
+  category: AssetCategory;
+  title: string;
+  credit?: string;
+  approvedFor: AssetUse[];
+  status: 'draft' | 'in-review' | 'approved';
+  width?: number;
+  height?: number;
+  durationSeconds?: number;
+  updatedAt?: string;
+}
+
+/** A short-lived link to show or download the file (5 minutes). */
+export async function linkFor(cfg: AppConfig, token: string, path: string): Promise<string> {
+  const { url } = await api<{ url: string }>(cfg, token, 'POST', `${path}/download`);
+  return url;
 }
 
 /** Matches the API limit (services/api/src/files/model.ts). */
