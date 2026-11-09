@@ -214,6 +214,7 @@ export const handler = handle(async (event) => {
         ...(body.startTime ? { startTime: body.startTime } : {}),
         ...(body.endTime ? { endTime: body.endTime } : {}),
         ...(body.venue ? { venue: body.venue } : {}),
+        ...(body.venue && body.venueId ? { venueId: body.venueId } : {}),
         ...(body.notes ? { notes: body.notes } : {}),
         status: body.status,
         deal: body.deal,
@@ -239,8 +240,10 @@ export const handler = handle(async (event) => {
       const patch = parseBody(event, GigPatch);
       const refused = gigPatchAllowed(principal.role, gig, patch);
       if (refused) throw new HttpError(403, refused);
-      const { askHelp, helpDone, startTime, endTime, ...fields } = patch;
+      const { askHelp, helpDone, startTime, endTime, venueId, ...fields } = patch;
       const next: Gig = { ...gig, ...fields, updatedAt: now };
+      if (venueId === null || (fields.venue !== undefined && !fields.venue)) delete next.venueId;
+      else if (venueId !== undefined) next.venueId = venueId;
       // Move an older single `time` across as the start time.
       if (next.time && !next.startTime) next.startTime = next.time;
       delete next.time;
