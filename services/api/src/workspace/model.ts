@@ -26,25 +26,35 @@ export function newId(now = Date.now()): string {
 // ── Plan ──────────────────────────────────────────────────────────────────
 export const MEASURE_IDS = ['M1', 'M2', 'M3', 'M4'] as const;
 
+const PlanDate = z.iso.date('Use a date like 2026-12-11');
 const Milestone = z.object({
   id: z.string().min(1).max(40),
   title: z.string().trim().min(1).max(200),
   done: z.boolean().default(false),
   measures: z.array(z.enum(MEASURE_IDS)).max(4).default([]),
+  /** When it's due, for the timeline (rev 7). Optional: undated items are "Unscheduled". */
+  due: PlanDate.optional(),
 });
 
 /** Plan text is Markdown, written in the editor (outcome and each stage's goal). */
 export const OUTCOME_MAX = 2000;
 export const GOAL_MAX = 4000;
 
-const Phase = z.object({
-  id: z.string().min(1).max(40),
-  name: z.string().trim().min(1).max(80),
-  goal: z.string().trim().max(GOAL_MAX).default(''),
-  milestones: z.array(Milestone).max(30).default([]),
-  /** Set when the stage came from a custom stage in the library. */
-  stageId: z.string().max(40).optional(),
-});
+const Phase = z
+  .object({
+    id: z.string().min(1).max(40),
+    name: z.string().trim().min(1).max(80),
+    goal: z.string().trim().max(GOAL_MAX).default(''),
+    milestones: z.array(Milestone).max(30).default([]),
+    /** Set when the stage came from a custom stage in the library. */
+    stageId: z.string().max(40).optional(),
+    /** The stage's dates on the timeline (rev 7). Optional. */
+    start: PlanDate.optional(),
+    end: PlanDate.optional(),
+  })
+  .refine((p) => !p.start || !p.end || p.end >= p.start, {
+    message: "A stage can't end before it starts",
+  });
 
 export const PlanBody = z.object({
   outcome: z.string().trim().max(OUTCOME_MAX),
@@ -325,4 +335,16 @@ export function matchesFilter(todo: Todo, filter: TodoFilter | undefined, today:
     case 'own':
       return !todo.done && todo.source === 'artist';
   }
+}
+
+/** The plan's date span for the timeline: earliest start or due to latest end or due. */
+export function planSpan(
+  phases: readonly { start?: string; end?: string; milestones: readonly { due?: string }[] }[],
+): { from: string; to: string } | undefined {
+  const dates = phases
+    .flatMap((p) => [p.start, p.end, ...p.milestones.map((m) => m.due)])
+    .filter((d): d is string => !!d);
+  if (dates.length === 0) return undefined;
+  dates.sort();
+  return { from: dates[0]!, to: dates.at(-1)! };
 }

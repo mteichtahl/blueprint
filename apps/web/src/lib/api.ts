@@ -65,6 +65,8 @@ export interface Milestone {
   title: string;
   done: boolean;
   measures: MeasureId[];
+  /** Due date for the timeline (rev 7). */
+  due?: string;
 }
 export interface Phase {
   id: string;
@@ -74,6 +76,9 @@ export interface Phase {
   milestones: Milestone[];
   /** Set when the stage came from a custom stage. */
   stageId?: string;
+  /** Stage dates for the timeline (rev 7). */
+  start?: string;
+  end?: string;
 }
 
 /** A custom stage from BMG's stage library. */
