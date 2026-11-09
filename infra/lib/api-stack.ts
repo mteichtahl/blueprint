@@ -312,7 +312,13 @@ export class ApiStack extends BmgStack {
         ACTION_KEY_ID: props.actionKey.keyArn,
       },
     });
-    const aiTools = fn('AiTools', 'ai-tools', "the assistant's read tools");
+    const aiTools = fn(
+      'AiTools',
+      'ai-tools',
+      "the assistant's read tools",
+      { AI_RETRIEVE_ROLE_ARN: `arn:aws:iam::${this.account}:role/${p}-ai-retrieve` },
+      true,
+    );
     const aiActions = fn('AiActions', 'ai-actions', 'carry out confirmed assistant actions', {
       ACTION_KEY_ID: props.actionKey.keyArn,
     });
@@ -519,6 +525,12 @@ export class ApiStack extends BmgStack {
       [main],
     );
     allow(aiTools, 'Roster', ['dynamodb:Query'], [`${main}/index/GSI1`]);
+    allow(
+      aiTools,
+      'RetrieveSessions',
+      ['sts:AssumeRole', 'sts:TagSession'],
+      [`arn:aws:iam::${this.account}:role/${p}-ai-retrieve`],
+    );
     allow(aiActions, 'SingleUseTokens', ['dynamodb:PutItem'], [main]);
     props.actionKey.grant(aiActions, 'kms:VerifyMac');
     putEvents(aiActions);

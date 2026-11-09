@@ -1,5 +1,13 @@
+import {
+  BedrockAgentRuntimeClient,
+  RetrieveCommand,
+  type KnowledgeBaseRetrievalResult,
+} from '@aws-sdk/client-bedrock-agent-runtime';
+import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { isArtistId } from '@bmg/crypto';
+import { BMG_KB_OWNER, retrievalFilter } from '../ai/kb.ts';
+import { kbRecord } from '../ai/kb-ops.ts';
 import { aiCanRead, workspaceDigest } from '../ai/model.ts';
 import { aiStates } from '../ai/prompts.ts';
 import type { Gig } from '../events/model.ts';
@@ -14,6 +22,52 @@ import { artistPk, PLAN_SK, ROSTER_GSI1PK, type Plan, type Todo } from '../works
  */
 
 const table = () => env('MAIN_TABLE');
+const sts = new STSClient({});
+
+/**
+ * Retrieval runs in a session tagged with the one knowledge-base owner it may
+ * query: IAM only allows bedrock:Retrieve on a knowledge base whose artistId
+ * tag matches, so a bug or a prompt injection can't reach another artist's
+ * (design 10.3).
+ */
+async function retrieve(
+  owner: string,
+  query: string,
+  role: 'artist' | 'bmg-admin' | 'bmg-staff',
+): Promise<{ source: string; text: string }[]> {
+  const rec = await kbRecord(owner);
+  if (!rec) return [];
+  const creds = await sts.send(
+    new AssumeRoleCommand({
+      RoleArn: env('AI_RETRIEVE_ROLE_ARN'),
+      RoleSessionName: `retrieve-${owner}`.slice(0, 64),
+      DurationSeconds: 900,
+      Tags: [{ Key: 'artistId', Value: owner }],
+    }),
+  );
+  const c = creds.Credentials!;
+  const client = new BedrockAgentRuntimeClient({
+    credentials: {
+      accessKeyId: c.AccessKeyId!,
+      secretAccessKey: c.SecretAccessKey!,
+      sessionToken: c.SessionToken!,
+    },
+  });
+  const filter = retrievalFilter(role);
+  const res = await client.send(
+    new RetrieveCommand({
+      knowledgeBaseId: rec.knowledgeBaseId,
+      retrievalQuery: { text: query },
+      retrievalConfiguration: {
+        vectorSearchConfiguration: { numberOfResults: 5, ...(filter ? { filter } : {}) },
+      },
+    }),
+  );
+  return (res.retrievalResults ?? []).map((r: KnowledgeBaseRetrievalResult) => ({
+    source: String(r.metadata?.fileName ?? 'a document'),
+    text: (r.content?.text ?? '').slice(0, 1500),
+  }));
+}
 const today = () => new Date().toISOString().slice(0, 10);
 
 async function query(pk: string, prefix: string, limit: number) {
@@ -96,6 +150,28 @@ export const handler = handle(async (event) => {
           today(),
         ),
       );
+    }
+
+    case 'GET /ai/tools/search': {
+      const q = (event.queryStringParameters?.q ?? '').trim().slice(0, 500);
+      if (!q) throw new HttpError(400, 'Say what to search for');
+      const artistId = event.queryStringParameters?.artistId;
+      if (principal.role === 'artist') {
+        const own = principal.artistId!;
+        const optedIn = (await aiStates([own]))[own] ?? false;
+        const check = aiCanRead(principal, own, optedIn);
+        if (!check.ok) throw new HttpError(403, check.reason);
+        return json(200, { results: await retrieve(own, q, 'artist') });
+      }
+      if (artistId) {
+        if (!isArtistId(artistId)) throw new HttpError(400, 'Give an artist id (art_…)');
+        const optedIn = (await aiStates([artistId]))[artistId] ?? false;
+        const check = aiCanRead(principal, artistId, optedIn);
+        if (!check.ok) throw new HttpError(403, check.reason);
+        return json(200, { results: await retrieve(artistId, q, principal.role) });
+      }
+      // No artist named: Blueprint's own library.
+      return json(200, { results: await retrieve(BMG_KB_OWNER, q, principal.role) });
     }
 
     default:

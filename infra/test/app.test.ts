@@ -634,3 +634,40 @@ describe('environment assistant (AI stack)', () => {
     });
   });
 });
+
+describe('environment knowledge bases (KB stack)', () => {
+  const [staging] = stacks.environments.map((e) => Template.fromStack(e.kb));
+
+  it('keeps vectors in a bucket under its own key', () => {
+    staging!.hasResourceProperties('AWS::S3Vectors::VectorBucket', {
+      VectorBucketName: 'bmg-staging-vectors',
+      EncryptionConfiguration: Match.objectLike({ SseType: 'aws:kms' }),
+    });
+  });
+
+  it('lets a retrieval session query only the knowledge base tagged like it', () => {
+    staging!.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'RetrieveFromTheTaggedOwnersKnowledgeBase',
+            Action: 'bedrock:Retrieve',
+            Condition: {
+              StringEquals: {
+                'aws:ResourceTag/artistId': '${aws:PrincipalTag/artistId}',
+                'aws:ResourceTag/bmg:env': 'staging',
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('reconciles knowledge bases with consent every hour', () => {
+    staging!.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(1 hour)' });
+    staging!.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      AlarmName: 'bmg-staging-ai-consent-drift',
+    });
+  });
+});

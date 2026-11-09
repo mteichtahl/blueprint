@@ -30,7 +30,11 @@ describe('agent tools', () => {
     const c = ctx();
     const calls: { url: string; headers: Record<string, string> }[] = [];
     const tools = buildTools(() => c, fakeFetch(calls));
-    expect(tools.map((t) => t.name)).toEqual(['get_workspace', 'propose_actions']);
+    expect(tools.map((t) => t.name)).toEqual([
+      'get_workspace',
+      'search_my_content',
+      'propose_actions',
+    ]);
     await byName(tools, 'get_workspace').invoke({ artistId: 'art_bbbbbbbbbbbb' });
     expect(calls[0]!.url).toBe(
       'https://api.example.test/v1/ai/tools/workspace?artistId=art_aaaaaaaaaaaa',
@@ -45,11 +49,27 @@ describe('agent tools', () => {
     const c = ctx({ role: 'bmg-staff', artistId: undefined });
     const calls: { url: string; headers: Record<string, string> }[] = [];
     const tools = buildTools(() => c, fakeFetch(calls));
-    expect(tools.map((t) => t.name)).toEqual(['list_artists', 'get_workspace', 'propose_actions']);
+    expect(tools.map((t) => t.name)).toEqual([
+      'list_artists',
+      'get_workspace',
+      'search_my_content',
+      'propose_actions',
+    ]);
     expect(await byName(tools, 'get_workspace').invoke({})).toMatchObject({
       error: /which artist/,
     });
     expect(calls).toHaveLength(0);
+  });
+
+  it('artists can only search their own documents', async () => {
+    const c = ctx();
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const tools = buildTools(() => c, fakeFetch(calls));
+    await byName(tools, 'search_my_content').invoke({
+      query: 'set list',
+      artistId: 'art_bbbbbbbbbbbb',
+    });
+    expect(calls[0]!.url).toBe('https://api.example.test/v1/ai/tools/search?q=set+list');
   });
 
   it('propose_actions only records a valid checklist', async () => {

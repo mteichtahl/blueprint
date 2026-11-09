@@ -67,6 +67,28 @@ export function buildTools(ctx: () => TurnContext, fetchImpl: Fetch = fetch) {
       },
     }),
     tool({
+      name: 'search_my_content',
+      description: describe(
+        c,
+        'search_my_content',
+        "Search the documents this person may see. Blueprint staff: give an artistId to search that artist's documents, or leave it out to search Blueprint's own library.",
+      ),
+      inputSchema: z.object({
+        query: z.string().min(1).max(500).describe('What to look for, in plain words'),
+        artistId: z
+          .string()
+          .optional()
+          .describe('Blueprint staff only: the artist whose documents to search'),
+      }),
+      callback: async ({ query, artistId }) => {
+        const t = ctx();
+        t.toolsUsed.add('search_my_content');
+        const params = new URLSearchParams({ q: query });
+        if (t.role !== 'artist' && artistId) params.set('artistId', artistId);
+        return callApi(t, `/ai/tools/search?${params.toString()}`, fetchImpl);
+      },
+    }),
+    tool({
       name: 'propose_actions',
       description: describe(
         c,

@@ -159,3 +159,20 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Sessions:** access and ID tokens live in memory only. The refresh token is kept in session storage encrypted (AES-GCM) with a non-extractable WebCrypto key held in IndexedDB, so storage never holds a usable token in clear text; closing the tab still signs out. The app refreshes the access token a minute before it expires (`GetTokensFromRefreshToken`, because refresh tokens rotate), and signing out revokes the refresh token. Admin actions that need a recent sign-in send people back through the sign-in screens.
 - **Errors are written for people** and never say whether an account exists ("That email and password don’t match").
 - **Social sign-in** (Google, Apple, Facebook) is not on the client today. When it's added, its button will go to Cognito's `/oauth2/authorize` with `identity_provider` set, which sends people straight to the provider and back, never to a Cognito page.
+- **Knowledge bases (design 10.3, 10.4):** a new `bmg-<env>-kb` stack. The API stack is close to the 500-resource limit, so the new pieces live here.
+  - **Storage:** one S3 Vectors bucket per environment, under its own key (`alias/bmg/<env>/vectors`). Each opted-in artist, and BMG, gets a knowledge base with its own index, both tagged `artistId=<owner>` and `bmg:env`.
+  - **Documents are pushed in by our code (a CUSTOM data source); Bedrock never reads the file buckets.** `kb-sync` reads each file the way the app does:
+    - artist files through a data-access session tagged as a Blueprint role, so **KMS itself refuses private items**;
+    - library files under the platform key.
+
+    It then sends the file inline. Bedrock therefore needs no access to any artist key, and the per-artist "AI grant" from the design isn't needed. Consent is checked before every read, and the knowledge base of an opted-out artist doesn't exist.
+  - **What goes in:**
+    - Private items never go in, so no knowledge base can return them to Blueprint. The cost is that an artist's own assistant can't search their private files either.
+    - Blueprint-only items are filtered out of an artist's own searches by code: `visibility != bmg-only`, set server-side.
+    - Only document types Bedrock parses (PDF, Word, Excel, text, Markdown, HTML, CSV), up to 5 MB each.
+  - **Retrieval runs in an `ai-retrieve` session tagged with the one owner it may query.** IAM allows `bedrock:Retrieve` only where the knowledge base's `artistId` tag matches the session tag, so a bug or a prompt injection can't reach another artist's knowledge base. BMG searches one named artist at a time, or its own library.
+  - **Consent:**
+    - `consent.aiChanged` creates and fills the knowledge base, or deletes it with its data and index.
+    - **Reconciliation runs hourly** rather than daily. It fixes any drift and raises the `ai-consent-drift` alarm, so an opted-out artist is gone within the hour even if an event was lost.
+    - The `ai-kb-count` alarm fires at 40 per environment, because the limit is 100 per Region and staging and prod share it.
+  - **The BMG knowledge base** is created by the first reconciliation run, within an hour of the first deploy. Artists don't search Blueprint's library yet. That needs per-artist sharing on chunks, which comes later.
