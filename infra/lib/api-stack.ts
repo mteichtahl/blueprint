@@ -50,6 +50,9 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly onboarding: IStateMachine;
   /** The files stack's quarantine key; the buckets have fixed names (names.bucket). */
   readonly quarantineKey: IKey;
+  /** The assistant (AI stack): its runtime and the key that signs "Do it" tokens. */
+  readonly agentRuntimeArn: string;
+  readonly actionKey: IKey;
 }
 
 /**
@@ -294,6 +297,26 @@ export class ApiStack extends BmgStack {
     });
     const gigsEvents = fn('Events', 'events', 'artist gigs and Blueprint events');
     const prompts = fn('Prompts', 'prompts', 'Settings - AI prompts: drafts, versions, publish');
+    // ── Assistant (design 10, F4) ──
+    const aiChat = new BmgFunction(this, 'AiChat', {
+      entry: 'services/api/src/handlers/ai-chat.ts',
+      description: `BMG ${env} API: the assistant (consent, prompts, agent, action tokens)`,
+      roleName: `${p}-api-ai-chat`,
+      prod,
+      bundleAwsSdk: true,
+      timeout: Duration.seconds(29),
+      memorySize: 512,
+      environment: {
+        ...common,
+        AGENT_RUNTIME_ARN: props.agentRuntimeArn,
+        ACTION_KEY_ID: props.actionKey.keyArn,
+      },
+    });
+    const aiTools = fn('AiTools', 'ai-tools', "the assistant's read tools");
+    const aiActions = fn('AiActions', 'ai-actions', 'carry out confirmed assistant actions', {
+      ACTION_KEY_ID: props.actionKey.keyArn,
+    });
+    const aiConsent = fn('AiConsent', 'ai-consent', "record each artist's AI choice");
     const smtpSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.smtpSecret(cfg, env)}-*`;
     const webUrlParam = names.ssm(cfg, env, 'web/url');
     const artists = fn('Artists', 'artists', 'invite artists', {
@@ -470,6 +493,45 @@ export class ApiStack extends BmgStack {
       [main],
     );
     putEvents(prompts);
+    allow(
+      aiChat,
+      'AssistantItems',
+      ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:BatchWriteItem', 'dynamodb:Query'],
+      [main],
+    );
+    allow(
+      aiChat,
+      'InvokeTheAgent',
+      ['bedrock-agentcore:InvokeAgentRuntime'],
+      [props.agentRuntimeArn, `${props.agentRuntimeArn}/*`],
+    );
+    props.actionKey.grant(aiChat, 'kms:GenerateMac');
+    acknowledge(
+      aiChat.role!,
+      'InvokeAgentRuntime is authorised on the runtime and its endpoints (runtime ARN + "/*"); this is the one assistant runtime for this environment.',
+      `AwsSolutions-IAM5[Resource::${prod ? 'bmg-prod' : 'bmg-staging'}-ai:ExportsOutputFnGetAttAgent255F68E9AgentRuntimeArn6937379E/*]`,
+    );
+    putEvents(aiChat);
+    allow(
+      aiTools,
+      'ReadWorkspaces',
+      ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query'],
+      [main],
+    );
+    allow(aiTools, 'Roster', ['dynamodb:Query'], [`${main}/index/GSI1`]);
+    allow(aiActions, 'SingleUseTokens', ['dynamodb:PutItem'], [main]);
+    props.actionKey.grant(aiActions, 'kms:VerifyMac');
+    putEvents(aiActions);
+    allow(aiConsent, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
+    allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
+    new Rule(this, 'AiConsentChanges', {
+      eventBus: props.bus,
+      description: "Keep each artist's current AI choice in step with the consent ledger",
+      eventPattern: { source: ['bmg.identity'], detailType: ['consent.aiChanged'] },
+      targets: [
+        new LambdaFunction(aiConsent, { retryAttempts: 8, maxEventAge: Duration.hours(6) }),
+      ],
+    });
     allow(
       messages,
       'ConversationItems',
@@ -662,6 +724,10 @@ export class ApiStack extends BmgStack {
       notifications,
       gigsEvents,
       prompts,
+      aiChat,
+      aiTools,
+      aiActions,
+      aiConsent,
     ]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
@@ -676,6 +742,10 @@ export class ApiStack extends BmgStack {
       notifications,
       gigsEvents,
       prompts,
+      aiChat,
+      aiActions,
+      aiConsent,
+      me,
     ]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
@@ -813,6 +883,11 @@ export class ApiStack extends BmgStack {
     route('DELETE', '/ai/prompts/{promptId}/draft', prompts);
     route('POST', '/ai/prompts/{promptId}/publish', prompts);
     route('POST', '/ai/prompts/{promptId}/rollback', prompts);
+    route('POST', '/ai/chat', aiChat);
+    route('GET', '/ai/chat/history', aiChat);
+    route('POST', '/ai/actions/confirm', aiActions);
+    route('GET', '/ai/tools/artists', aiTools);
+    route('GET', '/ai/tools/workspace', aiTools);
     route('GET', '/conversations', messages);
     route('POST', '/conversations', messages);
     route('GET', '/conversations/{conversationId}/messages', messages);

@@ -5,10 +5,14 @@
   "type": "module",
   "description": "The AI prompts BMG admins can edit (design 10.6): ids, variables, defaults and the fixed platform rules",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./actions": "./src/actions.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
   }
 }

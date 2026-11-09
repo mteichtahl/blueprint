@@ -4,3 +4,4 @@ dist
 package-lock.json
 .bmg
 bmg.config.json
+.agent-build

@@ -1,0 +1,16 @@
+{
+  "name": "@bmg/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Blueprint AI: the Strands agent hosted on AgentCore Runtime (design 10)",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bmg/prompts": "*",
+    "@strands-agents/sdk": "^1.24.0",
+    "zod": "^4.5.4"
+  }
+}

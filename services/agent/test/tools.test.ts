@@ -1,0 +1,72 @@
+import { describe, expect, it } from 'vitest';
+import { buildTools, type TurnContext } from '../src/tools.ts';
+
+const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
+  apiUrl: 'https://api.example.test/v1',
+  token: 'token-for-the-person-xyz',
+  role: 'artist',
+  artistId: 'art_aaaaaaaaaaaa',
+  descriptions: {},
+  proposed: [],
+  toolsUsed: new Set(),
+  ...over,
+});
+
+function fakeFetch(calls: { url: string; headers: Record<string, string> }[]) {
+  return (async (url: URL, init?: RequestInit) => {
+    calls.push({ url: String(url), headers: init?.headers as Record<string, string> });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }) as unknown as typeof fetch;
+}
+
+const byName = (tools: ReturnType<typeof buildTools>, name: string) => {
+  const t = tools.find((x) => x.name === name);
+  if (!t) throw new Error(`no tool ${name}`);
+  return t as unknown as { invoke: (i: unknown) => Promise<unknown> };
+};
+
+describe('agent tools', () => {
+  it('artists only get their own workspace, called as them with the AI context', async () => {
+    const c = ctx();
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const tools = buildTools(() => c, fakeFetch(calls));
+    expect(tools.map((t) => t.name)).toEqual(['get_workspace', 'propose_actions']);
+    await byName(tools, 'get_workspace').invoke({ artistId: 'art_bbbbbbbbbbbb' });
+    expect(calls[0]!.url).toBe(
+      'https://api.example.test/v1/ai/tools/workspace?artistId=art_aaaaaaaaaaaa',
+    );
+    expect(calls[0]!.headers).toEqual({
+      authorization: 'Bearer token-for-the-person-xyz',
+      'x-bmg-context': 'ai',
+    });
+  });
+
+  it('Blueprint staff can list artists and must say which one', async () => {
+    const c = ctx({ role: 'bmg-staff', artistId: undefined });
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const tools = buildTools(() => c, fakeFetch(calls));
+    expect(tools.map((t) => t.name)).toEqual(['list_artists', 'get_workspace', 'propose_actions']);
+    expect(await byName(tools, 'get_workspace').invoke({})).toMatchObject({
+      error: /which artist/,
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('propose_actions only records a valid checklist', async () => {
+    const c = ctx();
+    const tools = buildTools(() => c, fakeFetch([]));
+    const action = {
+      type: 'createTodo',
+      summary: 'Add a to-do: send the pitch email',
+      artistId: 'art_aaaaaaaaaaaa',
+      title: 'Send the pitch email',
+    };
+    await byName(tools, 'propose_actions').invoke({ actions: [action] });
+    expect(c.proposed).toEqual([action]);
+    await expect(
+      byName(tools, 'propose_actions').invoke({
+        actions: [{ type: 'deleteEverything', summary: 'x' }],
+      }),
+    ).rejects.toThrow();
+  });
+});

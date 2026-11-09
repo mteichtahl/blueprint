@@ -129,3 +129,19 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - Drafts, publishes and rollbacks are audited, including denied attempts.
   - The editor rejects variables the feature doesn't supply. A read-only "platform rules" block above each prompt lists the safety rules enforced in code.
   - Previewing against sample inputs, and "promote to prod", are deferred until the agent exists. Until then, staging and prod are edited separately.
+- **Checked before building the assistant (O2, O7; full notes in the project doc `claude/BMG_AI_Readiness_Sydney_O2_O7.md`):** everything runs in Sydney.
+  - Claude is reached only through the Australia profile, which routes to Sydney and Melbourne. Models: `au.anthropic.claude-sonnet-5-5` for the assistant and `au.anthropic.claude-haiku-5-5` for summaries.
+  - The Strands TypeScript SDK is on its stable 1.x line.
+  - Bedrock allows **100 knowledge bases per account per Region, and that can't be raised**. Staging and prod share the limit.
+- **The assistant (design 10, F4):**
+  - **The agent is deployed as code, not a container.** It's bundled with esbuild at synth and runs on AgentCore Runtime's Node 22 managed runtime. The CodeBuild runners aren't privileged, so they can't build Docker images.
+  - **People never call the runtime directly.** The runtime accepts IAM only, and the only caller is the API's `ai-chat` function. That function checks the person, their MFA and their AI consent, fills in the published prompt, and keeps their history for 30 days (`AICHAT#<sub>`, TTL).
+  - **Change from the design: tools call the API directly, without AgentCore Gateway.** A Gateway Lambda target never learns who is calling. The agent's tools are in-process and call `/ai/tools/*` on our API with the person's own token, tagged `x-bmg-context: ai`. The security property is the same (normal authorisation as that person) with fewer moving parts.
+  - `/ai/tools/*` adds AI consent on top of normal authorisation. An opted-out artist is invisible whoever asks. Staff see only their own artists. BMG-only to-dos stay hidden from artists, and private gigs stay hidden from Blueprint.
+  - **Each artist's current AI choice** is projected from the consent ledger into `ARTIST#<id> / AI` by a `consent.aiChanged` rule. An older decision can never overwrite a newer one. Artists who chose before this existed are backfilled by `GET /me` the next time they open the app. Until then they count as opted out, which is the safe default.
+  - **Actions:**
+    - The agent's only "write" tool, `propose_actions`, drafts a typed checklist: createTodo, sendMessage or updateSubmissionPriority.
+    - The chat function re-validates the checklist and signs a token with a KMS HMAC key. The token is bound to the person, the session and a hash of the checklist; it is single-use and lasts 60 seconds.
+    - `POST /ai/actions/confirm` checks the token, burns it, and carries out the ticked actions through the normal API as the person.
+  - **Guardrail:** Standard tier through `au.guardrail.v1:0`. It covers prompt attacks (high), harmful content, definitive legal or financial advice, card numbers, keys and passwords (blocked), and phone, email and address (masked in replies). Contextual grounding waits for knowledge bases, and must then use the Classic tier in Sydney.
+  - **Not in this slice:** AgentCore Memory (the runtime session keeps the conversation), streaming replies, and `search_my_content`, which needs knowledge bases (next).
