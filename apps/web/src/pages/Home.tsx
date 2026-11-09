@@ -31,7 +31,10 @@ import {
   shortDate,
   Tag,
 } from '../components/ui.tsx';
+import { Bell } from '../components/Bell.tsx';
+import { useNotifications, type AppNotification } from '../lib/notifications.ts';
 import { ArtistFiles, Library } from './Library.tsx';
+import { Profile } from './Profile.tsx';
 import { ArtistChats, BmgMessages, useInbox, type ConversationSummary } from './Messages.tsx';
 import { PlanTab } from './Plan.tsx';
 import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
@@ -82,6 +85,17 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   useEffect(() => void load().catch(() => undefined), [load]);
 
   const inbox = useInbox(cfg, token, me);
+  const notes = useNotifications(cfg, token, me.sub);
+  const openNotification = (n: AppNotification) => {
+    void notes.markRead([n.id]);
+    setView(
+      n.link.startsWith('chat:')
+        ? 'messages'
+        : (({ review: 'review', library: 'library', submit: 'review' } as Record<string, string>)[
+            n.link
+          ] ?? 'overview'),
+    );
+  };
   const unread = (inbox.conversations ?? []).filter((c) => c.unread).length;
   const reviewsFor = (id: string) => openReviews.filter((s) => s.artistId === id).length;
   const sections: NavSection[] = [
@@ -153,6 +167,15 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       theme={theme}
       onTheme={setTheme}
       onSignOut={onSignOut}
+      onProfile={() => setView('profile')}
+      bell={
+        <Bell
+          items={notes.items}
+          unread={notes.unread}
+          onOpen={openNotification}
+          onMarkAll={() => void notes.markRead('all')}
+        />
+      }
       topActions={
         me.role === 'bmg-admin' && (
           <Button size="sm" variant="ghost" onClick={() => setView('artists')}>
@@ -184,6 +207,20 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         />
       )}
       {openArtist && <ArtistWorkspace cfg={cfg} token={token} me={me} artist={openArtist} />}
+      {view === 'profile' && (
+        <>
+          <PageHeader eyebrow="Your account" title="Profile & preferences" />
+          <Profile
+            cfg={cfg}
+            token={token}
+            me={me}
+            userName={userName}
+            theme={theme}
+            onTheme={setTheme}
+            onSignOut={onSignOut}
+          />
+        </>
+      )}
       {view === 'messages' && (
         <>
           <PageHeader
@@ -649,10 +686,11 @@ function InviteArtist({
 
 // ═════════════════════════════ Artist phone app ═════════════════════════════
 
-type ArtistView = 'home' | 'chat' | 'todo' | 'library' | 'submit' | 'plan';
+type ArtistView = 'home' | 'chat' | 'todo' | 'library' | 'submit' | 'plan' | 'profile';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
-  useTheme();
+  const [theme, setTheme] = useTheme();
+  const notes = useNotifications(cfg, token, me.sub);
   const [view, setView] = useState<ArtistView>('home');
   const artistId = me.artistId!;
   const first = userName.split(' ')[0];
@@ -666,12 +704,13 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const headers: Record<ArtistView, { eyebrow: string; title: string }> = {
     home: { eyebrow: 'Blueprint', title: `Hi ${first}` },
     chat: { eyebrow: 'Chats', title: 'Messages' },
+    profile: { eyebrow: 'Profile & preferences', title: userName },
     todo: { eyebrow: 'To-do', title: 'This week' },
     library: { eyebrow: 'Library & assets', title: 'Your files' },
     submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
     plan: { eyebrow: 'My plan', title: 'Your plan' },
   };
-  const back = view === 'submit' || view === 'plan';
+  const back = view === 'submit' || view === 'plan' || view === 'profile';
 
   return (
     <ArtistShell
@@ -692,13 +731,33 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                 ← Home
               </button>
             ) : (
-              <button
-                type="button"
-                className="text-sm font-bold text-[#D3D8DE] hover:text-white"
-                onClick={onSignOut}
-              >
-                Sign out
-              </button>
+              <span className="flex items-center gap-1">
+                <Bell
+                  light
+                  items={notes.items}
+                  unread={notes.unread}
+                  onMarkAll={() => void notes.markRead('all')}
+                  onOpen={(n) => {
+                    void notes.markRead([n.id]);
+                    setView(
+                      n.link.startsWith('chat:')
+                        ? 'chat'
+                        : n.link === 'submit'
+                          ? 'submit'
+                          : n.link === 'library'
+                            ? 'library'
+                            : 'home',
+                    );
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Profile & preferences"
+                  onClick={() => setView('profile')}
+                >
+                  <Avatar name={userName} size={34} className="!bg-cta !text-white" />
+                </button>
+              </span>
             )
           }
         />
@@ -718,6 +777,18 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
         <ArtistSubmissions cfg={cfg} token={token} artistId={artistId} isBmg={false} />
       )}
       {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
+      {view === 'profile' && (
+        <Profile
+          cfg={cfg}
+          token={token}
+          me={me}
+          userName={userName}
+          theme={theme}
+          onTheme={setTheme}
+          onSignOut={onSignOut}
+          compact
+        />
+      )}
     </ArtistShell>
   );
 }

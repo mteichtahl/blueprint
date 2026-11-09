@@ -14,7 +14,9 @@
     "@aws-sdk/client-eventbridge": "^3.1164.0",
     "@aws-sdk/client-kms": "^3.1164.0",
     "@aws-sdk/client-s3": "^3.1164.0",
+    "@aws-sdk/client-secrets-manager": "^3.1164.0",
     "@aws-sdk/client-sfn": "^3.1164.0",
+    "@aws-sdk/client-sqs": "^3.1164.0",
     "@aws-sdk/client-ssm": "^3.1164.0",
     "@aws-sdk/client-sts": "^3.1164.0",
     "@aws-sdk/credential-provider-node": "^3.972.94",
@@ -25,10 +27,12 @@
     "@bmg/crypto": "*",
     "@smithy/signature-v4": "^5.7.5",
     "aws-jwt-verify": "^5.2.1",
+    "nodemailer": "^10.4.0",
     "otpauth": "^9.6.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.164"
+    "@types/aws-lambda": "^8.10.164",
+    "@types/nodemailer": "^8.0.2"
   }
 }

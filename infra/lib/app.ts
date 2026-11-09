@@ -125,6 +125,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       consentTable: data.tables.consent,
       sessionsTable: data.tables.sessions,
       bus: audit.bus,
+      alarmTopic: foundation.alarmTopic,
       onboarding: keys.onboarding,
       quarantineKey: files.quarantineKey,
       description: `BMG ${envName} REST API: authorizer, consent, step-up, invites`,
