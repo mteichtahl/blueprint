@@ -131,6 +131,42 @@ async function syncReminder(todo: Todo) {
 }
 
 /**
+ * Schedules the reminder without letting a Scheduler problem undo the save.
+ * The to-do is already stored when this runs, so a failure here used to turn
+ * into a 500, and a retry made a duplicate to-do. Now the reminder is cleared,
+ * the error is logged, and the caller tells the user to set it again.
+ */
+async function scheduleReminder(todo: Todo): Promise<Todo & { reminderFailed?: true }> {
+  try {
+    await syncReminder(todo);
+    return todo;
+  } catch (err) {
+    const e = err as { name?: string; message?: string };
+    console.error(
+      JSON.stringify({
+        msg: 'todo reminder schedule failed',
+        artistId: todo.artistId,
+        todoId: todo.todoId,
+        error: e.name,
+        detail: e.message,
+      }),
+    );
+    if (!todo.remindAt) return todo;
+    await db.send(
+      new UpdateCommand({
+        TableName: table(),
+        Key: { PK: artistPk(todo.artistId), SK: todoSk(todo.todoId) },
+        UpdateExpression: 'REMOVE remindAt',
+        ConditionExpression: 'attribute_exists(PK)',
+      }),
+    );
+    const rest: Todo = { ...todo };
+    delete rest.remindAt;
+    return { ...rest, reminderFailed: true };
+  }
+}
+
+/**
  * Works out remindAt. When the user just set the timing (`strict`), a
  * reminder that would already have gone off is refused; otherwise (e.g.
  * re-opening an old to-do) a past reminder is simply not scheduled again.
@@ -251,7 +287,10 @@ const publicProfile = (p: Record<string, unknown>) => ({
   createdAt: p.createdAt,
 });
 
-const publicTodo = (t: Todo) => ({
+const publicTodo = (t: Todo & { reminderFailed?: true }) => ({
+  ...(t.reminderFailed
+    ? { warning: "Saved, but the reminder couldn't be set. Open the to-do and set it again." }
+    : {}),
   todoId: t.todoId,
   artistId: t.artistId,
   title: t.title,
@@ -619,8 +658,8 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_not_exists(PK)',
         }),
       );
-      await syncReminder(todo);
-      return json(201, publicTodo(todo));
+      const saved = await scheduleReminder(todo);
+      return json(201, publicTodo(saved));
     }
 
     case 'PATCH /artists/{artistId}/todos/{todoId}': {
@@ -684,7 +723,7 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_exists(PK)',
         }),
       );
-      await syncReminder(updated);
+      const saved = await scheduleReminder(updated);
       const notify = notifyOnEdit(principal.role, existing);
       if (notify) {
         await domainEvent('todo.updated', {
@@ -696,7 +735,7 @@ export const handler = handle(async (event) => {
         });
       }
       await audit(event, 'todo.update', 'success', { artistId, todoId, fields: changed.join(',') });
-      return json(200, publicTodo(updated));
+      return json(200, publicTodo(saved));
     }
 
     case 'GET /todos': {

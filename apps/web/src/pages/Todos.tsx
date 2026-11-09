@@ -122,14 +122,21 @@ function TodoEditor({
     setBusy(true);
     setError(null);
     try {
-      await api(cfg, token, 'PATCH', `/artists/${todo.artistId}/todos/${todo.todoId}`, {
-        title: title.trim(),
-        notes: notes.trim(),
-        due: due || null,
-        dueTime: due && dueTime ? dueTime : null,
-        reminder: due && reminder ? reminder : null,
-      });
-      onSaved(note ? `Saved. ${note.replace(' when you save', '')}` : 'Saved.');
+      const res = await api<{ warning?: string }>(
+        cfg,
+        token,
+        'PATCH',
+        `/artists/${todo.artistId}/todos/${todo.todoId}`,
+        {
+          title: title.trim(),
+          notes: notes.trim(),
+          due: due || null,
+          dueTime: due && dueTime ? dueTime : null,
+          reminder: due && reminder ? reminder : null,
+        },
+      );
+      if (res?.warning) onSaved(res.warning);
+      else onSaved(note ? `Saved. ${note.replace(' when you save', '')}` : 'Saved.');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -560,19 +567,26 @@ function AddTodo({
 
   async function add() {
     try {
-      await api(cfg, token, 'POST', `/artists/${artistId}/todos`, {
-        title,
-        ...(due ? { due } : {}),
-        ...(due && dueTime ? { dueTime } : {}),
-        ...(due && reminder ? { reminder } : {}),
-        ...(isBmg && bmgOnly ? { bmgOnly } : {}),
-      });
+      const res = await api<{ warning?: string }>(
+        cfg,
+        token,
+        'POST',
+        `/artists/${artistId}/todos`,
+        {
+          title,
+          ...(due ? { due } : {}),
+          ...(due && dueTime ? { dueTime } : {}),
+          ...(due && reminder ? { reminder } : {}),
+          ...(isBmg && bmgOnly ? { bmgOnly } : {}),
+        },
+      );
       setTitle('');
       setDue('');
       setDueTime('');
       setReminder('');
       setBmgOnly(false);
       onAdded();
+      if (res?.warning) onError(res.warning);
     } catch (e) {
       onError((e as Error).message);
     }
