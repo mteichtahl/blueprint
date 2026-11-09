@@ -4,7 +4,8 @@ import {
   AccessLogFormat,
   EndpointType,
   IdentitySource,
-  LambdaIntegration,
+  Integration,
+  IntegrationType,
   LogGroupLogDestination,
   MethodLoggingLevel,
   RequestAuthorizer,
@@ -911,6 +912,26 @@ export class ApiStack extends BmgStack {
       validateRequestBody: true,
       validateRequestParameters: true,
     });
+    // One proxy integration and one invoke permission per function, scoped to
+    // this API. LambdaIntegration adds two permissions per route, which pushed
+    // the stack past CloudFormation's 500-resource limit.
+    const integrations = new Map<BmgFunction, Integration>();
+    const integrationFor = (handler: BmgFunction) => {
+      let i = integrations.get(handler);
+      if (!i) {
+        handler.addPermission('ApiInvoke', {
+          principal: new ServicePrincipal('apigateway.amazonaws.com'),
+          sourceArn: this.api.arnForExecuteApi('*', '/*', '*'),
+        });
+        i = new Integration({
+          type: IntegrationType.AWS_PROXY,
+          integrationHttpMethod: 'POST',
+          uri: `arn:${this.partition}:apigateway:${this.region}:lambda:path/2015-03-31/functions/${handler.functionArn}/invocations`,
+        });
+        integrations.set(handler, i);
+      }
+      return i;
+    };
     const route = (
       method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
       path: string,
@@ -920,7 +941,7 @@ export class ApiStack extends BmgStack {
         .split('/')
         .filter(Boolean)
         .reduce((r, part) => r.getResource(part) ?? r.addResource(part), this.api.root);
-      resource.addMethod(method, new LambdaIntegration(handler), {
+      resource.addMethod(method, integrationFor(handler), {
         authorizer,
         requestValidator: validator,
       });

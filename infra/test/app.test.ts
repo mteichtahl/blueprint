@@ -683,6 +683,8 @@ describe('environment knowledge bases (KB stack)', () => {
     staging!.hasResourceProperties('AWS::CloudWatch::Alarm', {
       AlarmName: 'bmg-staging-ai-consent-drift',
     });
+  });
+});
 
 describe('connectors', () => {
   const prod = Template.fromStack(stacks.environments[1]!.api);
@@ -693,6 +695,16 @@ describe('connectors', () => {
     });
     prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-connectors-sync' });
     prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-connectors' });
+  });
+
+  it('keeps the API stacks well under the 500-resource limit', () => {
+    for (const env of stacks.environments) {
+      const count = Object.keys(Template.fromStack(env.api).toJSON().Resources).length;
+      expect(count).toBeLessThan(420);
+    }
+    // One invoke permission per function, not two per route.
+    const perms = Object.keys(prod.findResources('AWS::Lambda::Permission')).length;
+    expect(perms).toBeLessThan(40);
   });
 
   it('reads only the connector app secrets', () => {
