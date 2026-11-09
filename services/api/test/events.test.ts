@@ -9,6 +9,7 @@ import {
   moneySummary,
   durationMinutes,
   EventBody,
+  EventCreate,
   EventPatch,
   GigCreate,
   gigGsi3Sk,
@@ -283,5 +284,29 @@ describe('venues picked from the list', () => {
     expect(EventBody.parse({ name: 'M', date: '2026-12-11', venueId: 'v0000000001' }).venueId).toBe(
       'v0000000001',
     );
+  });
+});
+
+describe('event start and end times (required)', () => {
+  const base = { name: 'Mixer Night', date: '2026-12-11' };
+  it('needs both times on a new event', () => {
+    const missing = EventCreate.safeParse(base);
+    expect(missing.success).toBe(false);
+    expect(missing.error?.issues.map((i) => i.message)).toContain('Add the start time');
+    expect(EventCreate.safeParse({ ...base, startTime: '18:00' }).success).toBe(false);
+    expect(EventCreate.safeParse({ ...base, startTime: '18:00', endTime: '18:00' }).success).toBe(
+      false,
+    );
+    expect(EventCreate.parse({ ...base, startTime: '18:00', endTime: '23:30' })).toMatchObject({
+      startTime: '18:00',
+      endTime: '23:30',
+    });
+    expect(EventCreate.safeParse({ ...base, startTime: '21:00', endTime: '01:00' }).success).toBe(
+      true,
+    );
+  });
+
+  it('still reads older events without times', () => {
+    expect(EventBody.safeParse(base).success).toBe(true);
   });
 });
