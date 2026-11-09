@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
+import { AuthFrame } from '../components/Shell.tsx';
 import { Button, Card, Field, Notice } from '../components/ui.tsx';
 
 /**
@@ -49,9 +50,13 @@ export function StepUp({
   }
 
   return (
-    <main className="grid min-h-screen place-items-center p-6">
-      <Card title="Two-step verification" className="w-full max-w-md space-y-4">
-        <p className="text-sm text-muted-foreground">
+    <AuthFrame
+      eyebrow="Two-step verification"
+      title="Confirm it's you"
+      sub="Required for everyone at Blueprint."
+    >
+      <Card title="Authenticator code">
+        <p className="m-0 text-[15px] text-muted-foreground">
           You signed in with a social account. Confirm it's you with a 6-digit code from an
           authenticator app.
         </p>
@@ -64,7 +69,7 @@ export function StepUp({
           </div>
         )}
         {uri && secret && (
-          <div className="space-y-2 rounded-md bg-secondary p-3 text-sm">
+          <div className="tile gap-2 text-sm">
             <p>
               On your phone,{' '}
               <a className="font-semibold underline" href={uri}>
@@ -77,7 +82,7 @@ export function StepUp({
         )}
         {uri !== null && (
           <form
-            className="space-y-3"
+            className="flex flex-col gap-3"
             onSubmit={(e) => {
               e.preventDefault();
               void verify();
@@ -100,6 +105,6 @@ export function StepUp({
         )}
         {error && <Notice tone="error">{error}</Notice>}
       </Card>
-    </main>
+    </AuthFrame>
   );
 }
