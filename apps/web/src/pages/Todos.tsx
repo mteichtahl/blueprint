@@ -73,7 +73,12 @@ function DueTag({ t }: { t: Todo }) {
         {shortDate(t.due)}
         {t.dueTime ? ` · ${t.dueTime}` : ''}
       </Tag>
-      {t.reminder && !t.done && (
+      {t.reminder && !t.done && t.reminderFailed && (
+        <span title="Open the to-do and save it to try again">
+          <Tag tone="k">Reminder not set</Tag>
+        </span>
+      )}
+      {t.reminder && !t.done && !t.reminderFailed && (
         <span title={`Reminder ${REMINDER_SHORT[t.reminder]}`} className="text-muted-foreground">
           <Icon name="bell" size={14} />
           <span className="sr-only">Reminder {REMINDER_SHORT[t.reminder]}</span>
@@ -82,6 +87,9 @@ function DueTag({ t }: { t: Todo }) {
     </span>
   );
 }
+
+const REMINDER_FAILED =
+  "The reminder couldn't be set just now. Open the to-do and save it to try again.";
 
 /** Who is told when a to-do is edited (matches the API's rule). */
 function notifyNote(t: Todo, isBmg: boolean): string | null {
@@ -122,14 +130,21 @@ function TodoEditor({
     setBusy(true);
     setError(null);
     try {
-      await api(cfg, token, 'PATCH', `/artists/${todo.artistId}/todos/${todo.todoId}`, {
-        title: title.trim(),
-        notes: notes.trim(),
-        due: due || null,
-        dueTime: due && dueTime ? dueTime : null,
-        reminder: due && reminder ? reminder : null,
-      });
-      onSaved(note ? `Saved. ${note.replace(' when you save', '')}` : 'Saved.');
+      const saved = await api<Todo>(
+        cfg,
+        token,
+        'PATCH',
+        `/artists/${todo.artistId}/todos/${todo.todoId}`,
+        {
+          title: title.trim(),
+          notes: notes.trim(),
+          due: due || null,
+          dueTime: due && dueTime ? dueTime : null,
+          reminder: due && reminder ? reminder : null,
+        },
+      );
+      const done = note ? `Saved. ${note.replace(' when you save', '')}` : 'Saved.';
+      onSaved(saved.reminderFailed ? `${done} ${REMINDER_FAILED}` : done);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -560,7 +575,7 @@ function AddTodo({
 
   async function add() {
     try {
-      await api(cfg, token, 'POST', `/artists/${artistId}/todos`, {
+      const created = await api<Todo>(cfg, token, 'POST', `/artists/${artistId}/todos`, {
         title,
         ...(due ? { due } : {}),
         ...(due && dueTime ? { dueTime } : {}),
@@ -573,6 +588,7 @@ function AddTodo({
       setReminder('');
       setBmgOnly(false);
       onAdded();
+      if (created.reminderFailed) onError(`To-do added. ${REMINDER_FAILED}`);
     } catch (e) {
       onError((e as Error).message);
     }

@@ -448,6 +448,16 @@ describe('environment API', () => {
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
+  it('lets Scheduler assume the reminder role from the reminder schedule group (WP0)', () => {
+    const roles = Object.values(prod!.findResources('AWS::IAM::Role')).filter((r) =>
+      JSON.stringify(r.Properties.AssumeRolePolicyDocument).includes('scheduler.amazonaws.com'),
+    );
+    expect(roles).toHaveLength(1);
+    const cond = roles[0]!.Properties.AssumeRolePolicyDocument.Statement[0].Condition;
+    expect(cond.ArnEquals['aws:SourceArn']).toMatch(/:schedule-group\/bmg-prod-reminders$/);
+    expect(JSON.stringify(cond)).not.toContain(':schedule/');
+  });
+
   it('limits realtime subscribers to their own inbox channel and publishing to IAM', () => {
     const ns = Object.values(prod!.findResources('AWS::AppSync::ChannelNamespace'))[0]!;
     expect(ns.Properties.CodeHandlers).toContain('util.unauthorized()');

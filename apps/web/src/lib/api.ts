@@ -111,6 +111,8 @@ export interface Todo {
   dueTime: string | null;
   reminder: Reminder | null;
   remindAt: string | null;
+  /** The reminder couldn't be scheduled; saving the to-do again retries it. */
+  reminderFailed: boolean;
   phaseId: string | null;
   done: boolean;
   source: 'bmg' | 'feedback' | 'artist';
