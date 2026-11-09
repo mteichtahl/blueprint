@@ -344,6 +344,8 @@ export const PART_SCHEMAS = {
     time: Time,
     item: z.string().trim().min(1).max(200),
     who: Text(120).default(''),
+    /** Notes for the crew on this item: cues, contacts, gear (rev 7). */
+    notes: Text(1000).default(''),
   }),
   budget: z.object({
     item: z.string().trim().min(1).max(120),

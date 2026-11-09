@@ -310,3 +310,19 @@ describe('event start and end times (required)', () => {
     expect(EventBody.safeParse(base).success).toBe(true);
   });
 });
+
+describe('run sheet notes', () => {
+  it('adds notes to run sheet items', () => {
+    const row = PART_SCHEMAS.run.parse({
+      time: '19:00',
+      item: 'Doors',
+      notes: 'Wristbands at desk',
+    });
+    expect(row.notes).toBe('Wristbands at desk');
+    expect(PART_SCHEMAS.run.parse({ time: '19:00', item: 'Doors' }).notes).toBe('');
+    expect(
+      PART_SCHEMAS.run.safeParse({ time: '19:00', item: 'X', notes: 'x'.repeat(1001) }).success,
+    ).toBe(false);
+    expect(patchOf(PART_SCHEMAS.run).parse({ notes: 'Mic check' })).toEqual({ notes: 'Mic check' });
+  });
+});

@@ -695,6 +695,12 @@ function EventDetail({
                 { k: 'time', label: 'Time', type: 'time' },
                 { k: 'item', label: 'Item' },
                 { k: 'who', label: 'Who', optional: true },
+                {
+                  k: 'notes',
+                  label: 'Notes',
+                  optional: true,
+                  placeholder: 'Cues, gear, who to call',
+                },
               ]}
               onCancel={() => setAdding(null)}
               onSave={(b) => void addRow('run', b)}
@@ -703,11 +709,16 @@ function EventDetail({
           {d.run.length === 0 && <p className="src">Nothing on the run sheet yet.</p>}
           <div className="flex flex-col">
             {d.run.map((r) => (
-              <div key={r.itemId} className="li">
+              <div key={r.itemId} className="li flex-wrap">
                 <b className="w-16 flex-none">{time12(String(r.time))}</b>
                 <span className="flex-1">{String(r.item)}</span>
                 <span className="src">{String(r.who ?? '')}</span>
                 <RemoveButton onClick={() => void removeRow('run', r.itemId)} />
+                <RunNotes
+                  item={String(r.item)}
+                  notes={String(r.notes ?? '')}
+                  onSave={(notes) => void patchRow('run', r.itemId, { notes })}
+                />
               </div>
             ))}
           </div>
@@ -960,6 +971,72 @@ function TicketsForm({ sold, onSave }: { sold: number; onSave: (n: number) => vo
         Save
       </Button>
     </span>
+  );
+}
+
+/** A run sheet item's notes: shown under the row, edited in place. */
+function RunNotes({
+  item,
+  notes,
+  onSave,
+}: {
+  item: string;
+  notes: string;
+  onSave: (notes: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState(notes);
+  if (editing) {
+    return (
+      <div className="flex w-full flex-col gap-2 pl-16">
+        <textarea
+          aria-label={`Notes for ${item}`}
+          className="min-h-20 w-full rounded-lg border border-input bg-white px-3 py-2 text-[15px]"
+          maxLength={1000}
+          value={v}
+          onChange={(e) => setV(e.target.value)}
+        />
+        <span className="flex gap-2">
+          <Button
+            size="sm"
+            variant="navy"
+            onClick={() => {
+              setEditing(false);
+              if (v.trim() !== notes) onSave(v.trim());
+            }}
+          >
+            Save notes
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setV(notes);
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex w-full gap-2 pl-16 text-sm">
+      {notes ? (
+        <span className="src flex-1 whitespace-pre-line">{notes}</span>
+      ) : (
+        <span className="flex-1" />
+      )}
+      <button
+        type="button"
+        className="font-bold underline"
+        aria-label={`${notes ? 'Edit' : 'Add'} notes for ${item}`}
+        onClick={() => setEditing(true)}
+      >
+        {notes ? 'Edit notes' : '+ Notes'}
+      </button>
+    </div>
   );
 }
 
