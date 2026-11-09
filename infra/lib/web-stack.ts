@@ -13,6 +13,10 @@ import {
   PriceClass,
   ResponseHeadersPolicy,
   ViewerProtocolPolicy,
+  Function as CfFunction,
+  FunctionCode,
+  FunctionEventType,
+  FunctionRuntime,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -122,6 +126,18 @@ export class WebStack extends BmgStack {
     });
 
     const apiDomain = `${props.restApiId}.execute-api.${this.region}.amazonaws.com`;
+    // Single-page app routing at the edge, for the site only: paths without a
+    // file extension (e.g. /auth/callback) load index.html. Distribution-level
+    // error responses would also rewrite the API's own 403/404 answers into
+    // index.html, hiding its problem+json errors from the app.
+    const spaRouting = new CfFunction(this, 'SpaRouting', {
+      functionName: `${p}-spa-routing`,
+      runtime: FunctionRuntime.JS_2_0,
+      comment: 'Serve index.html for app routes',
+      code: FunctionCode.fromInline(
+        "function handler(event) { var r = event.request; if (r.uri.indexOf('.') === -1) { r.uri = '/index.html'; } return r; }",
+      ),
+    });
     const distribution = new Distribution(this, 'Distribution', {
       comment: `BMG ${env} web app`,
       defaultRootObject: 'index.html',
@@ -135,6 +151,9 @@ export class WebStack extends BmgStack {
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         responseHeadersPolicy: headers,
         compress: true,
+        functionAssociations: [
+          { function: spaRouting, eventType: FunctionEventType.VIEWER_REQUEST },
+        ],
       },
       additionalBehaviors: {
         '/v1/*': {
@@ -153,13 +172,6 @@ export class WebStack extends BmgStack {
           responseHeadersPolicy: headers,
         },
       },
-      // Single-page app: unknown paths (e.g. /auth/callback) load index.html.
-      errorResponses: [403, 404].map((status) => ({
-        httpStatus: status,
-        responseHttpStatus: 200,
-        responsePagePath: '/index.html',
-        ttl: Duration.seconds(0),
-      })),
     });
     const origin = `https://${distribution.distributionDomainName}`;
 
