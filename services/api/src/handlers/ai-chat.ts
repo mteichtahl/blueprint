@@ -10,6 +10,7 @@ import {
   ACTION_TOKEN_SECONDS,
   actionsHash,
   ActionList,
+  type AgentFailure,
   type AgentReply,
 } from '@bmg/prompts/actions';
 import {
@@ -148,7 +149,19 @@ export const handler = handle(async (event) => {
     });
   }
 
-  let reply: AgentReply;
+  let reply: AgentReply = { reply: '', actions: [], toolsUsed: [] };
+  const unavailable = (why: Record<string, unknown>) => {
+    // Admins see the reason (an error name and AWS message, never prompt text).
+    const reason =
+      principal.role === 'bmg-admin'
+        ? ` (${[why.error, why.status, why.detail].filter(Boolean).join(' · ')})`
+        : '';
+    return new HttpError(
+      502,
+      `The assistant is unavailable right now. Try again in a moment.${reason}`,
+    );
+  };
+  let failure: Record<string, unknown> | undefined;
   try {
     const res = await agentcore.send(
       new InvokeAgentRuntimeCommand({
@@ -172,13 +185,16 @@ export const handler = handle(async (event) => {
       }),
     );
     const text = (await res.response?.transformToString()) ?? '{}';
-    reply = JSON.parse(text) as AgentReply;
+    const out = JSON.parse(text) as AgentReply & Partial<AgentFailure>;
+    if (out.failure) failure = { where: 'agent', ...out.failure };
+    reply = out;
   } catch (err) {
-    console.error(
-      JSON.stringify({ level: 'error', msg: 'agent call failed', ...describeError(err) }),
-    );
+    failure = { where: 'invoke', ...describeError(err) };
+  }
+  if (failure) {
+    console.error(JSON.stringify({ level: 'error', msg: 'agent call failed', ...failure }));
     await audit(event, 'ai.chat', 'failed', { sessionId: sid });
-    throw new HttpError(502, 'The assistant is unavailable right now. Try again in a moment.');
+    throw unavailable(failure);
   }
 
   // Re-validate what the agent proposed: anything malformed is dropped.
