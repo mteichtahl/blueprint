@@ -16,8 +16,8 @@ export const AI_SK = 'AI';
 /** Assistant history is kept for 30 days (design 10.5). */
 export const HISTORY_DAYS = 30;
 export const historyPk = (sub: string) => `AICHAT#${sub}`;
-/** A new chat session id: time-ordered, with 80 bits from the CSPRNG (not Math.random). */
-export const sessionId = () => `s${Date.now().toString(36)}${randomBytes(10).toString('hex')}`;
+/** A new assistant conversation id: 24 random hex characters from the CSPRNG. */
+export const sessionId = () => `s${randomBytes(12).toString('hex')}`;
 export const SessionId = z.string().regex(/^s[a-z0-9]{8,30}$/);
 
 export const ChatBody = z

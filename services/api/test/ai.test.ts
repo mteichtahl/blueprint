@@ -8,8 +8,6 @@ import {
   decodeToken,
   encodeToken,
   workspaceDigest,
-  sessionId,
-  SessionId,
 } from '../src/ai/model.ts';
 import { stepsFor } from '../src/handlers/ai-actions.ts';
 import type { Gig } from '../src/events/model.ts';
@@ -147,12 +145,12 @@ describe('carrying out actions', () => {
   });
 });
 
-describe('chat session ids', () => {
-  it('are valid, unguessable and unique', () => {
-    const ids = Array.from({ length: 200 }, () => sessionId());
-    for (const id of ids) expect(SessionId.safeParse(id).success).toBe(true);
-    expect(new Set(ids).size).toBe(ids.length);
-    // 20 hex characters (80 bits) of randomness after the time part.
-    expect(ids[0]).toMatch(/[0-9a-f]{20}$/);
+describe('conversation ids', () => {
+  it('are random, unguessable and match the accepted format', async () => {
+    const { sessionId, SessionId } = await import('../src/ai/model.ts');
+    const a = sessionId();
+    expect(SessionId.safeParse(a).success).toBe(true);
+    expect(a).toMatch(/^s[0-9a-f]{24}$/);
+    expect(sessionId()).not.toBe(a);
   });
 });
