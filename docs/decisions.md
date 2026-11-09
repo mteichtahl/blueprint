@@ -232,3 +232,9 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Contrast check:** text, primary and accent on the background, and background on primary, graded against WCAG AA (4.5:1, or 3:1 for large text).
 - **Export PDF** is the browser's print-to-PDF with print styles that show only the kit.
 - **No new Lambdas:** the routes reuse the workspace and files functions, keeping the API stack under 500 resources (now 105 routes).
+
+## Notes: Phase 6 policy review (10 Nov 2026)
+
+- **Full findings are in [security-review.md](security-review.md).** The gate is met: no high findings are open.
+- **The key admin can no longer rewrite artist key policies (K1).** New keys are created with `BypassPolicyLockoutSafetyCheck`, because the policy deliberately takes `PutKeyPolicy` away from the creating role. The account root keeps policy administration, so no key is orphaned. Older keys are moved to the new policy on deploy by `Custom::BmgKeyPolicyRefresh`.
+- **Data-access sessions are limited to 8 named roles (I1),** listed in `DATA_ACCESS_CALLERS` in `infra/lib/keys-stack.ts`. A new function that opens artist data must be added there. The infra test fails until it is.
