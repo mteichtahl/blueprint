@@ -4,6 +4,9 @@ import {
   checkTimes,
   crossesMidnight,
   dealNoteFor,
+  defaultMoney,
+  Money,
+  moneySummary,
   durationMinutes,
   EventBody,
   EventPatch,
@@ -195,5 +198,74 @@ describe('deal: Other with free text', () => {
     const note = 'x'.repeat(300);
     expect(GigPatch.parse({ deal: 'other', dealNote: note }).dealNote).toBe(note);
     expect(GigPatch.safeParse({ dealNote: 'x'.repeat(301) }).success).toBe(false);
+  });
+});
+
+describe('money: tickets, takings, costs and profit', () => {
+  it('starts gigs with the preset cost rows', () => {
+    expect(defaultMoney().costs.map((c) => c.label)).toEqual([
+      'Venue',
+      'Photography',
+      'Videography',
+      'Content',
+      'Support band',
+      'Backing band',
+    ]);
+  });
+
+  it('works out profit (and losses)', () => {
+    const m = Money.parse({
+      ticketsSold: 120,
+      takingsCents: 240000,
+      costs: [
+        { id: 'p1', label: 'Venue', amountCents: 80000 },
+        { id: 'c1', label: 'Sound engineer', amountCents: 30000 },
+      ],
+    });
+    expect(moneySummary(m)).toEqual({
+      costsCents: 110000,
+      profitCents: 130000,
+      perTicketCents: 2000,
+    });
+    expect(moneySummary({ ticketsSold: 0, takingsCents: 0, costs: m.costs }).profitCents).toBe(
+      -110000,
+    );
+    expect(moneySummary({ ticketsSold: 0, takingsCents: 0, costs: [] }).perTicketCents).toBeNull();
+  });
+
+  it('allows custom rows and deleting presets, but checks the figures', () => {
+    expect(Money.safeParse({ costs: [] }).success).toBe(true);
+    expect(Money.safeParse({ takingsCents: -1 }).success).toBe(false);
+    expect(Money.safeParse({ costs: [{ id: 'a', label: '', amountCents: 1 }] }).success).toBe(
+      false,
+    );
+    expect(
+      Money.safeParse({
+        costs: [
+          { id: 'a', label: 'X', amountCents: 1 },
+          { id: 'a', label: 'Y', amountCents: 1 },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(GigPatch.parse({ money: { ticketsSold: 3 } }).money).toEqual({
+      ticketsSold: 3,
+      takingsCents: 0,
+      costs: [],
+    });
+  });
+
+  it('gives events takings and profit from what the budget rows spent', () => {
+    const e = EventBody.parse({ name: 'Mixer', date: '2026-12-11', takingsCents: 500000 });
+    const s = summarise(e, {
+      guests: [],
+      speakers: [],
+      crew: [],
+      budget: [
+        { budgetCents: 300000, spentCents: 280000 },
+        { budgetCents: 50000, spentCents: 0 },
+      ],
+    });
+    expect(s.takingsCents).toBe(500000);
+    expect(s.profitCents).toBe(220000);
   });
 });

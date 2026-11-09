@@ -62,6 +62,8 @@ export interface Gig {
   /** Removed in rev 7 (set duration). Older gigs may still hold it; never returned. */
   setLength?: string;
   ticketUrl?: string;
+  /** Tickets sold, takings and costs; absent until someone enters figures. */
+  money?: Money;
   help?: {
     text: string;
     topics: (typeof HELP_TOPICS)[number][];
@@ -72,6 +74,54 @@ export interface Gig {
   createdBy: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+// ── Money: tickets, takings, costs and profit (rev 7) ────────────────────
+/** The cost rows every gig starts with; any can be deleted and more added. */
+export const PRESET_COSTS = [
+  'Venue',
+  'Photography',
+  'Videography',
+  'Content',
+  'Support band',
+  'Backing band',
+] as const;
+
+const cents = z.number().int().min(0).max(100_000_000);
+export const CostRow = z.object({
+  id: z.string().regex(/^[a-z0-9-]{1,40}$/),
+  label: z.string().trim().min(1, 'Name the cost').max(60),
+  amountCents: cents.default(0),
+});
+export const Money = z
+  .object({
+    ticketsSold: z.number().int().min(0).max(1_000_000).default(0),
+    takingsCents: cents.default(0),
+    costs: z.array(CostRow).max(40).default([]),
+  })
+  .strict()
+  .refine(
+    (m) => new Set(m.costs.map((c) => c.id)).size === m.costs.length,
+    'Each cost needs its own id',
+  );
+export type Money = z.infer<typeof Money>;
+
+/** A gig with no figures yet shows the preset cost rows at $0. */
+export const defaultMoney = (): Money => ({
+  ticketsSold: 0,
+  takingsCents: 0,
+  costs: PRESET_COSTS.map((label, i) => ({ id: `p${i + 1}`, label, amountCents: 0 })),
+});
+
+/** Profit = total takings − total costs (negative is a loss). */
+export function moneySummary(m: Pick<Money, 'ticketsSold' | 'takingsCents' | 'costs'>) {
+  const costsCents = m.costs.reduce((n, c) => n + c.amountCents, 0);
+  const profitCents = m.takingsCents - costsCents;
+  return {
+    costsCents,
+    profitCents,
+    perTicketCents: m.ticketsSold > 0 ? Math.round(m.takingsCents / m.ticketsSold) : null,
+  };
 }
 
 export const gigSk = (id: string) => `GIG#${id}`;
@@ -153,6 +203,7 @@ export const GigPatch = z
       .optional(),
     shared: z.boolean().optional(),
     checklist: Checklist.optional(),
+    money: Money.optional(),
     /** Ask Blueprint for help (artist): what with, and a note. Opens a request. */
     askHelp: z
       .object({
@@ -208,6 +259,8 @@ export const EventBody = z.object({
   ticketPriceCents: z.number().int().min(0).max(10_000_000).default(0),
   /** Until the Humanitix connector is on, ticket sales are typed in. */
   ticketsSold: z.number().int().min(0).max(100000).default(0),
+  /** Total event takings (rev 7); profit = takings − what the budget rows spent. */
+  takingsCents: z.number().int().min(0).max(100_000_000).default(0),
   compsTarget: z.number().int().min(0).max(10000).default(0),
   surveyAfter: z.boolean().default(true),
   /** Set when the Humanitix connector links this event. */
@@ -276,6 +329,10 @@ export interface EventSummary {
   budgetCents: number;
   spentCents: number;
   ticketIncomeCents: number;
+  /** Total takings entered for the event (rev 7). */
+  takingsCents: number;
+  /** Takings − spent (the budget rows' actual costs). Negative is a loss. */
+  profitCents: number;
   crewFilled: number;
   crewNeeded: number;
   speakersConfirmed: number;
@@ -303,6 +360,8 @@ export function summarise(
     budgetCents: parts.budget.reduce((n, b) => n + b.budgetCents, 0),
     spentCents: parts.budget.reduce((n, b) => n + b.spentCents, 0),
     ticketIncomeCents: e.ticketsSold * e.ticketPriceCents,
+    takingsCents: e.takingsCents,
+    profitCents: e.takingsCents - parts.budget.reduce((n, b) => n + b.spentCents, 0),
     crewFilled: parts.crew.reduce((n, c) => n + Math.min(c.filled, c.needed), 0),
     crewNeeded: parts.crew.reduce((n, c) => n + c.needed, 0),
     speakersConfirmed: parts.speakers.filter((s) => s.status === 'confirmed').length,
