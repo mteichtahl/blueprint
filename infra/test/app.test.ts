@@ -444,7 +444,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(72);
+    expect(routed.length).toBe(73);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -645,6 +645,43 @@ describe('environment assistant (AI stack)', () => {
     staging!.hasResourceProperties('AWS::KMS::Key', {
       KeySpec: 'HMAC_256',
       KeyUsage: 'GENERATE_VERIFY_MAC',
+    });
+  });
+});
+
+describe('environment knowledge bases (KB stack)', () => {
+  const [staging] = stacks.environments.map((e) => Template.fromStack(e.kb));
+
+  it('keeps vectors in a bucket under its own key', () => {
+    staging!.hasResourceProperties('AWS::S3Vectors::VectorBucket', {
+      VectorBucketName: 'bmg-staging-vectors',
+      EncryptionConfiguration: Match.objectLike({ SseType: 'aws:kms' }),
+    });
+  });
+
+  it('lets a retrieval session query only the knowledge base tagged like it', () => {
+    staging!.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'RetrieveFromTheTaggedOwnersKnowledgeBase',
+            Action: 'bedrock:Retrieve',
+            Condition: {
+              StringEquals: {
+                'aws:ResourceTag/artistId': '${aws:PrincipalTag/artistId}',
+                'aws:ResourceTag/bmg:env': 'staging',
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('reconciles knowledge bases with consent every hour', () => {
+    staging!.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(1 hour)' });
+    staging!.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      AlarmName: 'bmg-staging-ai-consent-drift',
     });
   });
 });

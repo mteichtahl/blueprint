@@ -9,12 +9,16 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-agent": "^3.1164.0",
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.1164.0",
     "@aws-sdk/client-bedrock-agentcore": "^3.1164.0",
+    "@aws-sdk/client-cloudwatch": "^3.1164.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.1164.0",
     "@aws-sdk/client-dynamodb": "^3.1164.0",
     "@aws-sdk/client-eventbridge": "^3.1164.0",
     "@aws-sdk/client-kms": "^3.1164.0",
     "@aws-sdk/client-s3": "^3.1164.0",
+    "@aws-sdk/client-s3vectors": "^3.1164.0",
     "@aws-sdk/client-scheduler": "^3.1164.0",
     "@aws-sdk/client-secrets-manager": "^3.1164.0",
     "@aws-sdk/client-sfn": "^3.1164.0",
