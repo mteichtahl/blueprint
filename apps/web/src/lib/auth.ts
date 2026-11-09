@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.ts';
-import { refreshTokens, revokeToken, type Tokens } from './cognito.ts';
+import { CognitoError, refreshTokens, revokeToken, type Tokens } from './cognito.ts';
 
 /**
  * The signed-in session, from Blueprint's own sign-in screens (Cognito's
@@ -85,11 +85,21 @@ function sessionKey(): Promise<CryptoKey | null> {
 const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
+/**
+ * Local storage, so the session survives closing the tab or the installed app
+ * (home-screen apps clear session storage every time they close). It lasts as
+ * long as the refresh token: 30 days, or until signing out.
+ */
+function forget() {
+  localStorage.removeItem(BLOB_KEY);
+  sessionStorage.removeItem(BLOB_KEY);
+}
+
 async function persist(refreshToken: string | null) {
   try {
-    if (!refreshToken) return sessionStorage.removeItem(BLOB_KEY);
+    if (!refreshToken) return forget();
     const key = await sessionKey();
-    if (!key) return sessionStorage.removeItem(BLOB_KEY);
+    if (!key) return forget();
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = new Uint8Array(
       await crypto.subtle.encrypt(
@@ -98,7 +108,8 @@ async function persist(refreshToken: string | null) {
         new TextEncoder().encode(refreshToken),
       ),
     );
-    sessionStorage.setItem(BLOB_KEY, JSON.stringify({ iv: b64(iv), ct: b64(ct) }));
+    localStorage.setItem(BLOB_KEY, JSON.stringify({ iv: b64(iv), ct: b64(ct) }));
+    sessionStorage.removeItem(BLOB_KEY);
   } catch {
     // Storage or crypto blocked: the session lasts as long as the page.
   }
@@ -106,7 +117,8 @@ async function persist(refreshToken: string | null) {
 
 async function restoreRefreshToken(): Promise<string | null> {
   try {
-    const raw = sessionStorage.getItem(BLOB_KEY);
+    // Session storage: sessions saved before the move to local storage.
+    const raw = localStorage.getItem(BLOB_KEY) ?? sessionStorage.getItem(BLOB_KEY);
     if (!raw) return null;
     const { iv, ct } = JSON.parse(raw) as { iv: string; ct: string };
     const key = await sessionKey();
@@ -114,7 +126,7 @@ async function restoreRefreshToken(): Promise<string | null> {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, key, unb64(ct));
     return new TextDecoder().decode(plain);
   } catch {
-    sessionStorage.removeItem(BLOB_KEY);
+    forget();
     return null;
   }
 }
@@ -139,13 +151,19 @@ export async function currentSession(cfg: AppConfig): Promise<Session | null> {
   return refresh(cfg);
 }
 
+/** Failures that say nothing about the token itself. */
+const TRANSIENT = new Set(['NetworkError', 'TooManyRequestsException', 'InternalErrorException']);
+
 export async function refresh(cfg: AppConfig): Promise<Session | null> {
   const token = current?.refreshToken || (await restoreRefreshToken());
   if (!token) return clear();
   try {
     return await storeTokens(await refreshTokens(cfg, token), token);
-  } catch {
-    return clear();
+  } catch (e) {
+    // Only a rejected token ends the session; offline or a blip keeps it for next time.
+    if (e instanceof CognitoError && !TRANSIENT.has(e.type)) return clear();
+    current = null;
+    return null;
   }
 }
 
