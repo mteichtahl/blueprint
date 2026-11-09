@@ -574,6 +574,17 @@ export class ApiStack extends BmgStack {
         `AwsSolutions-IAM5[Resource::${connectorSecrets}]`,
       );
     }
+    // Admins register the vendor OAuth apps in the app (Connectors → Connector apps).
+    allow(
+      connectors,
+      'WriteConnectorApps',
+      [
+        'secretsmanager:CreateSecret',
+        'secretsmanager:PutSecretValue',
+        'secretsmanager:TagResource',
+      ],
+      [connectorSecrets],
+    );
     new Rule(this, 'ConnectorsHourly', {
       description: 'Pull connector stats into daily snapshots',
       schedule: Schedule.rate(Duration.hours(1)),
@@ -1039,6 +1050,9 @@ export class ApiStack extends BmgStack {
     });
     route('GET', '/connectors', connectors);
     route('POST', '/connectors/callback', connectors);
+    route('GET', '/connectors/apps', connectors);
+    route('PUT', '/connectors/apps/{provider}', connectors);
+    route('DELETE', '/connectors/apps/{provider}', connectors);
     route('GET', '/connectors/humanitix/events', connectors);
     route('POST', '/connectors/{connectorId}/connect', connectors);
     route('PATCH', '/connectors/{connectorId}', connectors);

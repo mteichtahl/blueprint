@@ -6,6 +6,7 @@ import {
   finishPendingCallback,
   type ArtistRow,
   type CellState,
+  type ConnectorApp,
   type ConnectorCard,
 } from '../lib/connectors.ts';
 import { Button, Card, DataTable, Field, Notice, Select, Tag } from '../components/ui.tsx';
@@ -335,7 +336,9 @@ export function BmgConnectors({
               )}
               {!c.connection && !c.available && (
                 <span className="src">
-                  Register the app first: <code>blueprint connectors setup {providerOf(c.id)}</code>
+                  {isAdmin
+                    ? `Register the ${APP_NAMES[providerOf(c.id)] ?? 'vendor'} app below under Connector apps first.`
+                    : 'An admin needs to register this app first.'}
                 </span>
               )}
               {c.connection ? (
@@ -447,6 +450,7 @@ export function BmgConnectors({
           )}
         </div>
       </Card>
+      {isAdmin && <ConnectorApps cfg={cfg} token={token} onChanged={() => act(async () => {})} />}
 
       <Card
         title={<span className="eyebrow">Artists' own connectors</span>}
@@ -506,6 +510,231 @@ export function BmgConnectors({
         )}
       </Card>
     </>
+  );
+}
+
+const APP_NAMES: Record<string, string> = {
+  google: 'Google',
+  meta: 'Meta',
+  mailchimp: 'Mailchimp',
+  tiktok: 'TikTok',
+  linkedin: 'LinkedIn',
+};
+
+/**
+ * Admins register the vendor OAuth apps here: where to create each one, the
+ * redirect address to give it, and its id and secret. The secret is stored
+ * encrypted and never shown again.
+ */
+function ConnectorApps({
+  cfg,
+  token,
+  onChanged,
+}: {
+  cfg: AppConfig;
+  token: string;
+  onChanged: () => Promise<void>;
+}) {
+  const [apps, setApps] = useState<ConnectorApp[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Msg>(null);
+
+  useEffect(() => {
+    void api<{ apps: ConnectorApp[] }>(cfg, token, 'GET', '/connectors/apps')
+      .then((r) => setApps(r.apps))
+      .catch((e: Error) => setMsg({ tone: 'error', text: e.message }));
+  }, [cfg, token]);
+
+  const run = async (fn: () => Promise<{ apps: ConnectorApp[] }>, ok: string) => {
+    setMsg(null);
+    try {
+      setApps((await fn()).apps);
+      setOpen(null);
+      setMsg({ tone: 'success', text: ok });
+      await onChanged();
+    } catch (e) {
+      const text = (e as Error).message;
+      setMsg({ tone: 'error', text, reauth: /fresh step-up/.test(text) });
+    }
+  };
+
+  return (
+    <Card title={<span className="eyebrow">Connector apps</span>}>
+      <p className="src mb-3">
+        Each connector signs in through an app Blueprint registers with the vendor. Create the app
+        on the vendor's site, give it the redirect address shown, then paste its id and secret here.
+      </p>
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      {!apps ? (
+        !msg && <p className="src">Loading…</p>
+      ) : (
+        <div className="flex flex-col divide-y divide-input">
+          {apps.map((a) => (
+            <div key={a.provider} className="flex flex-col gap-2 py-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <b className="text-lg">{APP_NAMES[a.provider]}</b>
+                {a.configured ? <Tag tone="n">Registered</Tag> : <Tag tone="s">Not set up</Tag>}
+                <span className="src flex-1">{a.usedBy.join(', ')}</span>
+                <Button
+                  size="sm"
+                  variant={a.configured ? 'default' : 'cta'}
+                  aria-expanded={open === a.provider}
+                  onClick={() => setOpen(open === a.provider ? null : a.provider)}
+                >
+                  {open === a.provider ? 'Close' : a.configured ? 'Change' : 'Set up'}
+                </Button>
+              </div>
+              {a.configured && (
+                <span className="src">
+                  {a.idLabel} {a.clientIdHint}
+                  {a.updatedAt ? ` · updated ${ago(a.updatedAt)}` : ''}
+                </span>
+              )}
+              {open === a.provider && (
+                <AppForm
+                  app={a}
+                  onSave={(creds) =>
+                    run(
+                      () =>
+                        api<{ apps: ConnectorApp[] }>(
+                          cfg,
+                          token,
+                          'PUT',
+                          `/connectors/apps/${a.provider}`,
+                          creds,
+                        ),
+                      `${APP_NAMES[a.provider]} is registered. You can connect ${a.usedBy.join(', ')} now.`,
+                    )
+                  }
+                  onRemove={
+                    a.configured
+                      ? () =>
+                          run(
+                            () =>
+                              api<{ apps: ConnectorApp[] }>(
+                                cfg,
+                                token,
+                                'DELETE',
+                                `/connectors/apps/${a.provider}`,
+                              ),
+                            `${APP_NAMES[a.provider]} app removed. Existing connections keep working until their sign-in expires.`,
+                          )
+                      : undefined
+                  }
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AppForm({
+  app,
+  onSave,
+  onRemove,
+}: {
+  app: ConnectorApp;
+  onSave: (creds: { clientId: string; clientSecret: string }) => Promise<void>;
+  onRemove?: () => Promise<void>;
+}) {
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const ready = clientId.trim().length >= 4 && clientSecret.trim().length >= 8;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    await onSave({ clientId: clientId.trim(), clientSecret: clientSecret.trim() });
+    setBusy(false);
+  };
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-lg border border-input p-3.5"
+      onSubmit={(e) => void submit(e)}
+    >
+      <div className="flex flex-col gap-1">
+        <b>{app.name}</b>
+        <ol className="src list-decimal pl-5">
+          {app.steps.map((s) => (
+            <li key={s}>{s}</li>
+          ))}
+        </ol>
+        <a
+          className="self-start font-bold underline decoration-cta underline-offset-[3px]"
+          href={app.where}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open the {APP_NAMES[app.provider]} developer console
+        </a>
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">Redirect address</span>
+        <div className="flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded bg-secondary px-2 py-1.5 text-sm">
+            {app.redirectUri}
+          </code>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() =>
+              void navigator.clipboard?.writeText(app.redirectUri).then(() => setCopied(true))
+            }
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+      </div>
+      <Field
+        label={app.idLabel}
+        autoComplete="off"
+        spellCheck={false}
+        value={clientId}
+        onChange={(e) => setClientId(e.target.value)}
+        placeholder={app.configured ? `Current: ${app.clientIdHint ?? ''}` : undefined}
+        required
+      />
+      <Field
+        label={app.secretLabel}
+        type="password"
+        autoComplete="new-password"
+        value={clientSecret}
+        onChange={(e) => setClientSecret(e.target.value)}
+        hint="Stored encrypted and never shown again. To change it, paste both again."
+        required
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" variant="cta" size="sm" disabled={busy || !ready}>
+          {app.configured ? 'Save new details' : 'Save'}
+        </Button>
+        {onRemove &&
+          (confirm ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void onRemove().finally(() => setBusy(false));
+              }}
+            >
+              Click again to remove
+            </Button>
+          ) : (
+            <Button type="button" size="sm" variant="ghost" onClick={() => setConfirm(true)}>
+              Remove
+            </Button>
+          ))}
+      </div>
+    </form>
   );
 }
 

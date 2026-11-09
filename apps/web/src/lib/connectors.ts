@@ -22,7 +22,7 @@ export interface ConnectorCard {
   label: string;
   blurb: string;
   auth: 'oauth' | 'apiKey' | 'manual';
-  /** False until BMG has registered the vendor app (`blueprint connectors setup`). */
+  /** False until an admin has registered the vendor app (Connectors → Connector apps). */
   available: boolean;
   connection?: Connection;
   manualLatest?: { listeners: number };
@@ -136,4 +136,20 @@ export async function finishPendingCallback(
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }
+}
+
+/** A vendor OAuth app behind one or more connectors (admins only). */
+export interface ConnectorApp {
+  provider: 'google' | 'meta' | 'mailchimp' | 'tiktok' | 'linkedin';
+  name: string;
+  where: string;
+  steps: string[];
+  idLabel: string;
+  secretLabel: string;
+  usedBy: string[];
+  configured: boolean;
+  /** The last few characters of the registered id, never the secret. */
+  clientIdHint: string | null;
+  updatedAt: string | null;
+  redirectUri: string;
 }

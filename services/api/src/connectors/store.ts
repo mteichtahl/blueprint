@@ -1,5 +1,4 @@
 import { DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
-import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import {
   BatchWriteCommand,
@@ -25,14 +24,12 @@ import {
   WEB_DETAIL_SK,
   type ConnectionView,
   type ConnStatus,
-  type Provider,
   type Settings,
   type Snapshot,
 } from './catalog.ts';
-import type { ClientCreds, Tokens, WebDetail } from './vendors.ts';
+import type { Tokens, WebDetail } from './vendors.ts';
 
 const kms = new KMSClient({});
-const secrets = new SecretsManagerClient({});
 const ssm = new SSMClient({});
 const sessions = new DataAccessSessions();
 const table = () => env('MAIN_TABLE');
@@ -231,22 +228,7 @@ export async function takeState(state: string): Promise<OAuthState | undefined> 
 }
 
 // ── App credentials and the redirect address ─────────────────────────────
-const credsCache = new Map<Provider, ClientCreds | null>();
-export async function clientCreds(provider: Provider): Promise<ClientCreds | undefined> {
-  if (credsCache.has(provider)) return credsCache.get(provider) ?? undefined;
-  try {
-    const res = await secrets.send(
-      new GetSecretValueCommand({ SecretId: `${env('CONNECTOR_SECRET_PREFIX')}/${provider}` }),
-    );
-    const v = JSON.parse(res.SecretString ?? '{}') as Partial<ClientCreds>;
-    const creds = v.clientId && v.clientSecret ? (v as ClientCreds) : null;
-    credsCache.set(provider, creds);
-    return creds ?? undefined;
-  } catch {
-    credsCache.set(provider, null);
-    return undefined;
-  }
-}
+export { clientCreds } from './apps.ts';
 
 let appUrl: string | undefined;
 export async function redirectUri(): Promise<string> {
