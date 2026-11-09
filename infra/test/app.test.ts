@@ -444,7 +444,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(73);
+    expect(routed.length).toBe(91);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -693,5 +693,25 @@ describe('environment knowledge bases (KB stack)', () => {
     staging!.hasResourceProperties('AWS::CloudWatch::Alarm', {
       AlarmName: 'bmg-staging-ai-consent-drift',
     });
+
+describe('connectors', () => {
+  const prod = Template.fromStack(stacks.environments[1]!.api);
+
+  it('syncs every hour with a role the data-access role trusts', () => {
+    prod.hasResourceProperties('AWS::Events::Rule', {
+      ScheduleExpression: 'rate(1 hour)',
+    });
+    prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-connectors-sync' });
+    prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-connectors' });
+  });
+
+  it('reads only the connector app secrets', () => {
+    const policies = Object.values(prod.findResources('AWS::IAM::Policy'));
+    const statements = policies.flatMap(
+      (p) => p.Properties.PolicyDocument.Statement as { Sid?: string; Resource: unknown }[],
+    );
+    const apps = statements.filter((s) => s.Sid === 'ReadConnectorApps');
+    expect(apps).toHaveLength(2);
+    expect(JSON.stringify(apps[0]!.Resource)).toContain(':secret:bmg/prod/connectors/*');
   });
 });

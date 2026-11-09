@@ -58,6 +58,8 @@ export type DomainEvent =
       topics?: string[];
       artistName?: string;
     }
+  | { type: 'connector.reminder'; artistId: string }
+  | { type: 'connector.needsReauth'; connectorId: string; label: string; artistId?: string }
   | {
       type: 'file.rejected';
       fileId: string;
@@ -69,7 +71,7 @@ export type DomainEvent =
 
 export interface Draft {
   /** In-app and email category; preferences can turn email off per category later. */
-  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig';
+  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
@@ -168,6 +170,26 @@ export function plan(
           link: 'gigs',
         },
       };
+    case 'connector.reminder':
+      return {
+        to: artistsOf([e.artistId]),
+        draft: {
+          kind: 'connector',
+          title: 'Connect your accounts',
+          body: 'Blueprint asked you to connect your socials, so your stats show up in the app.',
+          link: 'connectors',
+        },
+      };
+    case 'connector.needsReauth':
+      return {
+        to: e.artistId ? artistsOf([e.artistId]) : everyone.filter((r) => r.role === 'bmg-admin'),
+        draft: {
+          kind: 'connector',
+          title: `${e.label} needs you to sign in again`,
+          body: 'Its numbers have stopped updating until you reconnect it.',
+          link: 'connectors',
+        },
+      };
     case 'file.rejected':
       return {
         to: everyone.filter((r) => r.sub === e.uploadedBy || r.role === 'bmg-admin'),
@@ -228,6 +250,7 @@ const EYEBROW: Record<Draft['kind'], string> = {
   message: 'New message',
   file: 'Upload',
   gig: 'Gig help',
+  connector: 'Connectors',
 };
 
 /** The notification as a BMG-branded email (the shared layout in `@bmg/email`). */

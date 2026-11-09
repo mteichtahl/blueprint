@@ -354,6 +354,18 @@ function EventDetail({
               )}
             </span>
           )}
+          {!e.humanitixEventId && !editingSales && (
+            <HumanitixLink
+              cfg={cfg}
+              token={token}
+              onLink={(humanitixEventId) =>
+                run(async () => {
+                  await api(cfg, token, 'PUT', `${base}/humanitix`, { humanitixEventId });
+                  onChanged();
+                })
+              }
+            />
+          )}
         </Card>
         <Card className="flex-[1_1_200px]">
           <span className="eyebrow">Industry comps</span>
@@ -697,6 +709,72 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
     >
       ×
     </button>
+  );
+}
+
+/** Links the event to its Humanitix event, so ticket sales come in by themselves. */
+function HumanitixLink({
+  cfg,
+  token,
+  onLink,
+}: {
+  cfg: AppConfig;
+  token: string;
+  onLink: (id: string) => void;
+}) {
+  const [events, setEvents] = useState<{ id: string; name: string; startDate?: string }[] | null>(
+    null,
+  );
+  const [pick, setPick] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const open = async () => {
+    try {
+      const r = await api<{ events: { id: string; name: string; startDate?: string }[] }>(
+        cfg,
+        token,
+        'GET',
+        '/connectors/humanitix/events',
+      );
+      setEvents(r.events);
+      setPick(r.events[0]?.id ?? '');
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  if (error) return <span className="src">{error}</span>;
+  if (!events)
+    return (
+      <button
+        type="button"
+        className="src self-start font-bold underline"
+        onClick={() => void open()}
+      >
+        Link to Humanitix
+      </button>
+    );
+  if (events.length === 0)
+    return <span className="src">Connect Humanitix in Connectors first.</span>;
+  return (
+    <span className="flex items-end gap-2">
+      <label className="flex flex-1 flex-col gap-1.5">
+        <span className="text-[15px] font-bold">Humanitix event</span>
+        <select
+          className="min-h-11 rounded-lg border border-input bg-white px-3"
+          value={pick}
+          onChange={(e) => setPick(e.target.value)}
+        >
+          {events.map((ev) => (
+            <option key={ev.id} value={ev.id}>
+              {ev.name}
+              {ev.startDate ? ` · ${new Date(ev.startDate).toLocaleDateString('en-AU')}` : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button size="sm" variant="navy" disabled={!pick} onClick={() => onLink(pick)}>
+        Link
+      </Button>
+    </span>
   );
 }
 
