@@ -1,6 +1,7 @@
 /** Runtime settings written into config.json by the web stack at deploy time. */
 export interface AppConfig {
-  loginDomain: string;
+  /** Cognito's domain (kept for older deploys; the app no longer uses the hosted UI). */
+  loginDomain?: string;
   clientId: string;
   region: string;
   userPoolId: string;
