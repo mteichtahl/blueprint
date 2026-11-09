@@ -152,17 +152,54 @@ function StatusBadge({ f }: { f: FileItem }) {
   );
 }
 
+/** Delete with a second click to confirm (no browser dialogs). */
+function DeleteButton({ f, onDelete }: { f: FileItem; onDelete: (f: FileItem) => Promise<void> }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!confirm) return;
+    const t = setTimeout(() => setConfirm(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirm]);
+  return (
+    <Button
+      size="sm"
+      variant={confirm ? 'cta' : 'ghost'}
+      disabled={busy}
+      aria-label={confirm ? `Confirm delete ${f.name}` : `Delete ${f.name}`}
+      onClick={async (e) => {
+        e.stopPropagation();
+        if (!confirm) return setConfirm(true);
+        setBusy(true);
+        try {
+          await onDelete(f);
+        } finally {
+          setBusy(false);
+          setConfirm(false);
+        }
+      }}
+    >
+      <Icon name="trash" size={15} />
+      {busy ? 'Deleting…' : confirm ? 'Confirm' : 'Delete'}
+    </Button>
+  );
+}
+
 function FileTable({
   files,
   empty,
   columns,
   onOpen,
+  onDelete,
+  canDelete = () => false,
   compact = false,
 }: {
   files: FileItem[] | null;
   empty: string;
   columns: { label: string; cell: (f: FileItem) => React.ReactNode }[];
   onOpen: (f: FileItem) => void;
+  onDelete?: (f: FileItem) => Promise<void>;
+  canDelete?: (f: FileItem) => boolean;
   /** Phone layout: a list of rows instead of a table. */
   compact?: boolean;
 }) {
@@ -172,27 +209,32 @@ function FileTable({
     return (
       <div className="flex flex-col gap-1.5">
         {files.map((f) => (
-          <button
+          <div
             key={f.fileId}
-            type="button"
-            disabled={f.status !== 'available'}
-            onClick={() => onOpen(f)}
-            className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 text-left shadow-xs"
+            className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
           >
-            <span className="appsq !bg-secondary !text-foreground">
-              <Icon name="file" size={14} strokeWidth={2.4} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <b className="block truncate">{f.name}</b>
-              <span className="src">
-                {formatSize(f.size)} · {date(f.createdAt)}
-                {columns.map((c) => (
-                  <span key={c.label}> · {c.cell(f)}</span>
-                ))}
+            <button
+              type="button"
+              disabled={f.status !== 'available'}
+              onClick={() => onOpen(f)}
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            >
+              <span className="appsq !bg-secondary !text-foreground">
+                <Icon name="file" size={14} strokeWidth={2.4} />
               </span>
-            </span>
-            <StatusBadge f={f} />
-          </button>
+              <span className="min-w-0 flex-1">
+                <b className="block truncate">{f.name}</b>
+                <span className="src">
+                  {formatSize(f.size)} · {date(f.createdAt)}
+                  {columns.map((c) => (
+                    <span key={c.label}> · {c.cell(f)}</span>
+                  ))}
+                </span>
+              </span>
+              <StatusBadge f={f} />
+            </button>
+            {onDelete && canDelete(f) && <DeleteButton f={f} onDelete={onDelete} />}
+          </div>
         ))}
       </div>
     );
@@ -229,7 +271,7 @@ function FileTable({
               <td key={c.label}>{c.cell(f)}</td>
             ))}
             <td className="src">{date(f.createdAt)}</td>
-            <td className="text-right">
+            <td className="whitespace-nowrap text-right">
               <Button
                 size="sm"
                 variant="ghost"
@@ -239,6 +281,11 @@ function FileTable({
                 <Icon name="download" size={15} />
                 Open
               </Button>
+              {onDelete && canDelete(f) && (
+                <span className="ml-2 inline-block">
+                  <DeleteButton f={f} onDelete={onDelete} />
+                </span>
+              )}
             </td>
           </tr>
         ))}
@@ -257,11 +304,13 @@ export function ArtistFiles({
   token,
   artistId,
   isBmg,
+  isAdmin = false,
 }: {
   cfg: AppConfig;
   token: string;
   artistId: string;
   isBmg: boolean;
+  isAdmin?: boolean;
 }) {
   const collection = `/artists/${artistId}/files`;
   const { files, error, setError, load } = useFiles(cfg, token, collection);
@@ -283,6 +332,19 @@ export function ArtistFiles({
     void download(cfg, token, `${collection}/${f.fileId}`).catch((e) =>
       setError((e as Error).message),
     );
+  const remove = async (f: FileItem) => {
+    try {
+      await api(cfg, token, 'DELETE', `${collection}/${f.fileId}`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  // Same rule as the API: your own uploads; an admin may also remove Blueprint's.
+  const canDelete = (f: FileItem) =>
+    isBmg
+      ? f.uploaderRole !== 'artist' && (isAdmin || f.uploadedByMe)
+      : f.uploaderRole === 'artist' && f.uploadedByMe;
 
   const upload = (
     <UploadBox
@@ -346,6 +408,8 @@ export function ArtistFiles({
           files={files}
           empty="No files yet."
           onOpen={open}
+          onDelete={remove}
+          canDelete={canDelete}
           columns={[{ label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] }]}
           compact
         />
@@ -366,7 +430,14 @@ export function ArtistFiles({
           options={ARTIST_FILTER_OPTIONS}
         />
         {error && <Notice tone="error">{error}</Notice>}
-        <FileTable files={visible} empty="No files here." onOpen={open} columns={columns} />
+        <FileTable
+          files={visible}
+          empty="No files here."
+          onOpen={open}
+          onDelete={remove}
+          canDelete={canDelete}
+          columns={columns}
+        />
       </Card>
       <div className="flex-[1_1_300px]">{upload}</div>
     </div>
@@ -396,11 +467,13 @@ export function Library({
   cfg,
   token,
   isBmg,
+  isAdmin = false,
   artists,
 }: {
   cfg: AppConfig;
   token: string;
   isBmg: boolean;
+  isAdmin?: boolean;
   artists: ArtistSummary[];
 }) {
   const collection = '/library/files';
@@ -416,6 +489,15 @@ export function Library({
     void download(cfg, token, `${collection}/${f.fileId}`).catch((e) =>
       setError((e as Error).message),
     );
+  const remove = async (f: FileItem) => {
+    try {
+      await api(cfg, token, 'DELETE', `${collection}/${f.fileId}`);
+      if (editing?.fileId === f.fileId) setEditing(null);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   if (!isBmg) {
     return (
@@ -458,6 +540,8 @@ export function Library({
           files={visible}
           empty="Nothing here."
           onOpen={open}
+          onDelete={remove}
+          canDelete={(f) => isAdmin || f.uploadedByMe}
           columns={[
             {
               label: 'Shared with',

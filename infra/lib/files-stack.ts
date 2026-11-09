@@ -180,7 +180,8 @@ export class FilesStack extends BmgStack {
       statements: [
         new PolicyStatement({
           sid: 'OwnArtistObjects',
-          actions: ['s3:GetObject', 's3:PutObject'],
+          // Delete: artists remove their own uploads (versioned bucket, so recoverable for 35 days).
+          actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
           resources: [this.artistData.arnForObjects(prefix)],
         }),
         new PolicyStatement({

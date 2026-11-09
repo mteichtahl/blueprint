@@ -83,3 +83,14 @@ describe('keys', () => {
     });
   });
 });
+
+describe('cognitoMessageKind', () => {
+  it('brands every email trigger', async () => {
+    const { cognitoMessageKind } = await import('../src/claims.ts');
+    expect(cognitoMessageKind('CustomMessage_AdminCreateUser')).toBe('admin-create-user');
+    expect(cognitoMessageKind('CustomMessage_ResendCode')).toBe('verification-code');
+    expect(cognitoMessageKind('CustomMessage_ForgotPassword')).toBe('forgot-password');
+    expect(cognitoMessageKind('CustomMessage_VerifyUserAttribute')).toBe('attribute-verification');
+    expect(cognitoMessageKind('CustomMessage_Authentication')).toBeUndefined();
+  });
+});

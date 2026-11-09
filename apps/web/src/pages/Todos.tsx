@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, TODO_FILTERS, type ArtistSummary, type Todo } from '../lib/api.ts';
+import {
+  api,
+  REMINDER_OPTIONS,
+  TODO_FILTERS,
+  type ArtistSummary,
+  type Reminder,
+  type Todo,
+} from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
   Avatar,
@@ -8,9 +15,13 @@ import {
   Card,
   Chips,
   DataTable,
+  Field,
+  Icon,
   Notice,
+  Select,
   shortDate,
   Tag,
+  TextArea,
 } from '../components/ui.tsx';
 
 const SOURCE_LABEL: Record<Todo['source'], string> = {
@@ -47,18 +58,168 @@ function useTodos(cfg: AppConfig, token: string, path: (filter: string) => strin
   return { filter, setFilter, todos, error, setError, load, toggle };
 }
 
+const REMINDER_SHORT: Record<Reminder, string> = {
+  '60m': '60 min before',
+  '1d': '1 day before',
+  '3d': '3 days before',
+  '7d': '7 days before',
+};
+
 function DueTag({ t }: { t: Todo }) {
   if (!t.due) return <span className="src">No date</span>;
-  return <Tag tone={!t.done && t.due < today() ? 'c' : 's'}>{shortDate(t.due)}</Tag>;
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <Tag tone={!t.done && t.due < today() ? 'c' : 's'}>
+        {shortDate(t.due)}
+        {t.dueTime ? ` · ${t.dueTime}` : ''}
+      </Tag>
+      {t.reminder && !t.done && (
+        <span title={`Reminder ${REMINDER_SHORT[t.reminder]}`} className="text-muted-foreground">
+          <Icon name="bell" size={14} />
+          <span className="sr-only">Reminder {REMINDER_SHORT[t.reminder]}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Who is told when a to-do is edited (matches the API's rule). */
+function notifyNote(t: Todo, isBmg: boolean): string | null {
+  if (isBmg) return t.bmgOnly ? null : 'The artist is notified when you save.';
+  return t.source === 'artist' ? null : 'Blueprint is notified when you save.';
+}
+
+/**
+ * Edit a to-do: title, notes, due date and time, and a reminder before it's
+ * due. Both Blueprint and the artist can edit; the person it's allocated to is
+ * told what changed.
+ */
+function TodoEditor({
+  cfg,
+  token,
+  todo,
+  isBmg,
+  onClose,
+  onSaved,
+}: {
+  cfg: AppConfig;
+  token: string;
+  todo: Todo;
+  isBmg: boolean;
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+}) {
+  const [title, setTitle] = useState(todo.title);
+  const [notes, setNotes] = useState(todo.notes ?? '');
+  const [due, setDue] = useState(todo.due ?? '');
+  const [dueTime, setDueTime] = useState(todo.dueTime ?? '');
+  const [reminder, setReminder] = useState<'' | Reminder>(todo.reminder ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const note = notifyNote(todo, isBmg);
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(cfg, token, 'PATCH', `/artists/${todo.artistId}/todos/${todo.todoId}`, {
+        title: title.trim(),
+        notes: notes.trim(),
+        due: due || null,
+        dueTime: due && dueTime ? dueTime : null,
+        reminder: due && reminder ? reminder : null,
+      });
+      onSaved(note ? `Saved. ${note.replace(' when you save', '')}` : 'Saved.');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section
+      className="card gap-3 border-[#9AA4B0]"
+      aria-label={`Edit "${todo.title}"`}
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+    >
+      <div className="card-hd">
+        <h3 className="t text-[17px]">Edit to-do</h3>
+        <span className="src ml-auto">{SOURCE_LABEL[todo.source]}</span>
+      </div>
+      <Field
+        label="To-do"
+        value={title}
+        maxLength={200}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <TextArea
+        label="Notes"
+        value={notes}
+        maxLength={2000}
+        onChange={(e) => setNotes(e.target.value)}
+      />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Due date" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+        <Field
+          label="Time"
+          type="time"
+          value={dueTime}
+          disabled={!due}
+          hint="Melbourne time · 9am if blank"
+          onChange={(e) => setDueTime(e.target.value)}
+        />
+        <Select
+          label="Reminder"
+          value={reminder}
+          disabled={!due}
+          options={REMINDER_OPTIONS}
+          onChange={(e) => setReminder(e.target.value as '' | Reminder)}
+        />
+      </div>
+      {note && <span className="src">{note}</span>}
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="flex gap-2">
+        <Button variant="cta" disabled={busy || !title.trim()} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** The open editor (one at a time) and the last "saved" message. */
+function useEditing(load: () => Promise<void>) {
+  const [editing, setEditing] = useState<Todo | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  return {
+    editing,
+    saved,
+    open: (t: Todo) => {
+      setSaved(null);
+      setEditing(t);
+    },
+    close: () => setEditing(null),
+    done: (msg: string) => {
+      setEditing(null);
+      setSaved(msg);
+      void load();
+    },
+  };
 }
 
 function TodoRows({
   todos,
   onToggle,
+  onEdit,
   artistName,
 }: {
   todos: Todo[];
   onToggle: (t: Todo) => void;
+  onEdit: (t: Todo) => void;
   artistName?: (id: string) => string;
 }) {
   return (
@@ -72,6 +233,9 @@ function TodoRows({
           {artistName && <th scope="col">Artist</th>}
           <th scope="col">From</th>
           <th scope="col">Due</th>
+          <th scope="col">
+            <span className="sr-only">Edit</span>
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -112,6 +276,12 @@ function TodoRows({
             <td>
               <DueTag t={t} />
             </td>
+            <td className="text-right">
+              <Button size="sm" variant="ghost" onClick={() => onEdit(t)}>
+                <Icon name="pencil" size={14} />
+                Edit
+              </Button>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -137,6 +307,18 @@ export function ArtistTodos({
   );
   const { filter, setFilter, todos, error, setError, load, toggle } = useTodos(cfg, token, path);
   const all = useAllCounts(cfg, token, artistId, todos);
+  const ed = useEditing(load);
+  const editor = ed.editing && (
+    <TodoEditor
+      key={ed.editing.todoId}
+      cfg={cfg}
+      token={token}
+      todo={ed.editing}
+      isBmg={isBmg}
+      onClose={ed.close}
+      onSaved={ed.done}
+    />
+  );
 
   if (!isBmg) {
     return (
@@ -144,6 +326,10 @@ export function ArtistTodos({
         todos={todos}
         error={error}
         onToggle={toggle}
+        onEdit={ed.open}
+        editing={ed.editing?.todoId ?? null}
+        editor={editor}
+        saved={ed.saved}
         add={
           <AddTodo
             cfg={cfg}
@@ -172,13 +358,15 @@ export function ArtistTodos({
       {all && <Bar pct={all.total ? (all.done / all.total) * 100 : 0} />}
       <Chips label="Quick filters" value={filter} onChange={setFilter} options={TODO_FILTERS} />
       {error && <Notice tone="error">{error}</Notice>}
+      {ed.saved && <Notice tone="success">{ed.saved}</Notice>}
       {!todos ? (
         <p className="src">Loading…</p>
       ) : todos.length === 0 ? (
         <p className="src">Nothing here.</p>
       ) : (
-        <TodoRows todos={todos} onToggle={toggle} />
+        <TodoRows todos={todos} onToggle={toggle} onEdit={ed.open} />
       )}
+      {editor}
       <AddTodo
         cfg={cfg}
         token={token}
@@ -212,35 +400,53 @@ function PhoneTodos({
   todos,
   error,
   onToggle,
+  onEdit,
+  editing,
+  editor,
+  saved,
   add,
 }: {
   todos: Todo[] | null;
   error: string | null;
   onToggle: (t: Todo) => void;
+  onEdit: (t: Todo) => void;
+  editing: string | null;
+  editor: React.ReactNode;
+  saved: string | null;
   add: React.ReactNode;
 }) {
   if (!todos) return <p className="src">Loading…</p>;
   const fromBmg = todos.filter((t) => t.source !== 'artist');
   const own = todos.filter((t) => t.source === 'artist');
-  const item = (t: Todo, coral: boolean) => (
-    <label
-      key={t.todoId}
-      className={`flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs ${coral ? 'border-l-[3px] border-l-accent' : ''}`}
-    >
-      <input className="chk" type="checkbox" checked={t.done} onChange={() => onToggle(t)} />
-      <span className="min-w-0 flex-1">
-        <b className={`block ${t.done ? 'text-muted-foreground line-through' : ''}`}>{t.title}</b>
-        <span className="src">
-          {t.source === 'feedback' ? 'From your feedback' : t.source === 'bmg' ? 'Blueprint' : ''}
-          {t.notes ? `${t.source !== 'artist' ? ' · ' : ''}${t.notes}` : ''}
-        </span>
-      </span>
-      {t.due && <DueTag t={t} />}
-    </label>
-  );
+  const item = (t: Todo, coral: boolean) =>
+    editing === t.todoId ? (
+      <div key={t.todoId}>{editor}</div>
+    ) : (
+      <div
+        key={t.todoId}
+        className={`flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs ${coral ? 'border-l-[3px] border-l-accent' : ''}`}
+      >
+        <input
+          className="chk"
+          type="checkbox"
+          checked={t.done}
+          aria-label={`Mark "${t.title}" done`}
+          onChange={() => onToggle(t)}
+        />
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onEdit(t)}>
+          <b className={`block ${t.done ? 'text-muted-foreground line-through' : ''}`}>{t.title}</b>
+          <span className="src">
+            {t.source === 'feedback' ? 'From your feedback' : t.source === 'bmg' ? 'Blueprint' : ''}
+            {t.notes ? `${t.source !== 'artist' ? ' · ' : ''}${t.notes}` : ''}
+          </span>
+        </button>
+        {t.due && <DueTag t={t} />}
+      </div>
+    );
   return (
     <div className="flex flex-col gap-1.5">
       {error && <Notice tone="error">{error}</Notice>}
+      {saved && <Notice tone="success">{saved}</Notice>}
       <div className="eyebrow py-1.5 text-muted-foreground">From Blueprint</div>
       {fromBmg.length ? (
         fromBmg.map((t) => item(t, true))
@@ -271,7 +477,8 @@ export function AllTodos({
       `/todos?${new URLSearchParams({ ...(f ? { filter: f } : {}), ...(artistId ? { artistId } : {}) })}`,
     [artistId],
   );
-  const { filter, setFilter, todos, error, toggle } = useTodos(cfg, token, path);
+  const { filter, setFilter, todos, error, load, toggle } = useTodos(cfg, token, path);
+  const ed = useEditing(load);
   const overdue = (todos ?? []).filter((t) => !t.done && t.due && t.due < today()).length;
 
   return (
@@ -303,9 +510,28 @@ export function AllTodos({
           ) : todos.length === 0 ? (
             <p className="src">Nothing here.</p>
           ) : (
-            <TodoRows todos={todos} onToggle={toggle} artistName={(id) => names[id] ?? 'Artist'} />
+            <TodoRows
+              todos={todos}
+              onToggle={toggle}
+              onEdit={ed.open}
+              artistName={(id) => names[id] ?? 'Artist'}
+            />
           )}
         </div>
+        {ed.saved && <Notice tone="success">{ed.saved}</Notice>}
+        {ed.editing && (
+          <div className="mt-3.5">
+            <TodoEditor
+              key={ed.editing.todoId}
+              cfg={cfg}
+              token={token}
+              todo={ed.editing}
+              isBmg
+              onClose={ed.close}
+              onSaved={ed.done}
+            />
+          </div>
+        )}
       </details>
     </Card>
   );
@@ -328,6 +554,8 @@ function AddTodo({
 }) {
   const [title, setTitle] = useState('');
   const [due, setDue] = useState('');
+  const [dueTime, setDueTime] = useState('');
+  const [reminder, setReminder] = useState<'' | Reminder>('');
   const [bmgOnly, setBmgOnly] = useState(false);
 
   async function add() {
@@ -335,10 +563,14 @@ function AddTodo({
       await api(cfg, token, 'POST', `/artists/${artistId}/todos`, {
         title,
         ...(due ? { due } : {}),
+        ...(due && dueTime ? { dueTime } : {}),
+        ...(due && reminder ? { reminder } : {}),
         ...(isBmg && bmgOnly ? { bmgOnly } : {}),
       });
       setTitle('');
       setDue('');
+      setDueTime('');
+      setReminder('');
       setBmgOnly(false);
       onAdded();
     } catch (e) {
@@ -373,6 +605,34 @@ function AddTodo({
           onChange={(e) => setDue(e.target.value)}
         />
       </label>
+      {due && (
+        <>
+          <label>
+            <span className="sr-only">Due time (Melbourne)</span>
+            <input
+              type="time"
+              title="Due time (Melbourne). 9am if blank"
+              className="h-9 rounded-lg border border-input bg-white px-2 text-sm"
+              value={dueTime}
+              onChange={(e) => setDueTime(e.target.value)}
+            />
+          </label>
+          <label>
+            <span className="sr-only">Reminder</span>
+            <select
+              className="h-9 rounded-lg border border-input bg-white px-2 text-sm"
+              value={reminder}
+              onChange={(e) => setReminder(e.target.value as '' | Reminder)}
+            >
+              {REMINDER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
       {isBmg && (
         <label className="flex items-center gap-2 text-sm font-semibold">
           <input

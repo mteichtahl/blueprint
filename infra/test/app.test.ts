@@ -443,7 +443,7 @@ describe('environment API', () => {
   it('protects every route with the token authorizer', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(routed.length).toBe(35);
+    expect(routed.length).toBe(43);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -537,5 +537,46 @@ describe('environment web app', () => {
       RefreshTokenRotation: Match.objectLike({ Feature: 'ENABLED' }),
       WriteAttributes: ['email'],
     });
+  });
+});
+
+describe('environment notifications and branded email', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.notify));
+
+  it('sends workspace events to the notifier with retries and a dead-letter queue', () => {
+    for (const t of [staging!, prod!]) {
+      t.hasResourceProperties('AWS::Events::Rule', {
+        EventPattern: {
+          source: ['bmg.workspace'],
+          'detail-type': [
+            'todo.updated',
+            'todo.reminder',
+            'submission.updated',
+            'submission.feedbackGiven',
+          ],
+        },
+        Targets: [
+          Match.objectLike({
+            RetryPolicy: { MaximumRetryAttempts: 8, MaximumEventAgeInSeconds: 21600 },
+            DeadLetterConfig: Match.anyValue(),
+          }),
+        ],
+      });
+      t.resourceCountIs('AWS::SQS::Queue', 1);
+    }
+  });
+
+  it('only reads the SMTP secret of its own environment', () => {
+    const json = JSON.stringify(prod!.toJSON());
+    expect(json).toContain(`secret:${names.smtpSecret(cfg, 'prod')}-*`);
+    expect(json).not.toContain(names.smtpSecret(cfg, 'staging'));
+  });
+
+  it('brands every Cognito email with a custom message trigger', () => {
+    for (const e of stacks.environments) {
+      Template.fromStack(e.identity).hasResourceProperties('AWS::Cognito::UserPool', {
+        LambdaConfig: Match.objectLike({ CustomMessage: Match.anyValue() }),
+      });
+    }
   });
 });
