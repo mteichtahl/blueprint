@@ -162,6 +162,9 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           badge: artists.length,
           badgeTone: 'w',
         },
+        ...(me.role === 'bmg-admin'
+          ? [{ id: 'invite', label: 'Invite artist', icon: 'userPlus' as const }]
+          : []),
         { id: 'templates', label: 'Plan templates', icon: 'template' },
       ],
     },
@@ -225,13 +228,6 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           onOpen={openNotification}
           onMarkAll={() => void notes.markRead('all')}
         />
-      }
-      topActions={
-        me.role === 'bmg-admin' && (
-          <Button size="sm" variant="ghost" onClick={() => setView('artists')}>
-            Invite artist
-          </Button>
-        )
       }
     >
       {view === 'overview' && (
@@ -319,6 +315,23 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             onJobTitle={setJobTitle}
             onAvatar={setAvatar}
           />
+        </>
+      )}
+      {view === 'invite' && me.role === 'bmg-admin' && (
+        <>
+          <PageHeader
+            eyebrow="Artist workspaces"
+            title="Invite artist"
+            sub="Sets up their login, private key and artist workspace."
+          />
+          <div className="max-w-[520px]">
+            <InviteArtist
+              cfg={cfg}
+              token={token}
+              onReauth={onReauth}
+              onInvited={() => void load()}
+            />
+          </div>
         </>
       )}
       {view === 'templates' && (
