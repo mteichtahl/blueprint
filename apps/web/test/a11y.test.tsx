@@ -49,6 +49,11 @@ const todo = {
 const file = {
   fileId: 'file000000001',
   name: 'press-shot.jpg',
+  title: 'Press shot',
+  displayName: 'Press shot',
+  fileType: { kind: 'image', label: 'JPEG image', ext: 'jpg', mime: 'image/jpeg', detected: true },
+  hasThumbnail: false,
+  thumbnailUrl: null,
   size: 2_400_000,
   contentType: 'image/jpeg',
   status: 'available',

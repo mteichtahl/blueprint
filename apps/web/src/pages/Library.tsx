@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { download, formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
+import {
+  download,
+  fileTypeOf,
+  formatSize,
+  uploadFile,
+  waitUntilScanned,
+  type FileItem,
+} from '../lib/files.ts';
+import { makeThumbnail } from '../lib/thumbnail.ts';
+import { FileThumb } from '../components/FileThumb.tsx';
 import {
   Button,
   Card,
   Chips,
   DataTable,
+  Field,
   Icon,
   Notice,
   shortDate,
@@ -42,7 +52,13 @@ function useFiles(cfg: AppConfig, token: string, collection: string) {
   return { files, error, setError, load };
 }
 
-/** Pick a file, upload it, then wait for the malware scan. */
+/**
+ * Pick a file, name it, upload it, then wait for the malware scan. A preview
+ * is drawn as soon as the file is picked and uploaded with it.
+ *
+ * Shown as a card beside the list on wider screens, and as its own page on a
+ * phone (`asPage`), reached from the library's "Upload document" button.
+ */
 function UploadBox({
   cfg,
   token,
@@ -51,6 +67,8 @@ function UploadBox({
   children,
   onDone,
   title = 'Upload',
+  asPage = false,
+  onBack,
 }: {
   cfg: AppConfig;
   token: string;
@@ -60,18 +78,63 @@ function UploadBox({
   children?: React.ReactNode;
   onDone: () => void;
   title?: string;
+  /** Full-page layout (phone), with a way back to the library. */
+  asPage?: boolean;
+  onBack?: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [name, setName] = useState('');
+  // undefined: still drawing it; null: no preview for this file.
+  const [thumb, setThumb] = useState<Blob | null | undefined>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const making = useRef<Promise<Blob | null> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!thumb) {
+      setThumbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(thumb);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [thumb]);
+
+  function pick(f: File | null) {
+    setFile(f);
+    setResult(null);
+    setName('');
+    if (!f) {
+      setThumb(null);
+      making.current = null;
+      return;
+    }
+    setThumb(undefined);
+    const p = makeThumbnail(f);
+    making.current = p;
+    void p.then((b) => {
+      if (making.current === p) setThumb(b);
+    });
+  }
+
+  function reset() {
+    pick(null);
+    if (input.current) input.current.value = '';
+  }
 
   async function go() {
     if (!file) return;
     setResult(null);
+    const shown = name.trim() || file.name;
     try {
       setBusy('Uploading…');
-      const created = await uploadFile(cfg, token, collection, file, options());
+      const preview = thumb === undefined ? await making.current : thumb;
+      const created = await uploadFile(cfg, token, collection, file, options(), {
+        title: name,
+        thumbnail: preview ?? null,
+      });
       onDone();
       setBusy('Checking for malware…');
       const settled = await waitUntilScanned(cfg, token, `${collection}/${created.fileId}`);
@@ -82,14 +145,13 @@ function UploadBox({
               text: 'Uploaded. The scan is taking a while; the file appears when it’s done.',
             }
           : settled.status === 'available'
-            ? { tone: 'success', text: `${file.name} is ready.` }
+            ? { tone: 'success', text: `${shown} is ready.` }
             : {
                 tone: 'error',
-                text: `${file.name} was not kept: ${settled.rejectReason ?? 'it failed the scan'}.`,
+                text: `${shown} was not kept: ${settled.rejectReason ?? 'it failed the scan'}.`,
               },
       );
-      setFile(null);
-      if (input.current) input.current.value = '';
+      reset();
     } catch (e) {
       setResult({ tone: 'error', text: (e as Error).message });
     } finally {
@@ -98,27 +160,85 @@ function UploadBox({
     }
   }
 
-  return (
-    <Card title={title}>
+  const type = file ? fileTypeOf(file) : null;
+  const body = (
+    <>
       <label className="flex min-h-[96px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-[10px] border border-dashed border-[#9AA4B0] bg-background px-4 py-4 text-center">
-        <Icon name="upload" size={22} />
-        <b className="text-[15px]">{file ? file.name : 'Choose a file'}</b>
-        <span className="src">
-          {file ? formatSize(file.size) : 'Up to 500 MB · scanned for malware first'}
-        </span>
+        {file && type ? (
+          <span className="flex w-full items-center gap-3 text-left">
+            <FileThumb
+              src={thumbUrl}
+              kind={type.kind}
+              ext={type.ext}
+              label={type.label}
+              size={64}
+              loading={thumb === undefined}
+            />
+            <span className="min-w-0 flex-1">
+              <b className="line-clamp-2 block text-[15px] [overflow-wrap:anywhere]">{file.name}</b>
+              <span className="src">
+                {type.label} · {formatSize(file.size)}
+              </span>
+              <span className="src block underline">Choose a different file</span>
+            </span>
+          </span>
+        ) : (
+          <>
+            <Icon name="upload" size={22} />
+            <b className="text-[15px]">Choose a file</b>
+            <span className="src">Up to 500 MB · scanned for malware first</span>
+          </>
+        )}
         <input
           ref={input}
           type="file"
           className="sr-only"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          onChange={(e) => pick(e.target.files?.[0] ?? null)}
         />
       </label>
+      <Field
+        label="Name"
+        value={name}
+        maxLength={200}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={file ? file.name : 'e.g. Tour rider 2027'}
+        hint="Shown in lists instead of the file name. Leave blank to use the file name."
+      />
       {children}
       <Button variant="cta" disabled={!file || !!busy} onClick={() => void go()}>
         {busy ?? 'Upload'}
       </Button>
       {result && <Notice tone={result.tone}>{result.text}</Notice>}
+    </>
+  );
+
+  if (!asPage) return <Card title={title}>{body}</Card>;
+  return (
+    <Card
+      title="Upload document"
+      action={
+        <Button size="sm" variant="ghost" onClick={onBack} disabled={!!busy}>
+          ← Library
+        </Button>
+      }
+    >
+      {body}
+      {result?.tone === 'success' && (
+        <Button variant="navy" onClick={onBack}>
+          Back to library
+        </Button>
+      )}
     </Card>
+  );
+}
+
+/** The phone's way into the upload page. */
+function UploadDocumentButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button variant="cta" className="w-full" onClick={onClick}>
+      <Icon name="upload" size={16} />
+      Upload document
+    </Button>
   );
 }
 
@@ -176,7 +296,7 @@ function DeleteButton({ f, onDelete }: { f: FileItem; onDelete: (f: FileItem) =>
       size="sm"
       variant={confirm ? 'cta' : 'ghost'}
       disabled={busy}
-      aria-label={confirm ? `Confirm delete ${f.name}` : `Delete ${f.name}`}
+      aria-label={confirm ? `Confirm delete ${f.displayName}` : `Delete ${f.displayName}`}
       onClick={async (e) => {
         e.stopPropagation();
         if (!confirm) return setConfirm(true);
@@ -192,6 +312,19 @@ function DeleteButton({ f, onDelete }: { f: FileItem; onDelete: (f: FileItem) =>
       <Icon name="trash" size={15} />
       {busy ? 'Deleting…' : confirm ? 'Confirm' : 'Delete'}
     </Button>
+  );
+}
+
+/** A file's preview, or its type's tile. */
+function Thumb({ f, size }: { f: FileItem; size: number }) {
+  return (
+    <FileThumb
+      src={f.thumbnailUrl}
+      kind={f.fileType.kind}
+      ext={f.fileType.ext}
+      label={f.fileType.label}
+      size={size}
+    />
   );
 }
 
@@ -231,13 +364,11 @@ function FileTable({
               onClick={() => onOpen(f)}
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
             >
-              <span className="appsq !bg-secondary !text-foreground">
-                <Icon name="file" size={14} strokeWidth={2.4} />
-              </span>
+              <Thumb f={f} size={44} />
               <span className="min-w-0 flex-1">
-                <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.name}</b>
+                <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
                 <span className="src">
-                  {formatSize(f.size)} · {date(f.createdAt)}
+                  {f.fileType.label} · {formatSize(f.size)} · {date(f.createdAt)}
                   {columns.map((c) => (
                     <span key={c.label}> · {c.cell(f)}</span>
                   ))}
@@ -256,6 +387,7 @@ function FileTable({
       <thead>
         <tr>
           <th scope="col">Name</th>
+          <th scope="col">Type</th>
           <th scope="col">Size</th>
           {columns.map((c) => (
             <th key={c.label} scope="col">
@@ -271,13 +403,15 @@ function FileTable({
           <tr key={f.fileId}>
             <td>
               <span className="flex items-center gap-3">
-                <span className="appsq !bg-secondary !text-foreground">
-                  <Icon name="file" size={14} strokeWidth={2.4} />
+                <Thumb f={f} size={40} />
+                <span className="min-w-0">
+                  <b className="block">{f.displayName}</b>
+                  {f.title && <span className="src block">{f.name}</span>}
                 </span>
-                <b>{f.name}</b>
                 <StatusBadge f={f} />
               </span>
             </td>
+            <td className="src">{f.fileType.label}</td>
             <td className="src">{formatSize(f.size)}</td>
             {columns.map((c) => (
               <td key={c.label}>{c.cell(f)}</td>
@@ -328,6 +462,9 @@ export function ArtistFiles({
   const { files, error, setError, load } = useFiles(cfg, token, collection);
   const [visibility, setVisibility] = useState('normal');
   const [filter, setFilter] = useState<ArtistFilter>('all');
+  // Phones get an "Upload document" button that opens the upload page.
+  const phone = usePhone();
+  const [uploading, setUploading] = useState(false);
 
   async function setShared(f: FileItem, shared: boolean) {
     try {
@@ -366,6 +503,8 @@ export function ArtistFiles({
       title={isBmg ? 'Upload & share' : 'Upload'}
       options={() => ({ visibility })}
       onDone={() => void load()}
+      asPage={phone}
+      onBack={() => setUploading(false)}
     >
       <Select
         label="Who can see it"
@@ -410,10 +549,11 @@ export function ArtistFiles({
     },
   ];
 
+  if (phone && uploading) return upload;
   if (!isBmg) {
     return (
       <div className="flex flex-col gap-3">
-        {upload}
+        {phone ? <UploadDocumentButton onClick={() => setUploading(true)} /> : upload}
         {error && <Notice tone="error">{error}</Notice>}
         <div className="eyebrow pt-2 text-muted-foreground">My uploads and files</div>
         <FileTable
@@ -435,6 +575,7 @@ export function ArtistFiles({
         title="Files"
         action={<span className="src">{files?.length ?? 0} files</span>}
       >
+        {phone && <UploadDocumentButton onClick={() => setUploading(true)} />}
         <Chips
           label="Quick filters"
           value={filter}
@@ -451,7 +592,7 @@ export function ArtistFiles({
           columns={columns}
         />
       </Card>
-      <div className="flex-[1_1_300px]">{upload}</div>
+      {!phone && <div className="flex-[1_1_300px]">{upload}</div>}
     </div>
   );
 }
@@ -496,6 +637,8 @@ export function Library({
   >('all');
   const [editing, setEditing] = useState<FileItem | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
+  const phone = usePhone();
+  const [uploading, setUploading] = useState(false);
 
   const open = (f: FileItem) =>
     void download(cfg, token, `${collection}/${f.fileId}`).catch((e) =>
@@ -526,6 +669,33 @@ export function Library({
     );
   }
 
+  const uploadBox = (
+    <UploadBox
+      cfg={cfg}
+      token={token}
+      collection={collection}
+      title="Upload & share"
+      options={() => ({ sharing })}
+      onDone={() => void load()}
+      asPage={phone}
+      onBack={() => setUploading(false)}
+    >
+      <Select
+        label="Share with"
+        value={sharing}
+        onChange={setSharing}
+        options={[
+          { value: 'bmg-only', label: 'Nobody yet (BMG only)' },
+          { value: 'all-artists', label: 'All artists' },
+        ]}
+      />
+      <span className="src">
+        To share with chosen artists, upload first, then pick them under “Shared with”.
+      </span>
+    </UploadBox>
+  );
+  if (phone && uploading) return uploadBox;
+
   const visible =
     files &&
     files.filter((f) => libraryFilter === 'all' || (f.sharing ?? 'bmg-only') === libraryFilter);
@@ -536,6 +706,7 @@ export function Library({
         title="All files"
         action={<span className="src">{files?.length ?? 0} files</span>}
       >
+        {phone && <UploadDocumentButton onClick={() => setUploading(true)} />}
         <Chips
           label="Quick filters"
           value={libraryFilter}
@@ -574,27 +745,7 @@ export function Library({
         />
       </Card>
       <div className="flex flex-[1_1_300px] flex-col gap-5">
-        <UploadBox
-          cfg={cfg}
-          token={token}
-          collection={collection}
-          title="Upload & share"
-          options={() => ({ sharing })}
-          onDone={() => void load()}
-        >
-          <Select
-            label="Share with"
-            value={sharing}
-            onChange={setSharing}
-            options={[
-              { value: 'bmg-only', label: 'Nobody yet (BMG only)' },
-              { value: 'all-artists', label: 'All artists' },
-            ]}
-          />
-          <span className="src">
-            To share with chosen artists, upload first, then pick them under “Shared with”.
-          </span>
-        </UploadBox>
+        {!phone && uploadBox}
         {editing && (
           <ShareDialog
             file={editing}
@@ -637,7 +788,7 @@ function ShareDialog({
       return n;
     });
   return (
-    <Card title={`Share “${file.name}”`}>
+    <Card title={`Share “${file.displayName}”`}>
       <div className="space-y-3 text-sm">
         {(['bmg-only', 'all-artists', 'selected'] as const).map((s) => (
           <label key={s} className="flex items-center gap-2">

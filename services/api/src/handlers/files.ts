@@ -170,6 +170,68 @@ async function libraryDownloadUrl(f: FileRecord): Promise<string> {
 }
 
 /**
+ * A short-lived link to a file's preview image, signed like a download: an
+ * artist file's preview is encrypted like the file, so it's signed in a
+ * data-access session for that artist and the caller's role.
+ */
+async function thumbnailUrl(principal: Principal, f: FileRecord): Promise<string | null> {
+  if (f.thumb?.status !== 'available') return null;
+  const params = {
+    ResponseContentType: f.thumb.contentType,
+    ResponseCacheControl: 'private, max-age=300',
+  };
+  if (f.scope === 'library') {
+    return getSignedUrl(
+      s3,
+      new GetObjectCommand({
+        Bucket: env('LIBRARY_BUCKET'),
+        Key: storedKey('library', f.fileId, undefined, 'thumb'),
+        ...params,
+      }),
+      { expiresIn: URL_LIFETIME_SECONDS },
+    );
+  }
+  const credentials = await sessions.credentials(
+    { roleArn: env('DATA_ACCESS_ROLE_ARN'), artistId: f.artistId!, role: principal.role },
+    { minRemainingMs: (URL_LIFETIME_SECONDS + 60) * 1000 },
+  );
+  return getSignedUrl(
+    new S3Client({ credentials }),
+    new GetObjectCommand({
+      Bucket: env('ARTIST_BUCKET'),
+      Key: storedKey('artist', f.fileId, f.artistId, 'thumb'),
+      ...params,
+    }),
+    { expiresIn: URL_LIFETIME_SECONDS },
+  );
+}
+
+/** Adds preview links (signing is local: no call per file). A failure just means no preview. */
+async function withThumbnails(principal: Principal, files: Stored[], viewerSub: string) {
+  return Promise.all(
+    files.map(async (f) => ({
+      ...publicFile(f, viewerSub),
+      thumbnailUrl: await thumbnailUrl(principal, f).catch(() => null),
+    })),
+  );
+}
+
+/** The preview's upload target, when the browser made one. */
+async function thumbTarget(
+  scope: 'artist' | 'library',
+  fileId: string,
+  artistId: string | undefined,
+  thumb: FileRecord['thumb'],
+) {
+  if (!thumb) return null;
+  return uploadTarget(
+    quarantineKey(scope, fileId, artistId, 'thumb'),
+    thumb.size,
+    thumb.contentType,
+  );
+}
+
+/**
  * Deletes a file: its stored object (or the quarantined upload, if the scan
  * hasn't finished) and then its record. Both buckets are versioned, so the
  * object stays recoverable by an admin until its old version expires (35 days).
@@ -206,7 +268,41 @@ async function removeFile(principal: Principal, f: Stored) {
       );
     }
   }
+  if (f.thumb) await removeThumb(principal, f);
   await db.send(new DeleteCommand({ TableName: table(), Key: { PK: f.PK, SK: f.SK } }));
+}
+
+/** The preview goes with the file, wherever it is in the pipeline. */
+async function removeThumb(principal: Principal, f: Stored) {
+  const scope = f.scope;
+  await s3
+    .send(
+      new DeleteObjectCommand({
+        Bucket: env('QUARANTINE_BUCKET'),
+        Key: quarantineKey(scope, f.fileId, f.artistId, 'thumb'),
+      }),
+    )
+    .catch(() => undefined);
+  if (scope === 'library') {
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: env('LIBRARY_BUCKET'),
+        Key: storedKey('library', f.fileId, undefined, 'thumb'),
+      }),
+    );
+    return;
+  }
+  const credentials = await sessions.credentials({
+    roleArn: env('DATA_ACCESS_ROLE_ARN'),
+    artistId: f.artistId!,
+    role: principal.role,
+  });
+  await new S3Client({ credentials }).send(
+    new DeleteObjectCommand({
+      Bucket: env('ARTIST_BUCKET'),
+      Key: storedKey('artist', f.fileId, f.artistId, 'thumb'),
+    }),
+  );
 }
 
 /** A file attached to a submission that is still waiting for review can't be deleted. */
@@ -241,9 +337,13 @@ export const handler = handle(async (event) => {
     case 'GET /artists/{artistId}/files': {
       const artistId = artistIdParam(event);
       ensure(canArtistFile(principal, 'read', artistId));
-      const files = (await list(artistPk(artistId)))
-        .filter((f) => canArtistFile(principal, 'read', artistId, f).allow)
-        .map(show);
+      const files = await withThumbnails(
+        principal,
+        (await list(artistPk(artistId))).filter(
+          (f) => canArtistFile(principal, 'read', artistId, f).allow,
+        ),
+        principal.sub,
+      );
       return json(200, { files });
     }
 
@@ -265,6 +365,8 @@ export const handler = handle(async (event) => {
         scope: 'artist',
         artistId,
         name: body.name,
+        ...(body.title ? { title: body.title } : {}),
+        ...(body.thumbnail ? { thumb: { status: 'pending' as const, ...body.thumbnail } } : {}),
         size: body.size,
         contentType: body.contentType,
         status: 'pending',
@@ -293,15 +395,16 @@ export const handler = handle(async (event) => {
         body.size,
         body.contentType,
       );
+      const thumbUpload = await thumbTarget('artist', fileId, artistId, rec.thumb);
       await audit(event, 'file.upload-requested', 'success', { artistId, fileId, size: body.size });
-      return json(201, { file: show(rec), upload });
+      return json(201, { file: show(rec), upload, thumbUpload });
     }
 
     case 'GET /artists/{artistId}/files/{fileId}': {
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
       ensure(canArtistFile(principal, 'read', artistId, f));
-      return json(200, show(f));
+      return json(200, (await withThumbnails(principal, [f], principal.sub))[0]);
     }
 
     case 'PATCH /artists/{artistId}/files/{fileId}': {
@@ -408,12 +511,13 @@ export const handler = handle(async (event) => {
 
     // ── BMG document library ──
     case 'GET /library/files': {
-      const files = (await list(LIBRARY_PK))
+      const visible = (await list(LIBRARY_PK))
         .filter((f) => authorize(principal, 'read', librarySharing(f)).allow)
         // Artists only see files once they are ready, and never who else they're shared with.
-        .filter((f) => principal.role !== 'artist' || f.status === 'available')
-        .map(show)
-        .map((f) => (principal.role === 'artist' ? { ...f, sharedWithArtistIds: [] } : f));
+        .filter((f) => principal.role !== 'artist' || f.status === 'available');
+      const files = (await withThumbnails(principal, visible, principal.sub)).map((f) =>
+        principal.role === 'artist' ? { ...f, sharedWithArtistIds: [] } : f,
+      );
       return json(200, { files });
     }
 
@@ -425,6 +529,8 @@ export const handler = handle(async (event) => {
         fileId,
         scope: 'library',
         name: body.name,
+        ...(body.title ? { title: body.title } : {}),
+        ...(body.thumbnail ? { thumb: { status: 'pending' as const, ...body.thumbnail } } : {}),
         size: body.size,
         contentType: body.contentType,
         status: 'pending',
@@ -440,18 +546,19 @@ export const handler = handle(async (event) => {
         body.size,
         body.contentType,
       );
+      const thumbUpload = await thumbTarget('library', fileId, undefined, rec.thumb);
       await audit(event, 'file.upload-requested', 'success', {
         library: true,
         fileId,
         size: body.size,
       });
-      return json(201, { file: show(rec), upload });
+      return json(201, { file: show(rec), upload, thumbUpload });
     }
 
     case 'GET /library/files/{fileId}': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
       ensure(authorize(principal, 'read', librarySharing(f)));
-      return json(200, show(f));
+      return json(200, (await withThumbnails(principal, [f], principal.sub))[0]);
     }
 
     case 'PATCH /library/files/{fileId}': {
