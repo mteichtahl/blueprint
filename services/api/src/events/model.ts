@@ -35,6 +35,10 @@ export interface Gig {
   artistId: string;
   title: string;
   date: string;
+  /** 'HH:MM'. End before start means the gig runs past midnight. */
+  startTime?: string;
+  endTime?: string;
+  /** Older gigs stored a single start time here; read as startTime. */
   time?: string;
   venue?: string;
   notes?: string;
@@ -86,10 +90,28 @@ export const DEFAULT_CHECKLIST = [
   'Promo posts (3)',
 ];
 
+/**
+ * Start and end times (rev 7). An end earlier than the start is the next
+ * morning (a late gig); the same time twice is a mistake.
+ */
+export function checkTimes(start: string | null | undefined, end: string | null | undefined) {
+  if (end && !start) return 'Add a start time too';
+  if (start && end && start === end) return 'The end time must be after the start time';
+  return undefined;
+}
+export const crossesMidnight = (start?: string, end?: string) => !!start && !!end && end < start;
+/** Minutes from start to end, rolling past midnight. */
+export function durationMinutes(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  return (m(end) - m(start) + 24 * 60) % (24 * 60) || undefined;
+}
+
 export const GigCreate = z.object({
   title: z.string().trim().min(1, 'Name the gig').max(120),
   date: IsoDate,
-  time: Time.optional(),
+  startTime: Time.optional(),
+  endTime: Time.optional(),
   venue: Text(160).optional(),
   notes: Text(2000).optional(),
   status: z.enum(GIG_STATUSES).default('idea'),
@@ -107,7 +129,8 @@ export const GigPatch = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
     date: IsoDate.optional(),
-    time: Time.nullable().optional(),
+    startTime: Time.nullable().optional(),
+    endTime: Time.nullable().optional(),
     venue: Text(160).optional(),
     notes: Text(2000).optional(),
     status: z.enum(GIG_STATUSES).optional(),

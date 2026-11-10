@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   byTime,
+  checkTimes,
+  crossesMidnight,
+  durationMinutes,
   EventBody,
   EventPatch,
   GigCreate,
@@ -131,5 +134,38 @@ describe('events', () => {
   it('sorts the run sheet by time', () => {
     const rows = [{ time: '20:00' }, { time: '18:30' }, { time: '19:15' }];
     expect(rows.sort(byTime).map((r) => r.time)).toEqual(['18:30', '19:15', '20:00']);
+  });
+});
+
+describe('gig start and end times', () => {
+  it('needs a start for an end, and different times', () => {
+    expect(checkTimes(undefined, '22:00')).toBe('Add a start time too');
+    expect(checkTimes('20:00', '20:00')).toMatch(/after the start/);
+    expect(checkTimes('20:00', '23:00')).toBeUndefined();
+    expect(checkTimes('22:00', '01:00')).toBeUndefined();
+    expect(checkTimes(null, null)).toBeUndefined();
+  });
+
+  it('rolls late gigs past midnight', () => {
+    expect(crossesMidnight('22:00', '01:00')).toBe(true);
+    expect(crossesMidnight('19:00', '23:00')).toBe(false);
+    expect(durationMinutes('22:00', '01:30')).toBe(210);
+    expect(durationMinutes('19:30', '21:00')).toBe(90);
+    expect(durationMinutes('19:30')).toBeUndefined();
+  });
+
+  it('accepts start and end on create and clears them on patch', () => {
+    expect(
+      GigCreate.parse({
+        title: 'Launch',
+        date: '2026-12-11',
+        startTime: '19:30',
+        endTime: '23:00',
+      }),
+    ).toMatchObject({ startTime: '19:30', endTime: '23:00' });
+    expect(GigCreate.safeParse({ title: 'X', date: '2026-12-11', startTime: '7pm' }).success).toBe(
+      false,
+    );
+    expect(GigPatch.parse({ endTime: null })).toEqual({ endTime: null });
   });
 });
