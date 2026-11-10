@@ -1,0 +1,4 @@
+{
+  "_doc": "ZAP alerts reviewed and accepted (Phase 6). Each entry needs a pluginId, an optional uri regex, and a reason. Only alerts listed here may be High; everything else High fails the scan.",
+  "accepted": []
+}

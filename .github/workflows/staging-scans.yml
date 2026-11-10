@@ -1,0 +1,79 @@
+name: Staging scans
+
+# Phase 6 hardening: OWASP ZAP (baseline weekly, extended active scan on
+# demand) and a load test, against staging. Runs on the CI CodeBuild runner;
+# it needs no AWS credentials, only the public staging URL. No Docker: ZAP is
+# downloaded at a pinned version and checked against its SHA-256.
+
+on:
+  schedule:
+    - cron: '23 17 * * 0' # Mondays ~04:23 Melbourne: baseline scan + load test
+  workflow_dispatch:
+    inputs:
+      zap:
+        description: 'ZAP scan: baseline (passive, ~10 min), full (active, up to 90 min) or none'
+        type: choice
+        options: [baseline, full, none]
+        default: full
+      load:
+        description: 'Run the load test'
+        type: boolean
+        default: true
+      waf_check:
+        description: 'Also prove the API WAF rate rule blocks (blocks the runner IP for a few minutes)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-scans
+  cancel-in-progress: false
+
+env:
+  # The staging web app (CloudFront). Set the STAGING_WEB_URL repository
+  # variable when staging moves to staging.blueprintmusic.group.
+  TARGET: ${{ vars.STAGING_WEB_URL || 'https://d1e03n0k2euijp.cloudfront.net' }}
+  ZAP_VERSION: 2.17.0
+  ZAP_SHA256: efe799aaa3627db683b43f00c9c210aea0b75c00cc8f0a0f0434d12bb3ddde5a
+
+jobs:
+  scans:
+    name: Staging scans
+    runs-on: codebuild-bmg-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install ZAP ${{ env.ZAP_VERSION }} (checksum-verified)
+        if: (inputs.zap || 'baseline') != 'none'
+        run: |
+          java -version 2>&1 | head -1
+          major=$(java -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p')
+          [ "${major:-0}" -ge 17 ] || { echo "::error::ZAP needs Java 17+, runner has ${major}"; exit 1; }
+          curl -fsSL -o zap.tgz "https://github.com/zaproxy/zaproxy/releases/download/v${ZAP_VERSION}/ZAP_${ZAP_VERSION}_Linux.tar.gz"
+          echo "${ZAP_SHA256}  zap.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zap" && tar xzf zap.tgz -C "$RUNNER_TEMP/zap" --strip-components=1 && rm zap.tgz
+
+      - name: ZAP ${{ inputs.zap || 'baseline' }} scan
+        if: (inputs.zap || 'baseline') != 'none'
+        run: |
+          out="$RUNNER_TEMP/zap-out"; mkdir -p "$out"
+          node tools/scans/zap-plan.mjs "$TARGET" "${{ inputs.zap || 'baseline' }}" "$out"
+          "$RUNNER_TEMP/zap/zap.sh" -cmd -silent -dir "$RUNNER_TEMP/zap-home" -autorun "$out/zap-plan.yaml"
+          node tools/scans/zap-gate.mjs "$out/zap-report.json"
+
+      # The load test still runs if the scan found something.
+      - name: Let the WAF rate window clear
+        if: "!cancelled() && (inputs.zap || 'baseline') != 'none' && (github.event_name == 'schedule' || inputs.load)"
+        run: sleep 330
+
+      - name: Load test
+        if: "!cancelled() && (github.event_name == 'schedule' || inputs.load)"
+        run: node tools/load/load.mjs "$TARGET" --rps 5 --seconds 180 ${{ inputs.waf_check && '--waf-check' || '' }}
