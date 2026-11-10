@@ -488,33 +488,40 @@ describe('environment API', () => {
     prod!.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
   });
 
-  it('lets venue logo saves past the 8 KB WAF body limit, and only those', () => {
-    prod!.hasResourceProperties('AWS::WAFv2::WebACL', {
-      Rules: Match.arrayWith([
-        Match.objectLike({
-          Name: 'AWSManagedRulesCommonRuleSet',
-          Statement: {
-            ManagedRuleGroupStatement: Match.objectLike({
-              RuleActionOverrides: [{ Name: 'SizeRestrictions_BODY', ActionToUse: { Count: {} } }],
-            }),
-          },
-        }),
-        Match.objectLike({
-          Name: 'BodySizeLimit',
-          Action: { Block: {} },
-        }),
-      ]),
-    });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw CloudFormation JSON
+  type Waf = any;
+  it('limits bodies to 64 KB, except the image routes (venue logo, profile picture)', () => {
     const acl = Object.values(prod!.findResources('AWS::WAFv2::WebACL'))[0]!;
-    const rule = acl.Properties.Rules.find((r: { Name: string }) => r.Name === 'BodySizeLimit');
+    expect(acl.Properties.AssociationConfig).toEqual({
+      RequestBody: { API_GATEWAY: { DefaultSizeInspectionLimit: 'KB_64' } },
+    });
+    const rules = acl.Properties.Rules as Array<Waf>;
+    const common = rules.find((r) => r.Name === 'AWSManagedRulesCommonRuleSet')!;
+    expect(common.Statement.ManagedRuleGroupStatement.RuleActionOverrides).toEqual([
+      { Name: 'SizeRestrictions_BODY', ActionToUse: { Count: {} } },
+    ]);
+    const rule = rules.find((r) => r.Name === 'BodySizeLimit')!;
+    expect(rule.Action).toEqual({ Block: {} });
     const [size, exempt] = rule.Statement.AndStatement.Statements;
-    expect(size.SizeConstraintStatement).toMatchObject({ ComparisonOperator: 'GT', Size: 8192 });
-    const regex = new RegExp(
-      exempt.NotStatement.Statement.AndStatement.Statements[1].RegexMatchStatement.RegexString,
-    );
-    expect(regex.test('/v1/venues/abc123/logo')).toBe(true);
-    expect(regex.test('/v1/venues/abc123')).toBe(false);
-    expect(regex.test('/v1/venues/logo-lookup')).toBe(false);
+    expect(size.SizeConstraintStatement).toMatchObject({ ComparisonOperator: 'GT', Size: 65536 });
+    const routes: Array<[string, RegExp]> =
+      exempt.NotStatement.Statement.OrStatement.Statements.map(
+        (r: Waf) =>
+          [
+            r.AndStatement.Statements[0].ByteMatchStatement.SearchString,
+            new RegExp(r.AndStatement.Statements[1].RegexMatchStatement.RegexString),
+          ] as [string, RegExp],
+      );
+    const exempted = (method: string, path: string) =>
+      routes.some(([m, re]) => m === method && re.test(path));
+    expect(exempted('PUT', '/v1/venues/abc123/logo')).toBe(true);
+    expect(exempted('PATCH', '/v1/me')).toBe(true);
+    expect(exempted('PUT', '/v1/venues/abc123')).toBe(false);
+    expect(exempted('POST', '/v1/venues/logo-lookup')).toBe(false);
+    expect(exempted('PATCH', '/me')).toBe(true);
+    expect(exempted('PATCH', '/v1/conversations/c1/me')).toBe(false);
+    expect(exempted('GET', '/v1/me')).toBe(false);
+    expect(exempted('PATCH', '/v1/me/preferences')).toBe(false);
   });
 
   it('names API roles so the data-access role can trust them', () => {
