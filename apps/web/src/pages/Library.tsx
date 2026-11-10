@@ -9,6 +9,7 @@ import {
   waitUntilScanned,
   type FileItem,
 } from '../lib/files.ts';
+import { CATEGORY_ONE } from './Assets.tsx';
 import { makeThumbnail } from '../lib/thumbnail.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
 import {
@@ -37,6 +38,22 @@ const SHARING_LABEL: Record<NonNullable<FileItem['sharing']>, string> = {
 };
 
 const date = shortDate;
+
+/** A file's type, plus its asset kind when it's in the asset library ("PNG · Press photo"). */
+function typeLabel(f: FileItem): string {
+  return f.asset ? `${f.fileType.label} · ${CATEGORY_ONE[f.asset.category]}` : f.fileType.label;
+}
+
+/**
+ * Library type filter (rev 9): assets are artist files with extra details, so
+ * Library and Assets are one place, told apart by type.
+ */
+export type LibraryKind = 'all' | 'documents' | 'assets';
+export const LIBRARY_KIND_OPTIONS: readonly { id: LibraryKind; label: string }[] = [
+  { id: 'all', label: 'All files' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'assets', label: 'Assets' },
+];
 
 function useFiles(cfg: AppConfig, token: string, collection: string) {
   const [files, setFiles] = useState<FileItem[] | null>(null);
@@ -472,7 +489,7 @@ function FileTable({
                   <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
                 </button>
                 <span className="src">
-                  {f.fileType.label} · {formatSize(f.size)} · {date(f.createdAt)}
+                  {typeLabel(f)} · {formatSize(f.size)} · {date(f.createdAt)}
                   {columns.map((c) => (
                     <span key={c.label}> · {c.cell(f)}</span>
                   ))}
@@ -524,7 +541,7 @@ function FileTable({
                 <StatusBadge f={f} />
               </span>
             </td>
-            <td className="src">{f.fileType.label}</td>
+            <td className="src">{typeLabel(f)}</td>
             <td className="src">{formatSize(f.size)}</td>
             {columns.map((c) => (
               <td key={c.label}>{c.cell(f)}</td>
@@ -569,12 +586,15 @@ export function ArtistFiles({
   artistId,
   isBmg,
   isAdmin = false,
+  kind = 'all',
 }: {
   cfg: AppConfig;
   token: string;
   artistId: string;
   isBmg: boolean;
   isAdmin?: boolean;
+  /** Library type filter: everything, or documents only (assets have their own gallery). */
+  kind?: Exclude<LibraryKind, 'assets'>;
 }) {
   const collection = `/artists/${artistId}/files`;
   const { files, error, setError, load } = useFiles(cfg, token, collection);
@@ -649,7 +669,8 @@ export function ArtistFiles({
       />
     </UploadBox>
   );
-  const visible = files && files.filter((f) => ARTIST_FILTERS[filter].test(f));
+  const ofKind = files && (kind === 'documents' ? files.filter((f) => !f.asset) : files);
+  const visible = ofKind && ofKind.filter((f) => ARTIST_FILTERS[filter].test(f));
   const columns = [
     {
       label: 'Who can see it',
@@ -682,7 +703,7 @@ export function ArtistFiles({
         {error && <Notice tone="error">{error}</Notice>}
         <div className="eyebrow pt-2 text-muted-foreground">My uploads and files</div>
         <FileTable
-          files={files}
+          files={ofKind}
           empty="No files yet."
           onOpen={open}
           onDelete={remove}
@@ -700,7 +721,7 @@ export function ArtistFiles({
       <Card
         className="flex-[2_1_560px] pb-0"
         title="Files"
-        action={<span className="src">{files?.length ?? 0} files</span>}
+        action={<span className="src">{ofKind?.length ?? 0} files</span>}
       >
         {phone && <UploadDocumentButton onClick={() => setUploading(true)} />}
         <Chips

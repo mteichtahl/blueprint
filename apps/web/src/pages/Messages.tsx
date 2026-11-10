@@ -307,7 +307,7 @@ function ChatAvatar({ c, size = 48 }: { c: ConversationSummary; size?: number })
   return <Avatar name={c.title} size={size} />;
 }
 
-function useNarrow(query = '(max-width: 899px)') {
+export function useNarrow(query = '(max-width: 899px)') {
   const get = () => typeof window !== 'undefined' && window.matchMedia?.(query).matches === true;
   const [narrow, setNarrow] = useState(get);
   useEffect(() => {
@@ -2788,6 +2788,7 @@ export function ArtistChatTab({
   onNavigate,
   onOpenChat,
   onBack,
+  panel = false,
 }: {
   cfg: AppConfig;
   token: string;
@@ -2795,8 +2796,10 @@ export function ArtistChatTab({
   artist: ArtistSummary;
   onNavigate?: (view: string) => void;
   onOpenChat?: (conversationId: string) => void;
-  /** Phone: leaves the full-screen chat for the rest of the workspace. */
+  /** Phone: leaves the full-screen chat for the rest of the workspace. Panel: closes the panel. */
   onBack?: () => void;
+  /** Workspace side panel (rev 9): the narrow phone layout beside the open tab. */
+  panel?: boolean;
 }) {
   const ctx = useMemo<ChatCtx>(
     () => ({
@@ -2809,7 +2812,8 @@ export function ArtistChatTab({
     [cfg, token, me, onNavigate],
   );
   const inbox = useInbox(cfg, token, me);
-  const narrow = useNarrow();
+  // The side panel is phone-width, so it uses the phone layout on any screen.
+  const narrow = useNarrow() || panel;
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Phone opens on the conversation (composer in reach); desktop shows contact info beside it.
@@ -2842,14 +2846,14 @@ export function ArtistChatTab({
     );
   return (
     <div className="flex flex-col gap-2">
-      {onOpenChat && conversationId && !narrow && (
+      {onOpenChat && conversationId && (!narrow || panel) && (
         <div className="flex justify-end">
           <button type="button" className="wa-link" onClick={() => onOpenChat(conversationId)}>
             Open in Chat <Icon name="arrow" size={14} />
           </button>
         </div>
       )}
-      <div className={`wa wa-tab ${narrow ? 'wa-phone' : ''}`}>
+      <div className={`wa wa-tab ${narrow ? 'wa-phone' : ''} ${panel ? 'wa-panel' : ''}`}>
         {conv ? (
           <>
             {!(narrow && info) && (
