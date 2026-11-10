@@ -390,6 +390,15 @@ describe('environment audit trail', () => {
 describe('environment files', () => {
   const [staging] = stacks.environments.map((e) => Template.fromStack(e.files));
 
+  it('lets the app read artist images (GET only) for the brand kit PDF', () => {
+    staging!.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: names.bucket(cfg, 'staging', 'artist-data'),
+      CorsConfiguration: {
+        CorsRules: [Match.objectLike({ AllowedMethods: ['GET', 'HEAD'] })],
+      },
+    });
+  });
+
   it('keeps uploads in a 7-day quarantine under its own key, open to browser POSTs only', () => {
     staging!.hasResourceProperties('AWS::S3::Bucket', {
       BucketName: names.bucket(cfg, 'staging', 'quarantine'),

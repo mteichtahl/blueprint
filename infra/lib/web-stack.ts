@@ -113,7 +113,8 @@ export class WebStack extends BmgStack {
             `img-src 'self' data: blob: ${props.downloadOrigins.join(' ')}`,
             // blob: lets the browser read a picked video locally to draw its preview.
             `media-src 'self' blob: ${props.downloadOrigins.join(' ')}`,
-            `connect-src 'self' ${cognitoIdp} ${props.uploadOrigin} wss://${props.realtime.realtimeDns}`,
+            // Download origins: the app reads images itself (brand kit PDF).
+            `connect-src 'self' ${cognitoIdp} ${props.uploadOrigin} ${props.downloadOrigins.join(' ')} wss://${props.realtime.realtimeDns}`,
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "form-action 'self'",

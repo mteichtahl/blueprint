@@ -76,7 +76,7 @@ export const changesOldestFirst = (changes: readonly PlanChange[]) =>
   [...changes].sort((a, b) => a.at.localeCompare(b.at) || a.version - b.version);
 
 /** The logo's PNG bytes, or undefined if it isn't there (the app's fallback page isn't a PNG). */
-async function loadLogo(): Promise<Uint8Array | undefined> {
+export async function loadLogo(): Promise<Uint8Array | undefined> {
   try {
     const res = await fetch(LOGO_PATH);
     if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/png')) return;
