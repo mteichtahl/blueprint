@@ -89,6 +89,17 @@ export function onPublish(ctx) {
 }
 `;
 
+/** Largest request body the WAF lets through, except on IMAGE_ROUTES. */
+export const BODY_LIMIT_BYTES = 64 * 1024;
+/**
+ * Routes that carry an image as a data URL in JSON (method, URI path regex).
+ * Their handlers cap the image size, so the WAF body limit doesn't apply.
+ */
+export const IMAGE_ROUTES: ReadonlyArray<readonly [string, string]> = [
+  ['PUT', '/venues/[^/]+/logo$'], // venue logo
+  ['PATCH', '^(/[^/]+)?/me$'], // profile picture (/me, or /<stage>/me)
+];
+
 export class ApiStack extends BmgStack {
   readonly api: RestApi;
   readonly realtime: EventApi;
@@ -1172,6 +1183,28 @@ export class ApiStack extends BmgStack {
     );
 
     // ── Regional AWS WAF ──
+    /** Matches one method on a URI path (the path regex is matched as given). */
+    const wafRoute = (method: string, pathRegex: string) => ({
+      andStatement: {
+        statements: [
+          {
+            byteMatchStatement: {
+              fieldToMatch: { method: {} },
+              positionalConstraint: 'EXACTLY',
+              searchString: method,
+              textTransformations: [{ priority: 0, type: 'NONE' }],
+            },
+          },
+          {
+            regexMatchStatement: {
+              fieldToMatch: { uriPath: {} },
+              regexString: pathRegex,
+              textTransformations: [{ priority: 0, type: 'NONE' }],
+            },
+          },
+        ],
+      },
+    });
     const managed = (name: string, priority: number, countOnly: string[] = []) => ({
       name,
       priority,
@@ -1200,6 +1233,8 @@ export class ApiStack extends BmgStack {
       name: `${p}-api`,
       scope: 'REGIONAL',
       defaultAction: { allow: {} },
+      // Inspect up to 64 KB of each body, so BodySizeLimit can enforce 64 KB.
+      associationConfig: { requestBody: { API_GATEWAY: { defaultSizeInspectionLimit: 'KB_64' } } },
       visibilityConfig: {
         cloudWatchMetricsEnabled: true,
         sampledRequestsEnabled: true,
@@ -1217,10 +1252,12 @@ export class ApiStack extends BmgStack {
             metricName: 'RateLimitPerIp',
           },
         },
-        // The common set blocks any body over 8 KB (SizeRestrictions_BODY). Venue
-        // logos are saved as a data URL in JSON, so that rule only counts here and
-        // the 8 KB limit is applied below to everything except PUT …/logo, whose
-        // handler caps the image itself (LOGO_MAX_BYTES).
+        // The common set blocks any body over 8 KB (SizeRestrictions_BODY), which
+        // stopped real saves: venue logos and profile pictures go up as data URLs
+        // in JSON, and AI prompts, plans and run sheets can pass 8 KB too. That
+        // rule only counts here; BodySizeLimit blocks bodies over 64 KB instead,
+        // except the two image routes, whose handlers cap the image themselves
+        // (LOGO_MAX_BYTES). Every handler also validates its own field lengths.
         managed('AWSManagedRulesCommonRuleSet', 1, ['SizeRestrictions_BODY']),
         managed('AWSManagedRulesKnownBadInputsRuleSet', 2),
         {
@@ -1234,31 +1271,15 @@ export class ApiStack extends BmgStack {
                   sizeConstraintStatement: {
                     fieldToMatch: { body: { oversizeHandling: 'MATCH' } },
                     comparisonOperator: 'GT',
-                    size: 8192,
+                    size: BODY_LIMIT_BYTES,
                     textTransformations: [{ priority: 0, type: 'NONE' }],
                   },
                 },
                 {
                   notStatement: {
                     statement: {
-                      andStatement: {
-                        statements: [
-                          {
-                            byteMatchStatement: {
-                              fieldToMatch: { method: {} },
-                              positionalConstraint: 'EXACTLY',
-                              searchString: 'PUT',
-                              textTransformations: [{ priority: 0, type: 'NONE' }],
-                            },
-                          },
-                          {
-                            regexMatchStatement: {
-                              fieldToMatch: { uriPath: {} },
-                              regexString: '/venues/[^/]+/logo$',
-                              textTransformations: [{ priority: 0, type: 'NONE' }],
-                            },
-                          },
-                        ],
+                      orStatement: {
+                        statements: IMAGE_ROUTES.map(([method, path]) => wafRoute(method, path)),
                       },
                     },
                   },
