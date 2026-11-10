@@ -49,6 +49,7 @@ export interface Gig {
   plannedBy: 'artist' | 'bmg';
   /** Artist gigs are only visible to Blueprint once shared. */
   shared: boolean;
+  /** Removed in rev 7 (set duration). Older gigs may still hold it; never returned. */
   setLength?: string;
   ticketUrl?: string;
   help?: {
@@ -117,7 +118,6 @@ export const GigCreate = z.object({
   status: z.enum(GIG_STATUSES).default('idea'),
   deal: z.enum(GIG_DEALS).default('other'),
   dealNote: Text(200).optional(),
-  setLength: Text(40).optional(),
   ticketUrl: z
     .url({ protocol: /^https$/ })
     .max(500)
@@ -136,7 +136,6 @@ export const GigPatch = z
     status: z.enum(GIG_STATUSES).optional(),
     deal: z.enum(GIG_DEALS).optional(),
     dealNote: Text(200).optional(),
-    setLength: Text(40).optional(),
     ticketUrl: z
       .url({ protocol: /^https$/ })
       .max(500)

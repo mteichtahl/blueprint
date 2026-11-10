@@ -101,6 +101,8 @@ function strip(item: Record<string, unknown>): Record<string, unknown> {
 /** Older gigs kept one `time`; it's the start time. */
 function publicGig(g: Gig) {
   const { time, ...rest } = g;
+  // Set duration was removed from gigs (rev 7); old values stay stored but hidden.
+  delete rest.setLength;
   return strip({ ...rest, ...(rest.startTime || !time ? {} : { startTime: time }) });
 }
 
@@ -215,7 +217,6 @@ export const handler = handle(async (event) => {
         status: body.status,
         deal: body.deal,
         ...(body.dealNote ? { dealNote: body.dealNote } : {}),
-        ...(body.setLength ? { setLength: body.setLength } : {}),
         ...(body.ticketUrl ? { ticketUrl: body.ticketUrl } : {}),
         checklist: DEFAULT_CHECKLIST.map((title, i) => ({ id: `c${i + 1}`, title, done: false })),
         plannedBy: isArtist ? 'artist' : 'bmg',

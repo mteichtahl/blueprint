@@ -31,7 +31,6 @@ export interface Gig {
   status: GigStatus;
   deal: GigDeal;
   dealNote?: string;
-  setLength?: string;
   ticketUrl?: string;
   checklist: { id: string; title: string; done: boolean }[];
   plannedBy: 'artist' | 'bmg';
@@ -168,7 +167,6 @@ function GigForm({
     venue: gig?.venue ?? '',
     status: gig?.status ?? ('idea' as GigStatus),
     deal: gig?.deal ?? ('other' as GigDeal),
-    setLength: gig?.setLength ?? '',
     ticketUrl: gig?.ticketUrl ?? '',
     notes: gig?.notes ?? '',
     shared: gig?.shared ?? true,
@@ -198,7 +196,6 @@ function GigForm({
       status: f.status,
       deal: f.deal,
       ...(f.venue ? { venue: f.venue } : {}),
-      ...(f.setLength ? { setLength: f.setLength } : {}),
       ...(f.ticketUrl ? { ticketUrl: f.ticketUrl } : {}),
       ...(f.notes ? { notes: f.notes } : {}),
       ...(isArtist ? { shared: f.shared } : {}),
@@ -238,12 +235,6 @@ function GigForm({
               : {})}
         />
         <Field label="Venue" value={f.venue} onChange={set('venue')} />
-        <Field
-          label="Set length"
-          value={f.setLength}
-          onChange={set('setLength')}
-          placeholder="45 min"
-        />
         <Select label="Deal" value={f.deal} onChange={set('deal')} options={DEAL_OPTIONS} />
         <Field
           label="Tickets"
@@ -525,7 +516,6 @@ export function GigsTab({
                 <p className="src">
                   {when(open)}
                   {open.venue ? ` · ${open.venue}` : ''}
-                  {open.setLength ? ` · ${open.setLength}` : ''}
                 </p>
                 {open.notes && <p>{open.notes}</p>}
                 {open.ticketUrl && (
@@ -601,11 +591,7 @@ function GigTable({
                 <button type="button" className="text-left font-bold">
                   {g.title}
                 </button>
-                {(g.venue || g.setLength) && (
-                  <span className="src block">
-                    {[g.venue, g.setLength].filter(Boolean).join(' · ')}
-                  </span>
-                )}
+                {g.venue && <span className="src block">{g.venue}</span>}
               </td>
               <td>
                 <Tag tone={tone}>{label}</Tag>
@@ -788,12 +774,11 @@ function GigCard({ gig, onOpen }: { gig: Gig; onOpen: () => void }) {
           <b className="flex-1">{gig.title}</b>
           <Tag tone={tone}>{label}</Tag>
         </span>
-        {(gig.startTime || gig.venue || gig.setLength) && (
+        {(gig.startTime || gig.venue) && (
           <span className="src">
             {[
               timeRange(gig.startTime, gig.endTime),
               gig.venue,
-              gig.setLength,
               gig.deal !== 'other' ? DEAL[gig.deal] : '',
             ]
               .filter(Boolean)

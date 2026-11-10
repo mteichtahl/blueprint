@@ -169,3 +169,12 @@ describe('gig start and end times', () => {
     expect(GigPatch.parse({ endTime: null })).toEqual({ endTime: null });
   });
 });
+
+describe('set duration (removed in rev 7)', () => {
+  it('is no longer accepted on gigs', () => {
+    expect(
+      GigCreate.parse({ title: 'X', date: '2026-12-11', setLength: '45 min' }),
+    ).not.toHaveProperty('setLength');
+    expect(GigPatch.safeParse({ setLength: '45 min' }).success).toBe(false);
+  });
+});
