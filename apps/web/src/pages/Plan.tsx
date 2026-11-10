@@ -73,9 +73,12 @@ export function PlanTab({
   token,
   artistId,
   canEdit,
+  artistName = 'Artist',
   autoStart = false,
   onChanged,
 }: {
+  /** For the PDF export's title and file name. */
+  artistName?: string;
   cfg: AppConfig;
   token: string;
   artistId: string;
@@ -90,6 +93,7 @@ export function PlanTab({
   const [section, setSection] = useState<Section>({ kind: 'outcome' });
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -302,6 +306,27 @@ export function PlanTab({
         />
       )}
 
+      {data.exists && !editing && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="ghost"
+            disabled={exporting}
+            onClick={() => {
+              setExporting(true);
+              setError(null);
+              void import('../lib/planPdf.ts')
+                .then(({ exportPlanPdf }) =>
+                  exportPlanPdf({ artistName, plan: data.plan, gaps: data.gaps }),
+                )
+                .catch((e) => setError(`Couldn't make the PDF: ${(e as Error).message}`))
+                .finally(() => setExporting(false));
+            }}
+          >
+            {exporting ? 'Making the PDF…' : 'Export to PDF'}
+          </Button>
+          <span className="src">The whole plan, with the timeline.</span>
+        </div>
+      )}
       {canEdit && (
         <div className="flex flex-wrap items-center gap-3">
           {editing ? (
