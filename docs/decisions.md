@@ -238,3 +238,9 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **To-do reminder 500 (change plan WP0):** the reminder role's trust policy matched `aws:SourceArn` against the _schedule_ ARN, but EventBridge Scheduler sends the _schedule group_ ARN. So the role could never be assumed, and `CreateSchedule` failed after the to-do was already saved. The trust policy now uses `ArnEquals` on `schedule-group/<env>-reminders`, which follows AWS's confused-deputy guidance, and an infra test pins it.
   - **A reminder can no longer break a save.** Scheduler errors are logged (`reminder.failed`) and flagged on the to-do (`reminderFailed`). The API returns the saved to-do, and the UI shows "Reminder not set". Saving the to-do again, even unchanged, retries it, and that retry sends no change notification.
   - **Schedule names stay `todo-<artistId>-<todoId>`.** Artist ids are at most 36 characters, so names are at most 61 and never truncated, and a test already checks the 64-character limit. Renaming would orphan existing schedules.
+
+## Notes: Phase 6 policy review (10 Nov 2026)
+
+- **Full findings are in [security-review.md](security-review.md).** The gate is met: no high findings are open.
+- **The key admin can no longer rewrite artist key policies (K1).** New keys are created with `BypassPolicyLockoutSafetyCheck`, because the policy deliberately takes `PutKeyPolicy` away from the creating role. The account root keeps policy administration, so no key is orphaned. Older keys are moved to the new policy on deploy by `Custom::BmgKeyPolicyRefresh`.
+- **Data-access sessions are limited to 8 named roles (I1),** listed in `DATA_ACCESS_CALLERS` in `infra/lib/keys-stack.ts`. A new function that opens artist data must be added there. The infra test fails until it is.
