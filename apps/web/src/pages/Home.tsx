@@ -20,6 +20,7 @@ import {
   ArtistShell,
   BmgShell,
   PhoneHeader,
+  ProfileMenu,
   useTheme,
   type NavSection,
 } from '../components/Shell.tsx';
@@ -31,7 +32,6 @@ import {
   Chips,
   DataTable,
   Field,
-  initials,
   Notice,
   PageHeader,
   RowCard,
@@ -1053,17 +1053,17 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                     );
                   }}
                 />
-                <button
-                  type="button"
-                  aria-label={
-                    avatar
-                      ? 'Profile & preferences'
-                      : `${initials(userName)}, Profile & preferences`
-                  }
-                  onClick={() => setView('profile')}
-                >
-                  <Avatar name={userName} src={avatar} size={34} className="!bg-cta !text-white" />
-                </button>
+                <ProfileMenu
+                  userName={userName}
+                  roleLabel="Artist"
+                  avatar={avatar}
+                  size={34}
+                  onProfile={() => setView('profile')}
+                  items={[
+                    { label: 'My connectors', icon: 'plug', onSelect: () => setView('connectors') },
+                  ]}
+                  onSignOut={onSignOut}
+                />
               </span>
             )
           }
