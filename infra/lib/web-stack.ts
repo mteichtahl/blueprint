@@ -129,6 +129,19 @@ export class WebStack extends BmgStack {
         frameOptions: { override: true, frameOption: HeadersFrameOption.DENY },
         referrerPolicy: { override: true, referrerPolicy: HeadersReferrerPolicy.NO_REFERRER },
       },
+      // Phase 6 review (finding W2): turn off browser features the app never
+      // uses, and keep other sites' windows from holding a reference to ours.
+      customHeadersBehavior: {
+        customHeaders: [
+          {
+            header: 'Permissions-Policy',
+            value:
+              'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), browsing-topics=()',
+            override: true,
+          },
+          { header: 'Cross-Origin-Opener-Policy', value: 'same-origin', override: true },
+        ],
+      },
     });
 
     const apiDomain = `${props.restApiId}.execute-api.${this.region}.amazonaws.com`;

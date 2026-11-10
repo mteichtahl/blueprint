@@ -38,6 +38,18 @@ const SESSION_ROLES = ['artist', 'bmg-admin', 'bmg-staff'];
  * - Staging only: the isolation gate runs real KMS calls on every deploy and
  *   fails the deploy if any cross-artist or private-item access is allowed.
  */
+/** Roles (after `<project>-<env>-`) that may open per-artist data sessions. */
+export const DATA_ACCESS_CALLERS = [
+  'api-files',
+  'api-files-promote',
+  'api-messages',
+  'api-review',
+  'api-connectors',
+  'api-connectors-sync',
+  'api-kb-provision',
+  'api-kb-sync',
+] as const;
+
 export class KeysStack extends BmgStack {
   readonly dataAccessRole: Role;
   readonly onboarding: StateMachine;
@@ -65,12 +77,14 @@ export class KeysStack extends BmgStack {
       description: `BMG ${env}: per-artist data access. Usable only in sessions tagged with artistId and role.`,
       maxSessionDuration: Duration.hours(1),
       assumedBy: new AccountPrincipal(this.account).withSessionTags().withConditions({
-        ArnLike: {
+        // Exactly the functions that open artist data (finding I1), not every
+        // API role; an infra test keeps this list equal to the roles that
+        // are allowed to call sts:AssumeRole on it.
+        ArnEquals: {
           'aws:PrincipalArn': [
-            roleArn(gateRoleName),
-            // The staging files gate (files stack) runs the same kind of checks against S3.
-            roleArn(`${p}-files-gate`),
-            roleArn(`${p}-api-*`),
+            ...DATA_ACCESS_CALLERS.map((name) => roleArn(`${p}-${name}`)),
+            // The staging gates run real KMS and S3 checks.
+            ...(prod ? [] : [roleArn(gateRoleName), roleArn(`${p}-files-gate`)]),
           ],
         },
         // Both tags are required and nothing else may be set (no tag overrides).
@@ -119,7 +133,7 @@ export class KeysStack extends BmgStack {
       entry: 'services/keys/src/onboard.ts',
       description: `BMG ${env}: create an artist's KMS key and first workspace record`,
       roleName: keyAdminRoleName,
-      timeout: Duration.seconds(30),
+      timeout: Duration.minutes(2),
       prod,
       environment: {
         PROJECT: cfg.project,
@@ -158,6 +172,14 @@ export class KeysStack extends BmgStack {
         resources: [artistAliases],
       }),
     );
+    // Finds this environment's artist keys for the policy refresh (finding K1).
+    onboard.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'ListArtistAliases',
+        actions: ['kms:ListAliases'],
+        resources: ['*'],
+      }),
+    );
     onboard.addToRolePolicy(
       new PolicyStatement({
         sid: 'RecordArtist',
@@ -168,7 +190,7 @@ export class KeysStack extends BmgStack {
     props.platformKey.grant(onboard, 'kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey');
     acknowledge(
       onboard.role!,
-      'kms:CreateKey has no resource ARN before the key exists; it is limited by request tags to this environment. Other key actions are limited to keys tagged with this environment and to artist aliases.',
+      'kms:CreateKey has no resource ARN before the key exists; it is limited by request tags to this environment. kms:ListAliases has no resource-level scoping. Other key actions are limited to keys tagged with this environment and to artist aliases.',
       'AwsSolutions-IAM5[Resource::*]',
       `AwsSolutions-IAM5[Resource::${anyKey}]`,
       `AwsSolutions-IAM5[Resource::${artistAliases}]`,
@@ -204,6 +226,15 @@ export class KeysStack extends BmgStack {
       'keys/data-access-role-arn': this.dataAccessRole.roleArn,
       'keys/onboarding-state-machine-arn': this.onboarding.stateMachineArn,
     };
+
+    // ── Phase 6 (finding K1): older artist keys get the current key policy,
+    // which no longer lets this role rewrite it. A no-op once done.
+    const refresh = new CustomResource(this, 'ArtistKeyPolicyRefresh', {
+      serviceToken: onboard.functionArn,
+      resourceType: 'Custom::BmgKeyPolicyRefresh',
+      properties: { policyVersion: '2026-11-10' },
+    });
+    refresh.node.addDependency(onboard, onboard.role!);
 
     // ── Phase 2 gate: cross-artist access must be refused by KMS (staging) ──
     if (!prod) {

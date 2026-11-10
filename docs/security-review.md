@@ -1,0 +1,46 @@
+# Phase 6 policy review: IAM, KMS and Cognito (10 Nov 2026)
+
+**Scope:** every IAM role, policy and trust policy, every KMS key policy (including the run-time artist key policy in `services/keys/src/policy.ts`), the Cognito user pool and app client, and the edge headers. Checked against the synthesized templates for both environments, and the tooling and guardrail stacks.
+
+**Gate (design, Phase 6):** no high findings open. **Result: met.** The one high finding (K1) is fixed in this PR.
+
+| ID  | Severity          | Finding                                                                                                                                                                                                                                                                                        | Status                                                                                                                                                                                                                                                                                                                          |
+| --- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| K1  | **High**          | The onboarding task's role (`<env>-key-admin`) was allowed `kms:PutKeyPolicy` (and grant revocation) by every artist key's own policy. A compromised onboarding function could rewrite a key policy to give itself `Decrypt`, so it could read every artist's data. Onboarding never needs it. | **Fixed.** The key admin now gets only setup and read actions (`KEY_ADMIN_ACTIONS`). Existing keys get the new policy on the next deploy through `Custom::BmgKeyPolicyRefresh`, which runs as the onboarding function, changes only keys with the old policy, and is a no-op afterwards. Unit tests and an infra test cover it. |
+| I1  | Medium            | The data-access role trusted `role/<env>-api-*`, which is all 22+ API roles. Only 8 of them call it, and an identity policy was the only thing stopping the rest.                                                                                                                              | **Fixed.** The trust now names exactly the 8 roles (`DATA_ACCESS_CALLERS`), plus the two gates in staging only. An infra test fails if this list ever drifts from the roles that are allowed to call `sts:AssumeRole` on it.                                                                                                    |
+| W1  | Medium            | The web app is served on the default `*.cloudfront.net` certificate, so CloudFront negotiates down to TLS 1.0 for old clients.                                                                                                                                                                 | **Open, tracked.** When `app.blueprintmusic.group` is attached, set `MinimumProtocolVersion: TLSv1.2_2021`. Modern browsers already negotiate TLS 1.3.                                                                                                                                                                          |
+| K2  | Medium (accepted) | Keeping "private" items private relies on the `role` session tag that the calling API function sets. A compromised data-reading function could set `role=artist`.                                                                                                                              | **Accepted, by design (9.1).** Only the 8 named roles can open sessions (I1). Tags are restricted to `artistId` and `role`, with fixed values. App-level authorisation and the authorisation-matrix CI gate check every request.                                                                                                |
+| W2  | Low               | No `Permissions-Policy` or `Cross-Origin-Opener-Policy` header.                                                                                                                                                                                                                                | **Fixed.** The camera, microphone, location, payment, USB, serial, Bluetooth and Topics APIs are off, and COOP is `same-origin`.                                                                                                                                                                                                |
+| W3  | Low               | Quarantine bucket CORS allows `https://*.cloudfront.net`.                                                                                                                                                                                                                                      | **Accepted for now.** Every upload needs a signed POST policy, so CORS alone grants nothing. Narrow it to the app origin with W1.                                                                                                                                                                                               |
+| I2  | Low               | The notifier gets `Encrypt` and `ReEncrypt*` on the platform key, from CDK's default SQS send grant. It only needs `GenerateDataKey` and `Decrypt`.                                                                                                                                            | Accepted: same key and same function, so there's no new reach.                                                                                                                                                                                                                                                                  |
+| W4  | Info              | No WAF on CloudFront.                                                                                                                                                                                                                                                                          | Accepted: the site is static. The API has its own regional WAF with rate limiting.                                                                                                                                                                                                                                              |
+
+## What was checked and is fine
+
+- **Wildcard resources (`*`)** appear only where AWS offers no resource scoping: X-Ray, CloudWatch metrics (limited by a namespace condition), Step Functions log delivery, CloudFront invalidation, and the two create calls (`kms:CreateKey`, `bedrock:CreateKnowledgeBase`), which are limited by request tags to the environment. All of them are acknowledged in cdk-nag with reasons.
+- **Wildcard actions** appear only in AWS service principals on CDK-managed keys (logs, CloudTrail, Config, EventBridge) and in CDK's own asset roles.
+- **Artist key policy:**
+  - Data actions go only to the data-access role, and only for a session tagged with that artist and an encryption context with the same artistId.
+  - `private` items are denied to every non-artist session.
+  - Deletion is denied except to the offboarding role.
+  - There are no wildcard actions, and the key admin has no data actions.
+- **CDK-managed keys** keep the default root statement, so IAM in the account can manage them. IAM is limited by the permission boundary, which denies key deletion, security-service tampering, IAM users and access keys, roles without the boundary, and crossing environments.
+- **Runner roles:** CodeBuild only, with the boundary attached. Only the prod runner can assume the prod bootstrap roles. No AWS secrets are stored in GitHub.
+- **Cognito:**
+  - Invite-only (admin create).
+  - MFA required (TOTP), plus passkeys.
+  - Password minimum 12 characters with all character classes.
+  - Threat protection is ENFORCED (Plus tier).
+  - User-existence errors are hidden.
+  - Token revocation is on, and refresh tokens rotate.
+  - Access and ID tokens last 15 minutes; refresh tokens last 30 days.
+  - Deletion protection is on, and email changes need verification.
+  - `custom:artistId` can't be written by clients.
+  - The API authorizer doesn't cache (TTL 0), so revoking a token takes effect immediately.
+- **S3:** every bucket blocks public access, refuses non-TLS requests, and uses KMS for data buckets. Logs go to access-log buckets.
+- **Headers:** a strict CSP (no inline script or style, `frame-ancestors 'none'`), HSTS for one year, `nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
+
+## Remaining Phase 6 items
+
+- The accessibility audit (WCAG 2.2 AA).
+- The extended ZAP scan and load test against staging.
