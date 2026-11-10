@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import { Command } from 'commander';
 import { accountSetup } from './commands/account.ts';
+import { aiOptOut, aiStatus } from './commands/ai.ts';
 import { adminCreate } from './commands/admin.ts';
 import { bootstrap } from './commands/bootstrap.ts';
 import { doctor } from './commands/doctor.ts';
@@ -20,7 +21,7 @@ const program = new Command()
   .description(
     'One-time setup for the BMG platform. First run, in order:\n' +
       '  init → doctor → bootstrap → account setup → github connect → github protect\n' +
-      '  → pipeline deploy → (push to main; wait for Deploy) → secrets set → email setup → admin create',
+      '  → pipeline deploy → (push to main; wait for Deploy) → secrets set → email setup → admin create → ai opt-out',
   )
   .option('-y, --yes', 'apply without asking for confirmation')
   .option('--dry-run', 'show what would change, change nothing');
@@ -125,6 +126,16 @@ program
   .command('repair')
   .description('remove BMG stacks whose first create failed, so the next deploy can run')
   .action(wrap(() => stacksRepair(g())));
+
+const ai = program.command('ai').description('AWS AI services');
+ai.command('opt-out')
+  .description(
+    'opt the account out of AWS using its content to improve AI services (needed for meeting transcripts)',
+  )
+  .action(wrap(() => aiOptOut(g())));
+ai.command('status')
+  .description('show whether meeting transcription is allowed to run (read-only)')
+  .action(wrap(() => aiStatus()));
 
 const verify = program.command('verify').description('live security checks');
 verify

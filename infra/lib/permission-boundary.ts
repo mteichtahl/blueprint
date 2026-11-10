@@ -23,11 +23,11 @@ const GLOBAL_SERVICE_ACTIONS = [
 ];
 
 /**
- * The account permission boundary (design section 4.2). Because the app runs in a
- * single AWS account without AWS Organizations, this boundary does the job SCPs
- * would otherwise do. It is attached to every role the app and pipeline create,
- * including the CDK CloudFormation execution roles of the staging and prod
- * bootstraps.
+ * The account permission boundary (design section 4.2). The app runs in a single
+ * AWS account with no SCPs (Organizations only holds the AI services opt-out
+ * policy, rev 11), so this boundary does the job SCPs would otherwise do. It
+ * is attached to every role the app and pipeline create, including the CDK
+ * CloudFormation execution roles of the staging and prod bootstraps.
  */
 export function buildPermissionBoundaryDocument(cfg: BmgConfig): PolicyDocument {
   const boundaryArn = `arn:aws:iam::${cfg.account.id}:policy/${names.permissionBoundary(cfg)}`;

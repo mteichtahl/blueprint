@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Schema and loader for bmg.config.json, shared by the CLI and the CDK app",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ai-opt-out": "./src/ai-opt-out.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
