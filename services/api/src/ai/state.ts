@@ -1,4 +1,5 @@
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { isArtistId } from '@bmg/crypto';
 import { db, env } from '../lib.ts';
 
 /**
@@ -7,7 +8,7 @@ import { db, env } from '../lib.ts';
  * events are safe.
  */
 export async function projectAiState(artistId: string, aiOptIn: boolean, decidedAt: string) {
-  if (!/^art_[a-z0-9]{12}$/.test(artistId)) return;
+  if (!isArtistId(artistId)) return;
   try {
     await db.send(
       new UpdateCommand({

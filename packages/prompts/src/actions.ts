@@ -7,7 +7,8 @@ import { z } from 'zod';
  * person's own permissions, re-checking every step.
  */
 
-const ArtistId = z.string().regex(/^art_[a-z0-9]{12}$/);
+// Same pattern as @bmg/crypto's ARTIST_ID_PATTERN (real ids are art_ + 16).
+const ArtistId = z.string().regex(/^art_[a-z0-9]{10,32}$/);
 const Summary = z.string().trim().min(1).max(200);
 
 export const Action = z.discriminatedUnion('type', [
