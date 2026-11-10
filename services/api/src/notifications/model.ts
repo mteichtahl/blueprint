@@ -61,6 +61,17 @@ export type DomainEvent =
       topics?: string[];
       artistName?: string;
     }
+  | {
+      /** A comment on a to-do's thread (rev 7): the other side hears about it. */
+      type: 'todo.commented';
+      artistId: string;
+      todoId: string;
+      title: string;
+      authorSub: string;
+      authorName: string;
+      byRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+      bmgOnly?: boolean;
+    }
   | { type: 'connector.reminder'; artistId: string }
   | { type: 'connector.needsReauth'; connectorId: string; label: string; artistId?: string }
   | {
@@ -74,7 +85,7 @@ export type DomainEvent =
 
 export interface Draft {
   /** In-app and email category; preferences can turn email off per category later. */
-  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector';
+  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector' | 'todo';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
@@ -182,6 +193,24 @@ export function plan(
           link: 'gigs',
         },
       };
+    case 'todo.commented': {
+      // Artist ↔ Blueprint threads: the artist hears from Blueprint, and
+      // Blueprint (staff on this artist) from the artist and each other.
+      // BMG-only to-dos never reach the artist.
+      const bmg = everyone.filter((r) => isBmg(r) && bmgFor(r, [e.artistId]));
+      const to =
+        e.byRole === 'artist' ? bmg : [...(e.bmgOnly ? [] : artistsOf([e.artistId])), ...bmg];
+      return {
+        to: to.filter((r) => r.sub !== e.authorSub),
+        draft: {
+          kind: 'todo',
+          title: `${e.authorName} commented on a to-do`,
+          body: `“${e.title}”`,
+          link: 'todos',
+          throttleKey: `todo-${e.todoId}`,
+        },
+      };
+    }
     case 'connector.reminder':
       return {
         to: artistsOf([e.artistId]),
@@ -263,6 +292,7 @@ const EYEBROW: Record<Draft['kind'], string> = {
   file: 'Upload',
   gig: 'Gig help',
   connector: 'Connectors',
+  todo: 'To-do',
 };
 
 /** The notification as a BMG-branded email (the shared layout in `@bmg/email`). */

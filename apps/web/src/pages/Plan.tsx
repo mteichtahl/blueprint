@@ -14,8 +14,15 @@ import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
 import { MarkdownEditor, MarkdownView } from '../components/Markdown.tsx';
 import { Bar, Button, Card, Field, Notice, Tag, TextArea } from '../components/ui.tsx';
+import { PlanTimeline } from '../components/PlanTimeline.tsx';
 
 const MEASURES: MeasureId[] = ['M1', 'M2', 'M3', 'M4'];
+const fmtDay = (d: string) =>
+  new Date(`${d}T00:00:00`).toLocaleDateString('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 const MAX_STAGES = 12;
 const uid = () => Math.random().toString(36).slice(2, 10);
 const STATUS = {
@@ -47,7 +54,11 @@ function phaseFrom(stage: {
 
 /** Plan section tabs: outcome, one per stage, the alignment check (and "add stage" while editing). */
 type Section =
-  { kind: 'outcome' } | { kind: 'phase'; id: string } | { kind: 'gaps' } | { kind: 'add' };
+  | { kind: 'outcome' }
+  | { kind: 'phase'; id: string }
+  | { kind: 'timeline' }
+  | { kind: 'gaps' }
+  | { kind: 'add' };
 const sameSection = (a: Section, b: Section) =>
   a.kind === b.kind && (a.kind !== 'phase' || (b.kind === 'phase' && a.id === b.id));
 
@@ -62,9 +73,12 @@ export function PlanTab({
   token,
   artistId,
   canEdit,
+  artistName = 'Artist',
   autoStart = false,
   onChanged,
 }: {
+  /** For the PDF export's title and file name. */
+  artistName?: string;
   cfg: AppConfig;
   token: string;
   artistId: string;
@@ -79,6 +93,7 @@ export function PlanTab({
   const [section, setSection] = useState<Section>({ kind: 'outcome' });
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -175,6 +190,7 @@ export function PlanTab({
     })),
     ...(data.exists || canEdit
       ? [
+          { section: { kind: 'timeline' as const }, key: 'timeline', label: 'Timeline' },
           {
             section: { kind: 'gaps' as const },
             key: 'gaps',
@@ -249,6 +265,17 @@ export function PlanTab({
           );
         })()}
 
+      {current.kind === 'timeline' && (
+        <Card title={<span className="eyebrow">Timeline</span>}>
+          {editing && (
+            <span className="src">
+              Showing your unsaved dates. Set them on each stage&apos;s tab.
+            </span>
+          )}
+          <PlanTimeline phases={plan.phases} canEdit={canEdit} />
+        </Card>
+      )}
+
       {current.kind === 'gaps' && (
         <Card title={<span className="eyebrow">Alignment check</span>}>
           {editing && (
@@ -279,6 +306,27 @@ export function PlanTab({
         />
       )}
 
+      {data.exists && !editing && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="ghost"
+            disabled={exporting}
+            onClick={() => {
+              setExporting(true);
+              setError(null);
+              void import('../lib/planPdf.ts')
+                .then(({ exportPlanPdf }) =>
+                  exportPlanPdf({ artistName, plan: data.plan, gaps: data.gaps }),
+                )
+                .catch((e) => setError(`Couldn't make the PDF: ${(e as Error).message}`))
+                .finally(() => setExporting(false));
+            }}
+          >
+            {exporting ? 'Making the PDF…' : 'Export to PDF'}
+          </Button>
+          <span className="src">The whole plan, with the timeline.</span>
+        </div>
+      )}
       {canEdit && (
         <div className="flex flex-wrap items-center gap-3">
           {editing ? (
@@ -411,6 +459,49 @@ function PhaseSection({
           </div>
         )
       )}
+      {editing ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field
+            label="Stage starts"
+            type="date"
+            value={phase.start ?? ''}
+            onChange={(e) =>
+              edit((ph) => {
+                const next = { ...ph };
+                if (e.target.value) next.start = e.target.value;
+                else delete next.start;
+                return next;
+              })
+            }
+          />
+          <Field
+            label="Stage ends"
+            type="date"
+            value={phase.end ?? ''}
+            min={phase.start}
+            onChange={(e) =>
+              edit((ph) => {
+                const next = { ...ph };
+                if (e.target.value) next.end = e.target.value;
+                else delete next.end;
+                return next;
+              })
+            }
+            {...(phase.start && phase.end && phase.end < phase.start
+              ? { hint: "A stage can't end before it starts" }
+              : {})}
+          />
+        </div>
+      ) : (
+        (phase.start || phase.end) && (
+          <span className="src">
+            {[phase.start, phase.end]
+              .filter(Boolean)
+              .map((d) => fmtDay(d!))
+              .join(' – ')}
+          </span>
+        )
+      )}
       <ul className="m-0 flex list-none flex-col p-0">
         {phase.milestones.map((m, mi) => (
           <li key={m.id} className="li text-[15px]">
@@ -422,7 +513,39 @@ function PhaseSection({
               aria-label={`Milestone "${m.title}" done`}
               onChange={() => onTick(mi)}
             />
-            <span className={m.done ? 'text-muted-foreground line-through' : ''}>{m.title}</span>
+            {editing ? (
+              <MilestoneTitle
+                title={m.title}
+                onChange={(title) =>
+                  edit((ph) => {
+                    ph.milestones[mi] = { ...ph.milestones[mi]!, title };
+                    return ph;
+                  })
+                }
+              />
+            ) : (
+              <span className={m.done ? 'text-muted-foreground line-through' : ''}>
+                {m.title}
+                {m.due && <span className="src"> · due {fmtDay(m.due)}</span>}
+              </span>
+            )}
+            {editing && (
+              <input
+                type="date"
+                aria-label={`Due date for ${m.title}`}
+                className="min-h-9 rounded-md border border-input bg-white px-2 text-[14px]"
+                value={m.due ?? ''}
+                onChange={(e) =>
+                  edit((ph) => {
+                    const ms = { ...ph.milestones[mi]! };
+                    if (e.target.value) ms.due = e.target.value;
+                    else delete ms.due;
+                    ph.milestones[mi] = ms;
+                    return ph;
+                  })
+                }
+              />
+            )}
             <span className="ml-auto flex gap-1">
               {MEASURES.map((id) =>
                 editing ? (
@@ -501,6 +624,27 @@ function PhaseSection({
         </>
       )}
     </Card>
+  );
+}
+
+/**
+ * Edit a milestone's name in place (rev 7). An empty name isn't kept: the
+ * field goes back to the last name on blur.
+ */
+function MilestoneTitle({ title, onChange }: { title: string; onChange: (t: string) => void }) {
+  const [v, setV] = useState(title);
+  return (
+    <input
+      aria-label={`Milestone name: ${title}`}
+      className="min-h-9 min-w-0 flex-1 rounded-md border border-input bg-white px-2 text-[15px]"
+      maxLength={200}
+      value={v}
+      onChange={(e) => {
+        setV(e.target.value);
+        if (e.target.value.trim()) onChange(e.target.value.trim());
+      }}
+      onBlur={() => !v.trim() && setV(title)}
+    />
   );
 }
 

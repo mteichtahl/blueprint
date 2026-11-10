@@ -61,6 +61,7 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
 /**
  * The REST API for one environment (design 7.2). Phase 2 routes:
  *   GET  /me                    who you are, step-up state, latest consent
+ *   PATCH /me                   your job title (Blueprint people; artists are "Artist")
  *   GET  /consent, POST /consent  append-only consent ledger (F1 step 4)
  *   POST /step-up/totp/setup|verify   app-level MFA for social sign-ins (6.2)
  *   POST /artists               admin invite → onboarding (F1), fresh step-up
@@ -130,7 +131,7 @@ export class ApiStack extends BmgStack {
       USER_POOL_ID: props.userPool.userPoolId,
       WEB_CLIENT_ID_PARAM: names.ssm(cfg, env, 'web/client-id'),
     });
-    const me = fn('Me', 'me', 'GET /me');
+    const me = fn('Me', 'me', 'GET and PATCH /me');
     const consent = fn('Consent', 'consent', 'consent ledger');
     const stepUp = fn('StepUp', 'step-up', 'TOTP step-up for social sign-in', {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
@@ -302,6 +303,7 @@ export class ApiStack extends BmgStack {
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
     });
     const gigsEvents = fn('Events', 'events', 'artist gigs and Blueprint events');
+    const addressBook = fn('AddressBook', 'address-book', 'shared contacts and venues');
     const prompts = fn('Prompts', 'prompts', 'Settings - AI prompts: drafts, versions, publish');
     // ── Assistant (design 10, F4) ──
     const aiChat = new BmgFunction(this, 'AiChat', {
@@ -649,8 +651,24 @@ export class ApiStack extends BmgStack {
       [main],
     );
     allow(newsroom, 'Regenerate', ['lambda:InvokeFunction'], [props.newsroomDraftArn]);
+    allow(
+      addressBook,
+      'AddressBookItems',
+      [
+        'dynamodb:GetItem',
+        'dynamodb:Query',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
+      ],
+      [main],
+    );
+    putEvents(addressBook);
     putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
+    // Job title (rev 7) lives on USER#<sub> / PROFILE.
+    allow(me, 'ReadProfile', ['dynamodb:GetItem'], [main]);
+    props.platformKey.grant(me, 'kms:Decrypt');
     new Rule(this, 'AiConsentChanges', {
       eventBus: props.bus,
       description: "Keep each artist's current AI choice in step with the consent ledger",
@@ -765,6 +783,7 @@ export class ApiStack extends BmgStack {
           'message.created',
           'file.rejected',
           'gig.helpRequested',
+          'todo.commented',
           'connector.reminder',
           'connector.needsReauth',
         ],
@@ -859,6 +878,7 @@ export class ApiStack extends BmgStack {
       aiActions,
       aiConsent,
       newsroom,
+      addressBook,
     ]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
@@ -878,6 +898,7 @@ export class ApiStack extends BmgStack {
       aiConsent,
       me,
       newsroom,
+      addressBook,
     ]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
@@ -987,6 +1008,7 @@ export class ApiStack extends BmgStack {
       });
     };
     route('GET', '/me', me);
+    route('PATCH', '/me', me);
     route('GET', '/consent', consent);
     route('POST', '/consent', consent);
     route('POST', '/step-up/totp/setup', stepUp);
@@ -1003,6 +1025,9 @@ export class ApiStack extends BmgStack {
     route('POST', '/artists/{artistId}/todos', workspace);
     route('PATCH', '/artists/{artistId}/todos/{todoId}', workspace);
     route('GET', '/todos', workspace);
+    route('GET', '/artists/{artistId}/todos/{todoId}/comments', workspace);
+    route('POST', '/artists/{artistId}/todos/{todoId}/comments', workspace);
+    route('DELETE', '/artists/{artistId}/todos/{todoId}/comments/{commentId}', workspace);
     route('GET', '/plan-stages', workspace);
     route('POST', '/plan-stages', workspace);
     route('PUT', '/plan-stages/{stageId}', workspace);
@@ -1055,6 +1080,17 @@ export class ApiStack extends BmgStack {
       authorizer,
       requestValidator: validator,
     });
+    // Contacts (and venues): one function under proxy resources, to keep the stack small.
+    for (const root of ['contacts', 'venues']) {
+      const res = this.api.root.addResource(root);
+      res.addMethod('ANY', integrationFor(addressBook), {
+        authorizer,
+        requestValidator: validator,
+      });
+      res
+        .addResource('{proxy+}')
+        .addMethod('ANY', integrationFor(addressBook), { authorizer, requestValidator: validator });
+    }
     route('GET', '/connectors', connectors);
     route('POST', '/connectors/callback', connectors);
     route('GET', '/connectors/apps', connectors);

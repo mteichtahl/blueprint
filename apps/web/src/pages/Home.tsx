@@ -13,6 +13,8 @@ import type { FileItem } from '../lib/files.ts';
 import { overallProgress, phaseProgress } from '../lib/plan.ts';
 import { hasPendingCallback } from '../lib/connectors.ts';
 import { BmgConnectors, MyConnectors } from './Connectors.tsx';
+import { Contacts } from './Contacts.tsx';
+import { Venues } from './Venues.tsx';
 import { ArtistStats, Insights } from './Insights.tsx';
 import {
   ArtistShell,
@@ -83,6 +85,7 @@ function greeting(): string {
 
 function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme();
+  const [jobTitle, setJobTitle] = useState(me.jobTitle ?? '');
   // Back from a vendor's sign-in page: open Connectors to finish connecting.
   const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
@@ -115,6 +118,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     submit: 'review',
     gigs: 'gigs',
     connectors: 'connectors',
+    todos: 'todos',
   };
   const goTo = (link: string) =>
     link.startsWith('chat:')
@@ -175,6 +179,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           badgeTone: 'w',
         },
         { id: 'insights', label: 'Insights', icon: 'chart' },
+        { id: 'contacts', label: 'Contacts', icon: 'users' },
+        { id: 'venues', label: 'Venues', icon: 'mic' },
       ],
     },
     {
@@ -199,7 +205,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       current={view}
       onNavigate={setView}
       userName={userName}
-      roleLabel={ROLE_LABEL[me.role]}
+      roleLabel={jobTitle || ROLE_LABEL[me.role]}
       theme={theme}
       onTheme={setTheme}
       onSignOut={onSignOut}
@@ -284,11 +290,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           <Profile
             cfg={cfg}
             token={token}
-            me={me}
+            me={{ ...me, jobTitle }}
             userName={userName}
             theme={theme}
             onTheme={setTheme}
             onSignOut={onSignOut}
+            onJobTitle={setJobTitle}
           />
         </>
       )}
@@ -352,6 +359,26 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             artists={artists}
             onOpenArtist={(id) => setView(`artist:${id}`)}
           />
+        </>
+      )}
+      {view === 'contacts' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Contacts"
+            sub="Everyone Blueprint and its artists work with. Artists can pick and add; you manage the list."
+          />
+          <Contacts cfg={cfg} token={token} isBmg />
+        </>
+      )}
+      {view === 'venues' && (
+        <>
+          <PageHeader
+            eyebrow="Shared with artists"
+            title="Venues"
+            sub="Capacity, backline, and who to call. Managers and bookers live in Contacts."
+          />
+          <Venues cfg={cfg} token={token} isBmg />
         </>
       )}
       {view === 'events' && <Events cfg={cfg} token={token} />}
@@ -841,7 +868,8 @@ type ArtistView =
   | 'plan'
   | 'profile'
   | 'connectors'
-  | 'stats';
+  | 'stats'
+  | 'contacts';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
@@ -851,7 +879,13 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   useDeepLink((link) => {
     if (link.startsWith('chat:')) setChatTarget(link.slice('chat:'.length) || null);
     setView(
-      link.startsWith('chat:') ? 'chat' : link === 'submit' || link === 'library' ? link : 'home',
+      link.startsWith('chat:')
+        ? 'chat'
+        : link === 'submit' || link === 'library'
+          ? link
+          : link === 'todos'
+            ? 'todo'
+            : 'home',
     );
   });
   const [view, setView] = useState<ArtistView>(hasPendingCallback() ? 'connectors' : 'home');
@@ -876,15 +910,18 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
     connectors: { eyebrow: 'Profile', title: 'My connectors' },
     stats: { eyebrow: 'Socials', title: 'My stats' },
+    contacts: { eyebrow: 'Shared by Blueprint', title: 'Contacts & venues' },
   };
   const [libTab, setLibTab] = useState<'files' | 'assets'>('files');
+  const [bookTab, setBookTab] = useState<'contacts' | 'venues'>('contacts');
   const back =
     view === 'brand' ||
     view === 'submit' ||
     view === 'plan' ||
     view === 'profile' ||
     view === 'connectors' ||
-    view === 'stats';
+    view === 'stats' ||
+    view === 'contacts';
 
   return (
     <ArtistShell
@@ -925,7 +962,9 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                             ? 'library'
                             : n.link === 'connectors'
                               ? 'connectors'
-                              : 'home',
+                              : n.link === 'todos'
+                                ? 'todo'
+                                : 'home',
                     );
                   }}
                 />
@@ -1005,9 +1044,35 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       {view === 'submit' && (
         <ArtistSubmissions cfg={cfg} token={token} artistId={artistId} isBmg={false} />
       )}
-      {view === 'plan' && <PlanTab cfg={cfg} token={token} artistId={artistId} canEdit={false} />}
+      {view === 'plan' && (
+        <PlanTab
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          artistName={userName}
+          canEdit={false}
+        />
+      )}
       {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} />}
       {view === 'connectors' && <MyConnectors cfg={cfg} token={token} artistId={artistId} />}
+      {view === 'contacts' && (
+        <>
+          <Chips
+            label="Contacts or venues"
+            value={bookTab}
+            onChange={setBookTab}
+            options={[
+              { id: 'contacts', label: 'Contacts' },
+              { id: 'venues', label: 'Venues' },
+            ]}
+          />
+          {bookTab === 'contacts' ? (
+            <Contacts cfg={cfg} token={token} isBmg={false} compact />
+          ) : (
+            <Venues cfg={cfg} token={token} isBmg={false} compact />
+          )}
+        </>
+      )}
       {view === 'stats' && (
         <>
           <ArtistStats cfg={cfg} token={token} artistId={artistId} name={userName} compact />
@@ -1193,6 +1258,25 @@ function ArtistHome({
           onClick={() => onNavigate('connectors')}
         >
           Connect Instagram, TikTok, Spotify and your calendar →
+        </button>
+      </section>
+      <section className="card gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="eyebrow">Contacts & venues</span>
+          <button
+            type="button"
+            className="ml-auto text-sm font-bold underline"
+            onClick={() => onNavigate('contacts')}
+          >
+            Open
+          </button>
+        </div>
+        <button
+          type="button"
+          className="text-left text-[15px]"
+          onClick={() => onNavigate('contacts')}
+        >
+          Venues, bookers and crew, shared with Blueprint →
         </button>
       </section>
       <Button
