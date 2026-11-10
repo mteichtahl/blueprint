@@ -30,6 +30,15 @@ import {
   type VenuePatchInput,
 } from '../address-book/model.ts';
 import { allContacts, saveContact } from '../address-book/store.ts';
+import { findVenueLogo } from '../address-book/logo-fetch.ts';
+import {
+  LogoLookup,
+  LogoUpload,
+  logoVersion,
+  parseLogoDataUrl,
+  venueLogoSk,
+  type VenueLogoMeta,
+} from '../address-book/logo.ts';
 import { newId } from '../workspace/model.ts';
 import {
   audit,
@@ -107,6 +116,12 @@ async function saveVenue(v: Venue, condition?: 'new' | 'exists') {
   );
 }
 
+async function deleteVenueLogo(id: string) {
+  await db.send(
+    new DeleteCommand({ TableName: table(), Key: { PK: VENUES_PK, SK: venueLogoSk(id) } }),
+  );
+}
+
 /** The manager and booker must be real, current contacts. */
 async function checkContacts(ids: (string | null | undefined)[]): Promise<Map<string, Contact>> {
   const contacts = new Map((await allContacts()).map((c) => [c.contactId, c]));
@@ -170,6 +185,30 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
   const { route, id } = routeOf(event.httpMethod, event.path ?? '');
   const bmg = isBmg(principal);
   const now = new Date().toISOString();
+
+  // "Automatically get logo": look on a website for a venue's logo. Nothing is
+  // saved here; the browser shows it, shrinks it and saves it with the venue.
+  if (route === 'POST /venues/:id' && id === 'logo-lookup') {
+    ensure(principal, 'write');
+    const { url } = parseBody(event, LogoLookup);
+    const found = await findVenueLogo(url);
+    await audit(event, 'venue.logoLookup', found ? 'success' : 'failed', {
+      host: (() => {
+        try {
+          return new URL(/^https?:/i.test(url) ? url : `https://${url}`).hostname;
+        } catch {
+          return '';
+        }
+      })(),
+      ...(found ? { why: found.why } : {}),
+    });
+    return json(
+      200,
+      found
+        ? { found: true, dataUrl: found.dataUrl, sourceUrl: found.sourceUrl }
+        : { found: false },
+    );
+  }
 
   switch (route) {
     case 'GET /contacts': {
@@ -328,8 +367,82 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
           ConditionExpression: 'attribute_exists(PK)',
         }),
       );
+      await deleteVenueLogo(existing.venueId);
       await audit(event, 'venue.delete', 'success', { venueId: existing.venueId });
       return json(200, { deleted: existing.venueId });
+    }
+
+    // ── Venue logos ──
+    case 'GET /venues/:id/logo': {
+      ensure(principal, 'read');
+      const v = await loadVenue(idParam(id));
+      if ((v.archived && !bmg) || !v.logo) throw new HttpError(404, 'No logo');
+      const res = await db.send(
+        new GetCommand({ TableName: table(), Key: { PK: VENUES_PK, SK: venueLogoSk(v.venueId) } }),
+      );
+      if (!res.Item) throw new HttpError(404, 'No logo');
+      const out = json(200, { dataUrl: res.Item.dataUrl, version: v.logo.version });
+      // The web app asks with ?v=<version>, so a cached copy is never stale.
+      out.headers = { ...out.headers, 'cache-control': 'private, max-age=31536000, immutable' };
+      return out;
+    }
+
+    case 'PUT /venues/:id/logo': {
+      const existing = await loadVenue(idParam(id));
+      ensure(principal, 'write', existing.createdBy);
+      const body = parseBody(event, LogoUpload);
+      let bytes: Buffer;
+      let contentType: string;
+      try {
+        ({ bytes, contentType } = parseLogoDataUrl(body.dataUrl));
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+      const sourceUrl =
+        body.source === 'website' && body.sourceUrl && /^https?:\/\//i.test(body.sourceUrl)
+          ? body.sourceUrl
+          : undefined;
+      const logo: VenueLogoMeta = {
+        version: logoVersion(bytes),
+        source: body.source,
+        ...(sourceUrl ? { sourceUrl } : {}),
+        updatedAt: now,
+      };
+      await db.send(
+        new PutCommand({
+          TableName: table(),
+          Item: {
+            PK: VENUES_PK,
+            SK: venueLogoSk(existing.venueId),
+            type: 'venue-logo',
+            venueId: existing.venueId,
+            contentType,
+            dataUrl: `data:${contentType};base64,${bytes.toString('base64')}`,
+            ...logo,
+          },
+        }),
+      );
+      const saved: Venue = { ...existing, logo, updatedAt: now, updatedBy: principal.sub };
+      await saveVenue(saved, 'exists');
+      await audit(event, 'venue.logo', 'success', {
+        venueId: saved.venueId,
+        source: logo.source,
+        bytes: bytes.length,
+      });
+      const contacts = new Map((await allContacts()).map((c) => [c.contactId, c]));
+      return json(200, venueFor(saved, bmg, saved.createdBy === principal.sub, contacts));
+    }
+
+    case 'DELETE /venues/:id/logo': {
+      const existing = await loadVenue(idParam(id));
+      ensure(principal, 'write', existing.createdBy);
+      await deleteVenueLogo(existing.venueId);
+      const saved: Venue = { ...existing, updatedAt: now, updatedBy: principal.sub };
+      delete saved.logo;
+      await saveVenue(saved, 'exists');
+      await audit(event, 'venue.logoRemove', 'success', { venueId: saved.venueId });
+      const contacts = new Map((await allContacts()).map((c) => [c.contactId, c]));
+      return json(200, venueFor(saved, bmg, saved.createdBy === principal.sub, contacts));
     }
 
     default:
