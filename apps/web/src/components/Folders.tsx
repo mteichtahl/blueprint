@@ -392,9 +392,16 @@ export function MoveDialog({
   items: ItemRef[];
   to?: string | null;
   onClose: () => void;
-  onMoved: () => void;
+  /** Done: where it went (null is the top) and that folder's name. */
+  onMoved: (to: string | null, name: string) => void;
 }) {
   const { list, error: loadError } = useFolders(cfg, token, base);
+  // Callers often pass a new array on every render. Key the check on what is
+  // being moved, so a redraw around the dialog doesn't restart it (which
+  // turned "Move to …" off again while it reloaded).
+  const itemsKey = items.map((i) => `${i.kind}:${i.id}`).join(',');
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const [at, setAt] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null | undefined>(preset);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -410,17 +417,21 @@ export function MoveDialog({
     if (target === undefined) return;
     setSummary(null);
     setError(null);
-    moveItems(cfg, token, base, items, target, true)
-      .then(setSummary)
-      .catch((e) => setError((e as Error).message));
-  }, [cfg, token, base, items, target]);
+    let live = true;
+    moveItems(cfg, token, base, itemsRef.current, target, true)
+      .then((s) => live && setSummary(s))
+      .catch((e) => live && setError((e as Error).message));
+    return () => {
+      live = false;
+    };
+  }, [cfg, token, base, itemsKey, target]);
 
   async function go() {
     if (target === undefined) return;
     setBusy(true);
     try {
       await moveItems(cfg, token, base, items, target, false);
-      onMoved();
+      onMoved(target, target === null ? rootLabel : (byId.get(target)?.name ?? 'the folder'));
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -1356,9 +1367,11 @@ export function FolderBrowser({
           items={dialog.items}
           to={dialog.to}
           onClose={() => setDialog(null)}
-          onMoved={() => {
+          onMoved={(to, name) => {
             stopSelecting();
-            setNotice('Moved.');
+            // Open where it went, so the moved items are in view.
+            onPlace(to);
+            setNotice(`Moved to “${name}”.`);
             refresh();
           }}
         />
