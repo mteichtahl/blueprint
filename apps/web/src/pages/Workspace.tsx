@@ -65,7 +65,7 @@ export function PlanStrip({
     <section className="card gap-3 px-5 py-4">
       <div className="flex flex-wrap items-center gap-3">
         <span className="eyebrow">Plan outcome</span>
-        <b className="line-clamp-2 min-w-[260px] flex-1">
+        <b className="line-clamp-2 min-w-[min(260px,100%)] flex-1">
           {markdownToText(plan.plan.outcome) || (
             <span className="font-normal text-muted-foreground">No outcome set yet</span>
           )}
@@ -130,7 +130,7 @@ export function ArtistWorkspace({
     <>
       <header className="flex flex-wrap items-center gap-[18px]">
         <Avatar name={artist.displayName} size={64} />
-        <div className="flex min-w-[300px] flex-1 flex-col gap-1">
+        <div className="flex min-w-[min(300px,100%)] flex-1 flex-col gap-1">
           <span className="eyebrow">Artist workspace</span>
           <h1 className="t m-0 text-[38px] leading-tight">{artist.displayName}</h1>
           <p className="m-0 text-[17px] text-muted-foreground">
@@ -257,7 +257,7 @@ function WorkspaceOverview({
   return (
     <div className="flex flex-wrap items-stretch gap-5">
       <Card
-        className="min-w-[360px] flex-[2_1_360px]"
+        className="min-w-[min(360px,100%)] flex-[2_1_360px]"
         title={<h2 className="t text-[22px]">Waiting for your review</h2>}
         action={
           <button
@@ -287,7 +287,7 @@ function WorkspaceOverview({
         )}
       </Card>
       <Card
-        className="min-w-[300px] flex-[1_1_300px]"
+        className="min-w-[min(300px,100%)] flex-[1_1_300px]"
         title={<h2 className="t text-[22px]">To-do</h2>}
         action={
           <>

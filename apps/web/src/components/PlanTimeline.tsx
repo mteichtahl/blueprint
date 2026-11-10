@@ -155,7 +155,7 @@ export function PlanTimeline({
         ]}
       />
       <div
-        className="-mx-5 overflow-x-auto px-5"
+        className="relative -mx-5 overflow-x-auto px-5"
         tabIndex={0}
         aria-label="Plan timeline, scrolls sideways"
       >

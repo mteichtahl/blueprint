@@ -261,3 +261,19 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **No Docker, so ZAP comes from its GitHub release,** pinned by version and SHA-256. The load test is plain Node rather than k6, so there's no other binary to pin.
 - **Scans are unauthenticated.** Per-role access is covered by the authorisation matrix in CI. A staging scanner user would need a TOTP secret on the runner, which isn't worth the exposure for this app.
 - **New finding W5:** the API WAF rate rule counts CloudFront edge addresses, not users. It gets fixed with the edge WAF when the custom domain arrives.
+
+## Notes: Phone and installed-app layout (10 Nov 2026)
+
+- **No sideways scrolling, no pinch zoom on phones.** `html`/`body` clip horizontal overflow as a safety net, but the causes are fixed at the source:
+  - Wide tables scroll in their own box. That box is `relative` (otherwise its absolutely positioned screen-reader labels escape and widen the page) and `w-0 min-w-full` (so its width never counts towards its parents' size).
+  - Large minimum widths become `min(Npx, 100%)`.
+  - Long words and links wrap (`overflow-wrap: break-word` in `main`).
+  - Zoom being off is a recorded WCAG 1.4.4 exception; see [accessibility.md](accessibility.md).
+- **The installed app uses the whole screen.**
+  - `viewport-fit=cover` and a `black-translucent` status bar: the navy header runs under the status bar and notch, and the app pads itself with `env(safe-area-inset-*)`.
+  - The artist app is a frame exactly the screen's height (`100dvh`): its header and tab bar never scroll away, only the content does, and each tab starts at the top.
+  - Chat fills the space between them, with the composer pinned above the tabs.
+  - On phones, Blueprint's top bar is navy, so the status bar's white text sits on it, and it stays put.
+  - No rubber-band bounce or pull-to-refresh; no tap delay; app chrome isn't selectable.
+- **The phone menu is a proper dialog:** a close button, Escape, focus moved in and back out, Tab kept inside, the page behind locked, a slide-in that respects reduced motion, and it closes itself when the screen widens to desktop.
+- **The layout check is a Chrome harness** (the app with long sample data, at 320, 375 and 414px). It isn't in CI, because CI runners have no browser.

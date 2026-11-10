@@ -37,6 +37,25 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+  /* Nothing may scroll the page sideways. clip (not hidden) keeps sticky headers working. */
+  overflow-x: clip;
+  max-width: 100%;
+}
+html {
+  /* No pinch or double-tap zoom: the app sizes itself (see index.html and lib/noZoom.ts). */
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+/* A collapsible section's content box would otherwise grow to its widest child
+   (a table in its own scroll box) and widen the page. */
+details::details-content {
+  min-width: 0;
+}
+/* Long words, links and file names wrap instead of pushing past the edge. */
+main {
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 /* ───── BMG design canvas patterns (bmg-ui.css, screens doc rev 4) ───── */
@@ -838,11 +857,10 @@ html {
   }
   .wa-filters {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 0 12px 8px;
-    overflow-x: auto;
     flex: none;
-    scrollbar-width: none;
   }
   .wa-pill {
     min-height: 32px;
@@ -1869,4 +1887,115 @@ textarea,
 }
 .dark .eyebrow {
   color: #e8726e;
+}
+
+/* Phone menu: slides in over a dimmed page. */
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+.drawer {
+  animation: drawer-in 0.2s ease-out;
+}
+.drawer-scrim {
+  animation: scrim-in 0.2s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer,
+  .drawer-scrim {
+    animation: none;
+  }
+}
+
+/* ───── Phones and the installed app (PWA) ─────
+   The app fills the screen, under the status bar and notch (viewport-fit=cover),
+   and pads itself with the safe-area insets. Navigation never scrolls away. */
+html,
+body {
+  /* No rubber-band bounce or pull-to-refresh tearing the app chrome. */
+  overscroll-behavior: none;
+}
+body {
+  -webkit-tap-highlight-color: transparent;
+}
+/* No 300 ms tap delay or double-tap zoom on controls. */
+button,
+a,
+input,
+select,
+textarea,
+label,
+[role='button'],
+[role='tab'] {
+  touch-action: manipulation;
+}
+/* App chrome isn't selectable text (long-press shouldn't select a tab label). */
+nav,
+.tabbar,
+.topbar,
+.ptab,
+.nav {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Artist app: a frame exactly the height of the screen. */
+.app-frame {
+  height: 100vh;
+  height: 100dvh;
+}
+/* Chat fills the space between the header and the tabs, edge to edge, with the
+   composer pinned above the tabs (no page scrolling to reach it). */
+.app-frame main:has(.wa-phone) {
+  padding: 0;
+  overflow: hidden;
+}
+.app-frame main:has(.wa-phone) > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-frame .wa-phone {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Blueprint on a phone: the top bar is navy like the artist header, so the
+   status bar's white text sits on it, and it stays put while the page scrolls. */
+@media (max-width: 1023px) {
+  .topbar {
+    padding-top: env(safe-area-inset-top);
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    min-height: calc(60px + env(safe-area-inset-top));
+    background: #011935;
+    border-bottom: 0;
+    backdrop-filter: none;
+  }
+  .dark .topbar {
+    background: #011935;
+  }
+  .topbar .ibtn {
+    color: #f1f4f7;
+  }
+  .topbar .ibtn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .topbar .dot {
+    border-color: #011935;
+  }
+  html {
+    scroll-padding-top: calc(72px + env(safe-area-inset-top));
+  }
 }

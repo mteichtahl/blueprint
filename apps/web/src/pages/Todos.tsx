@@ -75,7 +75,7 @@ function DueTag({ t }: { t: Todo }) {
       </span>
     );
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-1.5 whitespace-nowrap">
       <Tag tone={!t.done && t.due < today() ? 'c' : 's'}>
         {shortDate(t.due)}
         {t.dueTime ? ` · ${t.dueTime}` : ''}
@@ -654,7 +654,7 @@ function PhoneTodos({
     ) : (
       <div
         key={t.todoId}
-        className={`flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs ${coral ? 'border-l-[3px] border-l-accent' : ''}`}
+        className={`flex min-h-[52px] flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs ${coral ? 'border-l-[3px] border-l-accent' : ''}`}
       >
         <input
           className="chk"
@@ -663,7 +663,11 @@ function PhoneTodos({
           aria-label={`Mark "${t.title}" done`}
           onChange={() => onToggle(t)}
         />
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onEdit(t)}>
+        <button
+          type="button"
+          className="min-w-[min(11rem,100%)] flex-1 text-left"
+          onClick={() => onEdit(t)}
+        >
           <b className={`block ${t.done ? 'text-muted-foreground line-through' : ''}`}>{t.title}</b>
           <span className="src">
             {t.source === 'feedback' ? 'From your feedback' : t.source === 'bmg' ? 'Blueprint' : ''}

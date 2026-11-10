@@ -213,7 +213,7 @@ export function PlanTab({
       <nav
         role="tablist"
         aria-label="Plan sections"
-        className="flex flex-wrap overflow-x-auto border-b border-input"
+        className="relative flex flex-wrap overflow-x-auto border-b border-input"
       >
         {tabs.map((t) => (
           <button

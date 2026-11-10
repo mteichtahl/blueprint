@@ -207,7 +207,7 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-end gap-3">
-      <div className="flex min-w-[280px] flex-1 flex-col gap-1.5">
+      <div className="flex min-w-[min(280px,100%)] flex-1 flex-col gap-1.5">
         <span className="eyebrow">{eyebrow}</span>
         <h1 className="t m-0 text-[34px] leading-tight">{title}</h1>
         {sub && <p className="m-0 text-base text-muted-foreground">{sub}</p>}
@@ -322,7 +322,10 @@ export function Icon({
 /** Data table wrapper: sits flush inside a card, as in the canvas (.dt). */
 export function DataTable({ children }: { children: ReactNode }) {
   return (
-    <div className="-mx-5 overflow-x-auto">
+    // A wide table scrolls in its own box instead of widening the page: w-0 +
+    // min-width keep its width out of its parents' size, and `relative` keeps
+    // its screen-reader-only labels (absolutely positioned) inside the box.
+    <div className="relative -mx-5 w-0 min-w-[calc(100%+2.5rem)] overflow-x-auto">
       <table className="dt">{children}</table>
     </div>
   );
