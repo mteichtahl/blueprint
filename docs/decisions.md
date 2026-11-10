@@ -254,3 +254,10 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - The dark-mode eyebrow is #E8726E.
   - Focus is a solid 2px outline, not a soft glow.
 - **No `eslint-plugin-jsx-a11y`:** it doesn't support ESLint 10 yet. The axe tests cover more anyway, because they check the rendered result.
+
+## Notes: Phase 6 staging scans (10 Nov 2026)
+
+- **ZAP and the load test run from a workflow** (`staging-scans.yml`) on the CI CodeBuild runner, with no AWS credentials. It runs weekly (baseline scan and load test) and on demand (the full active scan). Details are in [staging-scans.md](staging-scans.md).
+- **No Docker, so ZAP comes from its GitHub release,** pinned by version and SHA-256. The load test is plain Node rather than k6, so there's no other binary to pin.
+- **Scans are unauthenticated.** Per-role access is covered by the authorisation matrix in CI. A staging scanner user would need a TOTP secret on the runner, which isn't worth the exposure for this app.
+- **New finding W5:** the API WAF rate rule counts CloudFront edge addresses, not users. It gets fixed with the edge WAF when the custom domain arrives.

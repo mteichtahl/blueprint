@@ -23,4 +23,16 @@ export default tseslint.config(
     files: ['**/*.mjs', '**/*.js'],
     languageOptions: { globals: { process: 'readonly', console: 'readonly' } },
   },
+  {
+    // Node scripts for the staging scans and load test (Phase 6).
+    files: ['tools/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        fetch: 'readonly',
+        performance: 'readonly',
+        setTimeout: 'readonly',
+        AbortSignal: 'readonly',
+      },
+    },
+  },
 );
