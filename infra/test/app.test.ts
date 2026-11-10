@@ -477,6 +477,35 @@ describe('environment API', () => {
     prod!.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
   });
 
+  it('lets venue logo saves past the 8 KB WAF body limit, and only those', () => {
+    prod!.hasResourceProperties('AWS::WAFv2::WebACL', {
+      Rules: Match.arrayWith([
+        Match.objectLike({
+          Name: 'AWSManagedRulesCommonRuleSet',
+          Statement: {
+            ManagedRuleGroupStatement: Match.objectLike({
+              RuleActionOverrides: [{ Name: 'SizeRestrictions_BODY', ActionToUse: { Count: {} } }],
+            }),
+          },
+        }),
+        Match.objectLike({
+          Name: 'BodySizeLimit',
+          Action: { Block: {} },
+        }),
+      ]),
+    });
+    const acl = Object.values(prod!.findResources('AWS::WAFv2::WebACL'))[0]!;
+    const rule = acl.Properties.Rules.find((r: { Name: string }) => r.Name === 'BodySizeLimit');
+    const [size, exempt] = rule.Statement.AndStatement.Statements;
+    expect(size.SizeConstraintStatement).toMatchObject({ ComparisonOperator: 'GT', Size: 8192 });
+    const regex = new RegExp(
+      exempt.NotStatement.Statement.AndStatement.Statements[1].RegexMatchStatement.RegexString,
+    );
+    expect(regex.test('/v1/venues/abc123/logo')).toBe(true);
+    expect(regex.test('/v1/venues/abc123')).toBe(false);
+    expect(regex.test('/v1/venues/logo-lookup')).toBe(false);
+  });
+
   it('names API roles so the data-access role can trust them', () => {
     const names = Object.values(prod!.findResources('AWS::IAM::Role'))
       .map((r) => r.Properties.RoleName)

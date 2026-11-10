@@ -1170,11 +1170,24 @@ export class ApiStack extends BmgStack {
     );
 
     // ── Regional AWS WAF ──
-    const managed = (name: string, priority: number) => ({
+    const managed = (name: string, priority: number, countOnly: string[] = []) => ({
       name,
       priority,
       overrideAction: { none: {} },
-      statement: { managedRuleGroupStatement: { vendorName: 'AWS', name } },
+      statement: {
+        managedRuleGroupStatement: {
+          vendorName: 'AWS',
+          name,
+          ...(countOnly.length
+            ? {
+                ruleActionOverrides: countOnly.map((n) => ({
+                  name: n,
+                  actionToUse: { count: {} },
+                })),
+              }
+            : {}),
+        },
+      },
       visibilityConfig: {
         cloudWatchMetricsEnabled: true,
         sampledRequestsEnabled: true,
@@ -1202,8 +1215,61 @@ export class ApiStack extends BmgStack {
             metricName: 'RateLimitPerIp',
           },
         },
-        managed('AWSManagedRulesCommonRuleSet', 1),
+        // The common set blocks any body over 8 KB (SizeRestrictions_BODY). Venue
+        // logos are saved as a data URL in JSON, so that rule only counts here and
+        // the 8 KB limit is applied below to everything except PUT …/logo, whose
+        // handler caps the image itself (LOGO_MAX_BYTES).
+        managed('AWSManagedRulesCommonRuleSet', 1, ['SizeRestrictions_BODY']),
         managed('AWSManagedRulesKnownBadInputsRuleSet', 2),
+        {
+          name: 'BodySizeLimit',
+          priority: 3,
+          action: { block: {} },
+          statement: {
+            andStatement: {
+              statements: [
+                {
+                  sizeConstraintStatement: {
+                    fieldToMatch: { body: { oversizeHandling: 'MATCH' } },
+                    comparisonOperator: 'GT',
+                    size: 8192,
+                    textTransformations: [{ priority: 0, type: 'NONE' }],
+                  },
+                },
+                {
+                  notStatement: {
+                    statement: {
+                      andStatement: {
+                        statements: [
+                          {
+                            byteMatchStatement: {
+                              fieldToMatch: { method: {} },
+                              positionalConstraint: 'EXACTLY',
+                              searchString: 'PUT',
+                              textTransformations: [{ priority: 0, type: 'NONE' }],
+                            },
+                          },
+                          {
+                            regexMatchStatement: {
+                              fieldToMatch: { uriPath: {} },
+                              regexString: '/venues/[^/]+/logo$',
+                              textTransformations: [{ priority: 0, type: 'NONE' }],
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            sampledRequestsEnabled: true,
+            metricName: 'BodySizeLimit',
+          },
+        },
       ],
     });
     new CfnWebACLAssociation(this, 'WafAssociation', {
