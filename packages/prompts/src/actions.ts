@@ -80,3 +80,12 @@ export interface AgentReply {
   /** Names of the tools used, for the trace (never their inputs or outputs). */
   toolsUsed: string[];
 }
+
+/**
+ * Why a turn failed, from the agent (error name, plus an AWS service error's
+ * status and message, which name the action and resource). Never prompt or
+ * reply text, so it is safe to log and to show to an admin.
+ */
+export interface AgentFailure {
+  failure: { error: string; status?: number; detail?: string };
+}
