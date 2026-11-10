@@ -7,6 +7,7 @@ import {
   notifyOnEdit,
   phaseFromStage,
   PlanBody,
+  planSpan,
   reminderAt,
   reminderScheduleName,
   stageAppliesTo,
@@ -164,5 +165,39 @@ describe('custom plan stages', () => {
       ['Send', false],
     ]);
     expect(PlanBody.safeParse({ ...templatePlan(), phases: [phase] }).success).toBe(true);
+  });
+});
+
+describe('plan dates for the timeline (rev 7)', () => {
+  const phase = (over: Record<string, unknown> = {}) => ({
+    id: 'p1',
+    name: 'Foundations',
+    milestones: [{ id: 'm1', title: 'Shoot', due: '2026-11-20' }],
+    ...over,
+  });
+  const plan = (phases: unknown[]) => ({ outcome: '', measures: [], phases, version: 0 });
+
+  it('takes stage start and end and milestone due dates, all optional', () => {
+    expect(
+      PlanBody.safeParse(plan([phase({ start: '2026-11-01', end: '2026-11-30' })])).success,
+    ).toBe(true);
+    expect(PlanBody.safeParse(plan([{ id: 'p', name: 'X' }])).success).toBe(true);
+    expect(PlanBody.safeParse(plan([phase({ start: '1 Nov' })])).success).toBe(false);
+  });
+
+  it("won't let a stage end before it starts", () => {
+    const r = PlanBody.safeParse(plan([phase({ start: '2026-12-01', end: '2026-11-01' })]));
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0]?.message).toMatch(/end before it starts/);
+  });
+
+  it('spans the earliest to the latest date', () => {
+    expect(
+      planSpan([
+        { start: '2026-11-01', end: '2026-12-31', milestones: [{ due: '2027-01-15' }] },
+        { milestones: [{}] },
+      ]),
+    ).toEqual({ from: '2026-11-01', to: '2027-01-15' });
+    expect(planSpan([{ milestones: [] }])).toBeUndefined();
   });
 });
