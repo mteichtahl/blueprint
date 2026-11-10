@@ -38,7 +38,7 @@ export const CATEGORY: Record<AssetCategory, string> = {
   audio: 'Audio',
   other: 'Other',
 };
-const CATEGORY_ONE: Record<AssetCategory, string> = {
+export const CATEGORY_ONE: Record<AssetCategory, string> = {
   'press-photo': 'Press photo',
   artwork: 'Artwork',
   logo: 'Logo',

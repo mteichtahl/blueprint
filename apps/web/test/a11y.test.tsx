@@ -322,6 +322,37 @@ const props = (role: Me['role']) => ({
   onReauth: () => undefined,
 });
 
+/**
+ * Opens a workspace screen (rev 9): four tabs (Overview, Plan, Work, Files)
+ * with a section switch under each; Assets is a Type filter in Library and
+ * Chat is a side panel. Tab names may carry a count ("Work 2").
+ */
+async function openWorkspace(name: string) {
+  const tab = (n: string) =>
+    fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${n}( \\d+)?$`) }));
+  const path: Record<string, string[]> = {
+    Overview: ['Overview'],
+    Stats: ['Overview', 'Stats'],
+    Plan: ['Plan'],
+    'To-do': ['Plan', 'To-dos'],
+    Submissions: ['Work', 'Submissions'],
+    Gigs: ['Work', 'Gigs'],
+    Library: ['Files', 'Library'],
+    Assets: ['Files', 'Library'],
+    'Brand kit': ['Files', 'Brand kit'],
+  };
+  if (name === 'Chat') {
+    fireEvent.click(document.querySelector('[aria-controls="ws-chat"]')!);
+  } else {
+    for (const n of path[name]!) {
+      tab(n);
+      await settle();
+    }
+    if (name === 'Assets') fireEvent.click(screen.getByRole('button', { name: 'Assets' }));
+  }
+  await settle();
+}
+
 describe('WCAG 2.2 AA (axe-core)', () => {
   it('sign-in screen', async () => {
     render(<SignIn cfg={cfg} onSignedIn={() => undefined} />);
@@ -361,8 +392,7 @@ describe('WCAG 2.2 AA (axe-core)', () => {
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: tab }));
-    await settle();
+    await openWorkspace(tab);
     expect(await violations()).toEqual([]);
   });
 
@@ -450,8 +480,7 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: tab }));
-    await settle();
+    await openWorkspace(tab);
     expect(await violations()).toEqual([]);
   });
 
@@ -460,8 +489,7 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: 'Plan' }));
-    await settle();
+    await openWorkspace('Plan');
     const edit = screen.queryAllByRole('button', { name: /^Edit/ });
     if (edit.length) fireEvent.click(edit[0]!);
     await settle();
@@ -507,8 +535,7 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: 'Assets' }));
-    await settle();
+    await openWorkspace('Assets');
     expect(screen.getByRole('complementary', { name: 'Asset details' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
@@ -566,8 +593,7 @@ describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: 'To-do' }));
-    await settle();
+    await openWorkspace('To-do');
     expect(screen.getAllByRole('list', { name: 'To-dos' }).length).toBeGreaterThan(0);
     expect(await violations()).toEqual([]);
   });
@@ -577,8 +603,7 @@ describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: 'To-do' }));
-    await settle();
+    await openWorkspace('To-do');
     fireEvent.click(screen.getByRole('button', { name: /Edit "Book rehearsal"/ }));
     await settle();
     expect(screen.getByRole('dialog', { name: 'Edit to-do' })).toBeTruthy();

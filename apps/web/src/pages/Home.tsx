@@ -45,7 +45,7 @@ import { useDeepLink } from '../lib/push.ts';
 import { AssetLibrary } from './Assets.tsx';
 import { BrandKit } from './BrandKit.tsx';
 import { AccessPage } from './Access.tsx';
-import { ArtistFiles, Library } from './Library.tsx';
+import { ArtistFiles, Library, LIBRARY_KIND_OPTIONS, type LibraryKind } from './Library.tsx';
 import { Profile } from './Profile.tsx';
 import { ArtistChats, BmgChat, useInbox, type ConversationSummary } from './Messages.tsx';
 import { markdownToText } from '../lib/markdown.ts';
@@ -988,8 +988,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     chat: { eyebrow: 'Blueprint', title: 'Chat' },
     profile: { eyebrow: 'Profile & preferences', title: userName },
     todo: { eyebrow: 'To-do', title: 'This week' },
-    library: { eyebrow: 'Library & assets', title: 'Your files' },
-    brand: { eyebrow: 'Library & assets', title: 'My brand kit' },
+    library: { eyebrow: 'Library', title: 'Your files' },
+    brand: { eyebrow: 'Library', title: 'My brand kit' },
     submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
     plan: { eyebrow: 'My plan', title: 'Your plan' },
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
@@ -997,7 +997,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     stats: { eyebrow: 'Socials', title: 'My stats' },
     contacts: { eyebrow: 'Shared by Blueprint', title: 'Contacts & venues' },
   };
-  const [libTab, setLibTab] = useState<'files' | 'assets'>('files');
+  const [libTab, setLibTab] = useState<LibraryKind>('all');
   const [bookTab, setBookTab] = useState<'contacts' | 'venues'>('contacts');
   const back =
     view === 'brand' ||
@@ -1085,21 +1085,24 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
         <>
           <div className="flex flex-wrap items-center gap-2">
             <Chips
-              label="Library"
+              label="Type"
               value={libTab}
               onChange={setLibTab}
-              options={[
-                { id: 'files', label: 'Files' },
-                { id: 'assets', label: 'Assets' },
-              ]}
+              options={LIBRARY_KIND_OPTIONS}
             />
             <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setView('brand')}>
               My brand kit
             </Button>
           </div>
-          {libTab === 'files' ? (
+          {libTab !== 'assets' ? (
             <>
-              <ArtistFiles cfg={cfg} token={token} artistId={artistId} isBmg={false} />
+              <ArtistFiles
+                cfg={cfg}
+                token={token}
+                artistId={artistId}
+                isBmg={false}
+                kind={libTab}
+              />
               <div className="eyebrow pt-2 text-muted-foreground">Shared by Blueprint</div>
               <Library cfg={cfg} token={token} isBmg={false} artists={[]} />
             </>
