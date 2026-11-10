@@ -327,7 +327,8 @@ export class FilesStack extends BmgStack {
     allow('ListQuarantine', ['s3:ListBucket'], [this.quarantine.bucketArn]);
     allow(
       'WriteLibrary',
-      ['s3:PutObject', 's3:GetObject'],
+      // DeleteObject: versions past the history limit, and previews of rejected versions (rev 8).
+      ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'],
       [this.orgData.arnForObjects('library/*')],
     );
     allow('ListLibrary', ['s3:ListBucket'], [this.orgData.bucketArn]);
@@ -388,6 +389,20 @@ export class FilesStack extends BmgStack {
         detailType: ['GuardDuty Malware Protection Object Scan Result'],
         detail: { s3ObjectDetails: { bucketName: [this.quarantine.bucketName] } },
       },
+      targets: [
+        new LambdaFunction(promoter, {
+          deadLetterQueue: dlq,
+          retryAttempts: 8,
+          maxEventAge: Duration.hours(6),
+        }),
+      ],
+    });
+    // "Restore" on an earlier version (rev 8): the files API records it and
+    // writes `file.restore`; the promoter makes the copy (up to 500 MB).
+    new Rule(this, 'VersionRestores', {
+      description: 'Restore an earlier version of a document',
+      eventBus: props.bus,
+      eventPattern: { source: ['bmg.audit'], detailType: ['file.restore'] },
       targets: [
         new LambdaFunction(promoter, {
           deadLetterQueue: dlq,

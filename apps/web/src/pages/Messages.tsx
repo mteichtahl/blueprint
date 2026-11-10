@@ -1433,7 +1433,9 @@ function AttachmentCard({
       setState(null);
       window.open(url, '_blank', 'noopener');
     } catch (e) {
-      setState((e as Error).message);
+      const msg = (e as Error).message;
+      // Deleted since it was posted (rev 8): the card stays, the file doesn't.
+      setState(/no such file/i.test(msg) ? 'This file was deleted' : msg);
     }
   }
   return (

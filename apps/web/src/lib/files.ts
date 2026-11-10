@@ -48,10 +48,83 @@ export interface FileItem {
   sharedWithArtistIds: string[];
   uploadedByMe: boolean;
   uploaderRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+  /** The owner (rev 8): the uploader, until they hand it on. */
+  ownerId: string;
+  ownerRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+  ownerName: string;
+  ownerJobTitle: string;
+  ownedByMe: boolean;
+  /** Who else can rename it and upload new versions. */
+  editAccess: EditAccess;
+  /** The chosen editors (shown to the owner only). */
+  editorIds: string[];
+  locked: boolean;
+  /** What you can do with it (the API checks again). */
+  canEdit: boolean;
+  canManage: boolean;
+  /** Versions (rev 8): the current one, and earlier ones newest first. */
+  version: number;
+  versionUploadedBy: string;
+  versionUploadedByName: string;
+  versionCreatedAt: string;
+  versionNote: string | null;
+  versions: FileVersion[];
+  /** In lists of an artist's files: used somewhere that stops it being deleted (rev 8). */
+  inUse?: boolean;
+  /** On the document's own page (rev 8): where it's used, and places you can't see. */
+  uses?: FileUse[];
+  hiddenUses?: number;
+  /** On the document's own page, for its owner: who can edit or own it. */
+  people?: Person[];
+  /** A new version being checked, or one that wasn't kept. */
+  pendingVersion: {
+    v: number;
+    name: string;
+    status: 'pending' | 'rejected';
+    rejectReason: string | null;
+    restoredFrom: number | null;
+    createdAt: string;
+  } | null;
   createdAt: string;
   availableAt: string | null;
   /** Set when the file is in the artist's asset library. */
   asset: AssetMeta | null;
+}
+
+export interface FileUse {
+  kind: 'submission' | 'brand-kit' | 'asset' | 'chat';
+  id: string;
+  title: string;
+  detail?: string;
+  /** Stops the document being deleted (everything except chats and reviewed submissions). */
+  blocks: boolean;
+}
+
+export interface FileVersion {
+  v: number;
+  name: string;
+  size: number;
+  fileType: FileTypeInfo;
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: string;
+  note: string | null;
+}
+
+export type EditAccess = 'owner' | 'chosen' | 'everyone';
+
+export const EDIT_ACCESS_LABEL: Record<EditAccess, string> = {
+  owner: 'Only me (locked)',
+  chosen: 'Me and chosen people',
+  everyone: 'Everyone who can see it',
+};
+
+/** Someone who can be given edit access or ownership of a document. */
+export interface Person {
+  sub: string;
+  displayName: string;
+  jobTitle: string;
+  isArtist: boolean;
 }
 
 export type AssetCategory = 'press-photo' | 'artwork' | 'logo' | 'video' | 'audio' | 'other';
@@ -129,6 +202,56 @@ export async function uploadFile(
   // The preview is a nicety: if it doesn't go through, the list shows the type's tile.
   if (usableThumb && res.thumbUpload) await postToS3(res.thumbUpload, usableThumb).catch(() => {});
   return res.file;
+}
+
+/**
+ * Uploads a new version of a document (rev 8): the API records it as pending
+ * and returns where to send it; it replaces the document once it's scanned.
+ */
+export async function uploadVersion(
+  cfg: AppConfig,
+  token: string,
+  path: string,
+  file: File,
+  opts: { note?: string; thumbnail?: Blob | null } = {},
+): Promise<FileItem> {
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error('Files are limited to 500 MB');
+  const thumb = opts.thumbnail === undefined ? await makeThumbnail(file) : opts.thumbnail;
+  const usableThumb = thumb && thumb.size <= THUMB_MAX_BYTES ? thumb : null;
+  const note = opts.note?.trim();
+  const res = await api<{
+    file: FileItem;
+    upload: { url: string; fields: Record<string, string> };
+    thumbUpload?: { url: string; fields: Record<string, string> } | null;
+  }>(cfg, token, 'POST', `${path}/versions`, {
+    name: file.name,
+    size: file.size,
+    contentType: file.type || 'application/octet-stream',
+    ...(note ? { note } : {}),
+    ...(usableThumb
+      ? { thumbnail: { size: usableThumb.size, contentType: usableThumb.type } }
+      : {}),
+  });
+  await postToS3(res.upload, file);
+  if (usableThumb && res.thumbUpload) await postToS3(res.thumbUpload, usableThumb).catch(() => {});
+  return res.file;
+}
+
+/** Polls until a new version has been scanned (or restored), or ~3 minutes pass. */
+export async function waitForVersion(
+  cfg: AppConfig,
+  token: string,
+  path: string,
+  v: number,
+): Promise<FileItem | undefined> {
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const f = await api<FileItem>(cfg, token, 'GET', path);
+    if (f.version >= v || f.pendingVersion?.v !== v || f.pendingVersion.status !== 'pending') {
+      return f;
+    }
+  }
+  return undefined;
 }
 
 async function postToS3(target: { url: string; fields: Record<string, string> }, body: Blob) {
@@ -218,11 +341,23 @@ export async function waitUntilScanned(
  * Opens a short-lived download link. The tab is opened during the click (so
  * it isn't blocked as a pop-up) and pointed at the link once it arrives.
  */
-export async function download(cfg: AppConfig, token: string, path: string): Promise<void> {
+export async function download(
+  cfg: AppConfig,
+  token: string,
+  path: string,
+  /** An earlier version (rev 8); the current one when left out. */
+  version?: number,
+): Promise<void> {
   const tab = window.open('', '_blank');
   if (tab) tab.opener = null;
   try {
-    const { url } = await api<{ url: string }>(cfg, token, 'POST', `${path}/download`);
+    const { url } = await api<{ url: string }>(
+      cfg,
+      token,
+      'POST',
+      `${path}/download`,
+      version ? { v: version } : undefined,
+    );
     if (tab) tab.location.href = url;
     else window.location.assign(url);
   } catch (err) {

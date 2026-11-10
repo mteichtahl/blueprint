@@ -61,8 +61,45 @@ const file = {
   visibility: 'normal',
   uploadedByMe: true,
   uploaderRole: 'artist',
+  ownerId: '0f8fad5b-d9cb-469f-a165-70867728950e',
+  ownerRole: 'artist',
+  ownerName: 'Chloe Poli',
+  ownerJobTitle: 'Artist',
+  ownedByMe: true,
+  editAccess: 'chosen',
+  editorIds: ['7c9e6679-7425-40de-944b-e07fc1f90ae7'],
+  locked: false,
+  canEdit: true,
+  canManage: true,
+  version: 2,
+  versionUploadedBy: '0f8fad5b-d9cb-469f-a165-70867728950e',
+  versionUploadedByName: 'Chloe Poli',
+  versionCreatedAt: now,
+  versionNote: 'Brighter edit',
+  versions: [
+    {
+      v: 1,
+      name: 'press-shot-old.jpg',
+      size: 2_000_000,
+      fileType: {
+        kind: 'image',
+        label: 'JPEG image',
+        ext: 'jpg',
+        mime: 'image/jpeg',
+        detected: true,
+      },
+      uploadedBy: '0f8fad5b-d9cb-469f-a165-70867728950e',
+      uploadedByName: 'Chloe Poli',
+      createdAt: now,
+      note: null,
+    },
+  ],
+  pendingVersion: null,
   createdAt: now,
   sharedWith: [],
+  sharedWithArtistIds: [],
+  scope: 'artist',
+  artistId: 'art_chloepoli000',
   asset: {
     category: 'press-photo',
     title: 'Press shot',
@@ -104,6 +141,32 @@ function answer(method: string, path: string): [number, unknown] {
     [/^\/artists\/[^/]+\/todos$/, { todos: [todo] }],
     [/^\/todos$/, { todos: [todo] }],
     [/^\/artists\/[^/]+\/files$/, { files: [file] }],
+    [
+      /^\/artists\/[^/]+\/files\/[^/]+$/,
+      {
+        ...file,
+        uses: [
+          {
+            kind: 'asset',
+            id: 'file000000001',
+            title: 'Asset library',
+            detail: 'Press shot',
+            blocks: true,
+          },
+          { kind: 'chat', id: 'dm-art_chloepoli000', title: 'Chat with Blueprint', blocks: false },
+        ],
+        hiddenUses: 1,
+        inUse: true,
+        people: [
+          {
+            sub: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+            displayName: 'Kyra Teichtahl',
+            jobTitle: 'Founder',
+            isArtist: false,
+          },
+        ],
+      },
+    ],
     [
       /^\/artists\/[^/]+\/brand-kit$/,
       {
@@ -527,6 +590,43 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     await click('The Toff in Town');
     expect(screen.getByText('Booked 3 times')).toBeTruthy();
     expect(screen.getByTitle('Map of The Toff in Town')).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist phone: a document’s detail page, then its Edit page (rev 8)', async () => {
+    await phone();
+    const lib = screen.queryAllByRole('button', { name: /^Library/ });
+    fireEvent.click(lib[lib.length - 1]!);
+    await settle();
+    await click(/^Press shot/);
+    expect(screen.getByRole('heading', { name: 'Document' })).toBeTruthy();
+    expect(screen.getByText('Kyra Teichtahl', { exact: false })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Version history' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Where it’s used' })).toBeTruthy();
+    expect(screen.getByText('+ 1 place you don’t have access to')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Restore version 1' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    await click('Edit');
+    expect(screen.getByRole('heading', { name: 'Edit document' })).toBeTruthy();
+    // Used in the asset library, so it can't be deleted yet (rev 8).
+    expect(
+      (screen.getByRole('button', { name: /^Delete Press shot/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getByText(/used in 1 place/)).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Who can edit it' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Upload a new version' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('BMG: workspace Library opens a document page', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    await openWorkspace('Library');
+    await click('Press shot');
+    expect(screen.getByRole('heading', { name: 'Document' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
