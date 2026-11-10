@@ -98,6 +98,8 @@ export interface FileItem {
   level?: 'none' | 'view' | 'edit' | 'manage';
   /** You can move it to another folder. */
   canMove?: boolean;
+  /** Gig media: the gig the photo or video was added to. */
+  gigId?: string | null;
 }
 
 export interface FileUse {
@@ -263,7 +265,10 @@ export async function waitForVersion(
   return undefined;
 }
 
-async function postToS3(target: { url: string; fields: Record<string, string> }, body: Blob) {
+export async function postToS3(
+  target: { url: string; fields: Record<string, string> },
+  body: Blob,
+) {
   const form = new FormData();
   for (const [k, v] of Object.entries(target.fields)) form.append(k, v);
   // S3 requires the file to be the last field.

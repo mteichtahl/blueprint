@@ -19,6 +19,7 @@ import {
 } from '../components/ui.tsx';
 import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
 import { VenuePicker } from './Venues.tsx';
+import { GigMedia } from '../components/GigMedia.tsx';
 
 /** Gigs (screens: workspace Gigs tab, BMG Artist gigs, artist My gigs / Plan a gig). */
 
@@ -539,6 +540,9 @@ export function GigsTab({
           />
         </div>
       )}
+      {editing && (
+        <GigMedia cfg={cfg} token={token} artistId={editing.artistId} gigId={editing.gigId} />
+      )}
     </div>
   );
 
@@ -766,20 +770,23 @@ export function AllGigs({
     if (phone && editing) window.scrollTo?.({ top: 0 });
   }, [phone, editing]);
   const form = editing && (
-    <GigForm
-      key={editing.gigId}
-      cfg={cfg}
-      token={token}
-      artistId={editing.artistId}
-      gig={editing}
-      isArtist={false}
-      onCancel={() => setEditing(null)}
-      onSaved={() => {
-        setSaved(`Saved ${editing.title}.`);
-        setEditing(null);
-        void load();
-      }}
-    />
+    <div className="flex flex-col gap-4">
+      <GigForm
+        key={editing.gigId}
+        cfg={cfg}
+        token={token}
+        artistId={editing.artistId}
+        gig={editing}
+        isArtist={false}
+        onCancel={() => setEditing(null)}
+        onSaved={() => {
+          setSaved(`Saved ${editing.title}.`);
+          setEditing(null);
+          void load();
+        }}
+      />
+      <GigMedia cfg={cfg} token={token} artistId={editing.artistId} gigId={editing.gigId} />
+    </div>
   );
   // On a phone, editing a gig is its own page, not a form above the list.
   if (phone && editing) {
@@ -895,6 +902,11 @@ export function ArtistGigs({
                 )
               }
             />
+          </div>
+        )}
+        {gig && (
+          <div className="card !p-3">
+            <GigMedia cfg={cfg} token={token} artistId={artistId} gigId={gig.gigId} />
           </div>
         )}
       </div>

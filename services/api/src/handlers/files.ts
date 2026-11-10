@@ -46,13 +46,33 @@ import {
   type FileRecord,
 } from '../files/model.ts';
 import { namesFor, people, type Person } from '../files/people.ts';
-import { can, fileAccess, folderAccess } from '../files/access.ts';
-import { folderManaged, folderMap, type FolderMap, type Level } from '../files/folders.ts';
+import { can, fileAccess, folderAccess, rootAccess } from '../files/access.ts';
+import {
+  folderManaged,
+  folderMap,
+  folderSk,
+  type FolderMap,
+  type Level,
+} from '../files/folders.ts';
 import { folderRoutes } from '../files/folder-routes.ts';
 import { loadFolders } from '../files/folder-store.ts';
 import { libraryRoute } from '../files/library-route.ts';
 import { usesOf } from '../files/usage.ts';
 import { BRAND_SK } from '../brand/model.ts';
+import { gigSk, type Gig } from '../events/model.ts';
+import {
+  counterSk,
+  countByKind,
+  MAX_MEDIA_NUMBER,
+  mediaFolderLabel,
+  mediaFolderPath,
+  MediaUpload,
+  numberFiles,
+  pathFolderId,
+  reservedNumbers,
+  walkFolderPath,
+  type MediaKind,
+} from '../gigs/media.ts';
 import { artistPk, newId } from '../workspace/model.ts';
 import {
   audit,
@@ -758,6 +778,247 @@ async function removeThumb(principal: Principal, f: Stored) {
 /** What the folder routes need from here (rev 10). */
 const deps = { removeFile };
 export type FolderDeps = typeof deps;
+// ── Gig media: photos and videos added on a gig's page ─────────────────────
+/**
+ * The gig, if this person can open it: artists see their own gigs; Blueprint
+ * sees the ones the artist shared (the same rule as the gigs API).
+ */
+async function loadVisibleGig(principal: Principal, artistId: string, gigId: string) {
+  const res = await db.send(
+    new GetCommand({ TableName: table(), Key: { PK: artistPk(artistId), SK: gigSk(gigId) } }),
+  );
+  const gig = res.Item as Gig | undefined;
+  const d = gig
+    ? authorize(principal, 'read', {
+        kind: 'artist-data',
+        artistId,
+        visibility: gig.shared ? 'normal' : 'private',
+      })
+    : { allow: false };
+  // Someone who can't open the gig is told it doesn't exist.
+  if (!gig || !d.allow) throw new HttpError(404, 'No such gig');
+  return gig;
+}
+
+/**
+ * Reserves `count` numbers for this gig name, kind and day in one atomic
+ * step, so uploads at the same time never get the same number.
+ */
+async function reserve(artistId: string, gig: Gig, kind: MediaKind, count: number) {
+  const res = await db.send(
+    new UpdateCommand({
+      TableName: table(),
+      Key: { PK: artistPk(artistId), SK: counterSk(gig.date, gig.title, kind) },
+      UpdateExpression: 'ADD #n :c SET #t = :t',
+      ExpressionAttributeNames: { '#n': 'last', '#t': 'type' },
+      ExpressionAttributeValues: { ':c': count, ':t': 'gig-media-counter' },
+      ReturnValues: 'UPDATED_NEW',
+    }),
+  );
+  const last = Number(res.Attributes?.last);
+  if (last > MAX_MEDIA_NUMBER) {
+    throw new HttpError(
+      409,
+      `This gig has reached ${MAX_MEDIA_NUMBER} ${kind === 'img' ? 'photos' : 'videos'} for the day`,
+    );
+  }
+  return reservedNumbers(last, count)[0]!;
+}
+
+type ArtistSpace = { kind: 'artist'; artistId: string };
+
+/**
+ * Where a gig's media lives: the day folder, if it exists yet, and whether
+ * this person could add to it (Can edit on the day folder, or on the deepest
+ * folder that exists, or the Library's top level, since the rest gets made).
+ */
+async function dayFolder(principal: Principal, artistId: string, gig: Gig) {
+  const space: ArtistSpace = { kind: 'artist', artistId };
+  const map = await foldersOf(artistPk(artistId));
+  const names = mediaFolderPath(gig.date);
+  const { found, missing } = walkFolderPath(map.values(), names);
+  const deepest = found.at(-1);
+  const access = deepest
+    ? folderAccess(principal, deepest, map, space)
+    : rootAccess(principal, map, space);
+  return {
+    map,
+    space,
+    names,
+    found,
+    missing,
+    day: missing.length ? undefined : deepest,
+    access,
+  };
+}
+
+/** `GET /artists/{artistId}/files?gigId=…`: the gig's photos and videos this person can open. */
+async function listGigMedia(principal: Principal, artistId: string, gigId: string) {
+  if (!FILE_ID_PATTERN.test(gigId)) throw new HttpError(404, 'No such gig');
+  const gig = await loadVisibleGig(principal, artistId, gigId);
+  const where = await dayFolder(principal, artistId, gig);
+  const visible = (await list(artistPk(artistId))).filter(
+    (f) =>
+      f.gig?.gigId === gig.gigId &&
+      can(fileAccess(principal, f, folderManaged(f) ? where.map : NO_FOLDERS), 'view'),
+  );
+  return json(200, {
+    folder: mediaFolderLabel(gig.date),
+    folderId: where.day?.folderId ?? null,
+    canAdd: can(where.access, 'edit'),
+    files: await withThumbnails(
+      principal,
+      visible.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true })),
+    ),
+  });
+}
+
+/**
+ * Makes the missing folders of `gigs › year › month › day`. The person needs
+ * Can edit where each new folder goes, as for New folder; they own what they
+ * make. Ids are fixed per path so two uploads at once share one folder.
+ */
+async function makeDayFolder(
+  event: APIGatewayProxyEvent,
+  principal: Principal,
+  artistId: string,
+  gig: Gig,
+) {
+  const pk = artistPk(artistId);
+  let where = await dayFolder(principal, artistId, gig);
+  for (let attempt = 0; where.missing.length && attempt < 3; attempt++) {
+    if (!can(where.access, 'view') && where.found.length) {
+      throw new HttpError(403, `You can’t add to ${mediaFolderLabel(gig.date)}`);
+    }
+    if (!can(where.access, 'edit')) {
+      throw new HttpError(
+        403,
+        `You can’t add folders under ${where.found.at(-1)?.name ?? 'the Library'}`,
+      );
+    }
+    let parentId = where.found.at(-1)?.folderId ?? null;
+    let raced = false;
+    for (const [i, name] of where.missing.entries()) {
+      const path = where.names.slice(0, where.found.length + i + 1);
+      // The path's fixed id first; if that's taken by a folder since renamed, a fresh one.
+      const folderId = attempt === 0 ? pathFolderId(artistId, path) : newId();
+      let made: string | undefined;
+      try {
+        await db.send(
+          new PutCommand({
+            TableName: table(),
+            Item: {
+              PK: pk,
+              SK: folderSk(folderId),
+              type: 'folder',
+              folderId,
+              name,
+              parentId,
+              ownerId: principal.sub,
+              ownerRole: principal.role,
+              createdAt: new Date().toISOString(),
+              createdBy: principal.sub,
+            },
+            ConditionExpression: 'attribute_not_exists(PK)',
+          }),
+        );
+        made = folderId;
+        await audit(event, 'folder.create', 'success', { artistId, folderId, gigMedia: true });
+      } catch (e) {
+        if ((e as { name?: string }).name !== 'ConditionalCheckFailedException') throw e;
+        // Someone else made it a moment ago: read the folders again and carry on from there.
+        raced = true;
+      }
+      if (raced || !made) break;
+      parentId = made;
+    }
+    folderCache.delete(pk);
+    where = await dayFolder(principal, artistId, gig);
+  }
+  if (!where.day) throw new HttpError(409, 'Couldn’t make the gig’s folder. Please try again.');
+  if (!can(where.access, 'view')) {
+    throw new HttpError(403, `You can’t add to ${mediaFolderLabel(gig.date)}`);
+  }
+  if (!can(where.access, 'edit')) {
+    throw new HttpError(403, `You can open ${mediaFolderLabel(gig.date)} but not add to it`);
+  }
+  return where.day;
+}
+
+/**
+ * `POST /artists/{artistId}/files` with a `gigId`: several photos and videos
+ * for a gig at once. Each gets its gig name, kind and number, and its own
+ * quarantine upload, scanned and kept like any other artist file.
+ */
+async function uploadGigMedia(
+  event: APIGatewayProxyEvent,
+  principal: Principal,
+  artistId: string,
+  show: (f: FileRecord) => unknown,
+) {
+  const body = parseBody(event, MediaUpload);
+  const gig = await loadVisibleGig(principal, artistId, body.gigId);
+  // Filed in gigs › year › month › day, made if needed; the folder's access decides (rev 10).
+  const folder = await makeDayFolder(event, principal, artistId, gig);
+  const counts = countByKind(body.files);
+  const start: Record<MediaKind, number> = { img: 1, video: 1 };
+  for (const kind of ['img', 'video'] as const) {
+    if (counts[kind]) start[kind] = await reserve(artistId, gig, kind, counts[kind]);
+  }
+  const now = new Date().toISOString();
+  const created = [];
+  for (const item of numberFiles(body.files, gig.title, start)) {
+    const fileId = newId();
+    const rec: FileRecord = {
+      fileId,
+      scope: 'artist',
+      artistId,
+      name: item.fileName,
+      ...(item.thumbnail ? { thumb: { status: 'pending' as const, ...item.thumbnail } } : {}),
+      size: item.size,
+      contentType: item.contentType,
+      status: 'pending',
+      visibility: 'normal',
+      uploadedBy: principal.sub,
+      uploaderRole: principal.role,
+      // In a folder, a new file takes the folder's access (rev 10).
+      folderId: folder.folderId,
+      editAccess: 'everyone',
+      gig: { gigId: gig.gigId, kind: item.kind, n: item.n },
+      createdAt: now,
+    };
+    await createRecord(artistPk(artistId), rec);
+    created.push({
+      file: show(rec),
+      upload: await uploadTarget(
+        quarantineKey('artist', fileId, artistId),
+        item.size,
+        item.contentType,
+      ),
+      thumbUpload: await thumbTarget('artist', fileId, artistId, rec.thumb),
+    });
+  }
+  await audit(event, 'gig.media-upload-requested', 'success', {
+    artistId,
+    gigId: gig.gigId,
+    count: created.length,
+  });
+  return json(201, {
+    folder: mediaFolderLabel(gig.date),
+    folderId: folder.folderId,
+    files: created,
+  });
+}
+
+/** Whether an upload request is for gig media (it names the gig). */
+function isGigUpload(event: APIGatewayProxyEvent): boolean {
+  try {
+    const b = JSON.parse(event.body ?? '{}') as unknown;
+    return typeof b === 'object' && b !== null && 'gigId' in b;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Files: upload (to quarantine), list, rename-free metadata, sharing, and
@@ -791,6 +1052,8 @@ export const handler = handle(async (raw) => {
     case 'GET /artists/{artistId}/files': {
       const artistId = artistIdParam(event);
       ensure(canArtistSpace(principal, 'read', artistId));
+      const gigId = event.queryStringParameters?.gigId;
+      if (gigId !== undefined) return listGigMedia(principal, artistId, gigId);
       const map = await foldersOf(artistPk(artistId));
       const visible = (await list(artistPk(artistId))).filter((f) =>
         can(fileAccess(principal, f, folderManaged(f) ? map : NO_FOLDERS), 'view'),
@@ -808,6 +1071,7 @@ export const handler = handle(async (raw) => {
     case 'POST /artists/{artistId}/files': {
       const artistId = artistIdParam(event);
       ensure(canArtistSpace(principal, 'write', artistId));
+      if (isGigUpload(event)) return uploadGigMedia(event, principal, artistId, show);
       const body = parseBody(event, ArtistUpload);
       const folder = await uploadFolder(
         principal,

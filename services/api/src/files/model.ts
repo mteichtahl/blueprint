@@ -85,6 +85,8 @@ export interface FileRecord {
   grants?: Grants;
   /** false: "Don't inherit access from parent folders". */
   inherit?: boolean;
+  /** Set on a photo or video added on a gig's page (gig media). */
+  gig?: { gigId: string; kind: 'img' | 'video'; n: number };
 }
 
 /** An earlier version of a document (rev 8). */
@@ -732,5 +734,7 @@ export function publicFile(f: FileRecord & { uploadedBy: string }, viewer: Viewe
     folderId: f.folderId ?? null,
     /** It has an access setting of its own (the "custom access" icon). */
     customAccess: !!f.grants || f.inherit === false,
+    /** The gig it was added to, for gig media. */
+    gigId: f.gig?.gigId ?? null,
   };
 }
