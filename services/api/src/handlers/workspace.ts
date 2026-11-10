@@ -344,6 +344,33 @@ async function roster(principal: Principal) {
   return res.Responses?.[table()] ?? [];
 }
 
+/** `ARTIST#id / AI`: latest AI choice and the terms it was made with (BMG roster). */
+async function consentSummaries(artistIds: string[]) {
+  const out: Record<
+    string,
+    { termsVersion: string | null; termsAcceptedAt: string | null; aiOptIn: boolean | null }
+  > = {};
+  for (let i = 0; i < artistIds.length; i += 100) {
+    const res = await db.send(
+      new BatchGetCommand({
+        RequestItems: {
+          [table()]: {
+            Keys: artistIds.slice(i, i + 100).map((id) => ({ PK: artistPk(id), SK: 'AI' })),
+          },
+        },
+      }),
+    );
+    for (const it of res.Responses?.[table()] ?? []) {
+      out[String(it.artistId ?? String(it.PK).slice('ARTIST#'.length))] = {
+        termsVersion: typeof it.termsVersion === 'string' ? it.termsVersion : null,
+        termsAcceptedAt: typeof it.termsAcceptedAt === 'string' ? it.termsAcceptedAt : null,
+        aiOptIn: typeof it.aiOptIn === 'boolean' ? it.aiOptIn : null,
+      };
+    }
+  }
+  return out;
+}
+
 const publicProfile = (p: Record<string, unknown>) => ({
   artistId: p.artistId,
   displayName: p.displayName,
@@ -383,7 +410,19 @@ export const handler = handle(async (event) => {
   switch (route) {
     case 'GET /artists': {
       const items = await roster(principal);
-      return json(200, { artists: items.map(publicProfile) });
+      if (principal.role === 'artist') return json(200, { artists: items.map(publicProfile) });
+      // Artists & access: each artist's terms acceptance and AI status.
+      const consent = await consentSummaries(items.map((i) => String(i.artistId)));
+      return json(200, {
+        artists: items.map((i) => ({
+          ...publicProfile(i),
+          ...(consent[String(i.artistId)] ?? {
+            termsVersion: null,
+            termsAcceptedAt: null,
+            aiOptIn: null,
+          }),
+        })),
+      });
     }
 
     case 'GET /artists/{artistId}': {

@@ -57,6 +57,10 @@ export interface ArtistSummary {
   displayName: string;
   status: string;
   createdAt: string;
+  /** Blueprint only (Artists & access): terms accepted and the current AI choice. */
+  termsVersion?: string | null;
+  termsAcceptedAt?: string | null;
+  aiOptIn?: boolean | null;
 }
 
 export type MeasureId = 'M1' | 'M2' | 'M3' | 'M4';

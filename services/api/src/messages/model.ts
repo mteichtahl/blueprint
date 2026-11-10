@@ -14,6 +14,7 @@
  *   wrapped only under the two artists' keys with `visibility=private`, which
  *   KMS refuses to every BMG role (design 9.1, 9.3).
  */
+import { DEFAULT_RULES, type AccessRules } from '../access/model.ts';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 
@@ -317,11 +318,15 @@ export const UpdateMine = z
  * - BMG `direct` with an artist → that artist's `dm-` chat.
  * - Artist `direct` with no artist → their chat with Blueprint.
  * - Artist `direct` with another artist → their shared private chat.
- * - Groups are created by BMG only (artist groups are off, screens doc).
+ * - Groups are created by Blueprint, and by artists only when Access &
+ *   permissions allows it (off by default). An artist's group always
+ *   includes them, and Blueprint is in it like every group.
+ * - Artist ↔ artist chats need "message other artists directly" to be on.
  */
 export function planConversation(
   viewer: Viewer,
   req: z.infer<typeof NewConversation>,
+  rules: Pick<AccessRules, 'artistDirectChats' | 'artistGroups'> = DEFAULT_RULES,
 ):
   | {
       ok: true;
@@ -332,14 +337,16 @@ export function planConversation(
     }
   | { ok: false; reason: string } {
   if (req.kind === 'group' || req.kind === 'announcement') {
-    if (viewer.role === 'artist')
-      return {
-        ok: false,
-        reason:
-          req.kind === 'group'
-            ? 'Groups are created by Blueprint'
-            : 'Announcements are sent by Blueprint',
-      };
+    if (viewer.role === 'artist') {
+      if (req.kind === 'announcement')
+        return { ok: false, reason: 'Announcements are sent by Blueprint' };
+      if (!rules.artistGroups) return { ok: false, reason: 'Groups are created by Blueprint' };
+      const me = viewer.artistId;
+      if (!me) return { ok: false, reason: 'No artist on this account' };
+      const artistIds = [...new Set([me, ...req.artistIds])].sort();
+      if (artistIds.length < 2) return { ok: false, reason: 'Add at least one other artist' };
+      return { ok: true, conversationId: '', type: 'group', artistIds, title: req.title };
+    }
     const artistIds = [...new Set(req.artistIds)].sort();
     return { ok: true, conversationId: '', type: req.kind, artistIds, title: req.title };
   }
@@ -349,6 +356,8 @@ export function planConversation(
     if (!req.artistId)
       return { ok: true, conversationId: directId(me), type: 'bmg-artist', artistIds: [me] };
     if (req.artistId === me) return { ok: false, reason: 'Pick another artist' };
+    if (!rules.artistDirectChats)
+      return { ok: false, reason: 'Blueprint has turned off chats between artists' };
     const pair = [me, req.artistId].sort();
     return {
       ok: true,
@@ -364,6 +373,31 @@ export function planConversation(
     type: 'bmg-artist',
     artistIds: [req.artistId],
   };
+}
+
+/**
+ * Access & permissions rules on posting, on top of `canSend`: with artist
+ * chats off, existing artist ↔ artist chats become read-only; with gig
+ * sharing off, artists can't put gig cards where other artists see them.
+ */
+export function sendRefused(
+  viewer: Viewer,
+  c: Pick<Conversation, 'type' | 'artistIds'>,
+  attachmentKind: string | undefined,
+  rules: Pick<AccessRules, 'artistDirectChats' | 'artistGigSharing'>,
+): string | null {
+  if (viewer.role !== 'artist') return null;
+  if (c.type === 'artist-to-artist' && !rules.artistDirectChats)
+    return 'Blueprint has turned off chats between artists. You can still read this chat.';
+  const otherArtists = c.artistIds.some((id) => id !== viewer.artistId);
+  if (
+    attachmentKind === 'gig' &&
+    !rules.artistGigSharing &&
+    otherArtists &&
+    (c.type === 'artist-to-artist' || c.type === 'group')
+  )
+    return 'Blueprint has turned off sharing gigs with other artists';
+  return null;
 }
 
 // ── Sealing messages with the conversation key (AES-256-GCM) ─────────────

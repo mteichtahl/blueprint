@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { ACCESS_KEY, DEFAULT_RULES, rulesFrom, type AccessRules } from '../access/model.ts';
 import { DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import {
@@ -39,6 +40,7 @@ import {
   NewMessage,
   open,
   planConversation,
+  sendRefused,
   presenceKey,
   previewOf,
   publicType,
@@ -567,6 +569,13 @@ async function loadReadable(viewer: Viewer, id: string): Promise<Conversation> {
  * is sealed with a per-conversation key, and artist-to-artist keys only open
  * in an artist session for a member.
  */
+/** Access & permissions switches; only artists are bound by them. */
+async function accessRules(viewer: Viewer): Promise<AccessRules> {
+  if (viewer.role !== 'artist') return DEFAULT_RULES;
+  const res = await db.send(new GetCommand({ TableName: table(), Key: ACCESS_KEY }));
+  return rulesFrom(res.Item);
+}
+
 export const handler = handle(async (event) => {
   const principal = await principalFor(authContext(event));
   const viewer = viewerOf(principal);
@@ -655,7 +664,7 @@ export const handler = handle(async (event) => {
 
     case 'POST /conversations': {
       const body = parseBody(event, NewConversation);
-      const plan = planConversation(viewer, body);
+      const plan = planConversation(viewer, body, await accessRules(viewer));
       if (!plan.ok) throw new HttpError(403, plan.reason);
       // Every artist must exist (and, for staff, be theirs to message).
       const names = await artistNames(plan.artistIds);
@@ -671,8 +680,12 @@ export const handler = handle(async (event) => {
         throw new HttpError(403, 'You can’t start this conversation');
       const existing = multi ? undefined : await getConversation(id);
       if (existing) return json(200, { conversationId: existing.conversationId });
+      // Artists who start a group (when allowed) get Blueprint's defaults; the
+      // admin-only settings stay Blueprint's to change.
       const settings =
-        body.kind === 'group' ? { ...DEFAULT_SETTINGS, ...(body.settings ?? {}) } : undefined;
+        body.kind === 'group'
+          ? { ...DEFAULT_SETTINGS, ...(viewer.role === 'artist' ? {} : (body.settings ?? {})) }
+          : undefined;
       let conv = await createConversation(
         {
           conversationId: id,
@@ -981,6 +994,8 @@ export const handler = handle(async (event) => {
             : 'Only admins can send messages in this group',
         );
       const body = parseBody(event, NewMessage);
+      const refused = sendRefused(viewer, conv, body.attachment?.kind, await accessRules(viewer));
+      if (refused) throw new HttpError(403, refused);
       if (body.attachment?.kind === 'file' && !canShareFiles(viewer, conv))
         throw new HttpError(403, 'Artists can’t share files in this group');
       let replyTo: Payload['replyTo'];
@@ -1013,6 +1028,11 @@ export const handler = handle(async (event) => {
 
     case 'GET /directory': {
       // Artists can start a chat with another artist, so they see names only.
+      // With artist chats and artist groups both off, they don't need the list.
+      if (viewer.role === 'artist') {
+        const rules = await accessRules(viewer);
+        if (!rules.artistDirectChats && !rules.artistGroups) return json(200, { artists: [] });
+      }
       const res = await db.send(
         new QueryCommand({
           TableName: table(),

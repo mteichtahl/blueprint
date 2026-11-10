@@ -1,3 +1,4 @@
+import { isArtistId } from '@bmg/crypto';
 import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwatch';
 import { QueryCommand } from '@aws-sdk/lib-dynamodb';
 import type { EventBridgeEvent } from 'aws-lambda';
@@ -93,7 +94,7 @@ export async function handler(
         { artistId: string; aiOptIn: boolean; decidedAt: string }
       >
     ).detail;
-    if (!/^art_[a-z0-9]{12}$/.test(d.artistId)) return;
+    if (!isArtistId(d.artistId)) return;
     // Record the choice first (the assistant reads it), then act on the latest choice only.
     await projectAiState(d.artistId, d.aiOptIn, d.decidedAt);
     const now = (await aiStates([d.artistId]))[d.artistId] ?? false;
