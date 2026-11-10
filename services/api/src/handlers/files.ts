@@ -11,7 +11,15 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { authorize, type Action, type Principal } from '@bmg/authz';
 import { DataAccessSessions, isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
+import type { z } from 'zod';
 import {
+  archivedKey,
+  currentVersion,
+  nextVersion,
+  DownloadBody,
+  VersionRestore,
+  VersionUpload,
+  versionBlocked,
   ArtistFilePatch,
   AssetMetaSchema,
   ArtistUpload,
@@ -192,7 +200,7 @@ async function thumbnailUrl(principal: Principal, f: FileRecord): Promise<string
       s3,
       new GetObjectCommand({
         Bucket: env('LIBRARY_BUCKET'),
-        Key: storedKey('library', f.fileId, undefined, 'thumb'),
+        Key: storedKey('library', f.fileId, undefined, 'thumb', f.thumb.v ?? 1),
         ...params,
       }),
       { expiresIn: URL_LIFETIME_SECONDS },
@@ -206,7 +214,7 @@ async function thumbnailUrl(principal: Principal, f: FileRecord): Promise<string
     new S3Client({ credentials }),
     new GetObjectCommand({
       Bucket: env('ARTIST_BUCKET'),
-      Key: storedKey('artist', f.fileId, f.artistId, 'thumb'),
+      Key: storedKey('artist', f.fileId, f.artistId, 'thumb', f.thumb.v ?? 1),
       ...params,
     }),
     { expiresIn: URL_LIFETIME_SECONDS },
@@ -219,12 +227,21 @@ async function thumbnailUrl(principal: Principal, f: FileRecord): Promise<string
  * the owner's name and job title (rev 8).
  */
 async function withThumbnails(principal: Principal, files: Stored[]) {
-  const names = await namesFor([...new Set(files.map((f) => ownerOf(f).sub))]);
+  const subs = files.flatMap((f) => [
+    ownerOf(f).sub,
+    f.versionUploadedBy ?? f.uploadedBy,
+    ...(f.versions ?? []).map((v) => v.uploadedBy),
+  ]);
+  const names = await namesFor([...new Set(subs)]);
+  const nameOf = (sub: string) => names.get(sub)?.displayName ?? 'Someone';
   return Promise.all(
     files.map(async (f) => {
       const owner = names.get(ownerOf(f).sub);
+      const shown = publicFile(f, principal);
       return {
-        ...publicFile(f, principal),
+        ...shown,
+        versionUploadedByName: nameOf(shown.versionUploadedBy),
+        versions: shown.versions.map((v) => ({ ...v, uploadedByName: nameOf(v.uploadedBy) })),
         ownerName: owner?.displayName ?? (ownerOf(f).role === 'artist' ? 'Artist' : 'Blueprint'),
         ownerJobTitle: owner?.jobTitle ?? '',
         thumbnailUrl: await thumbnailUrl(principal, f).catch(() => null),
@@ -379,7 +396,225 @@ async function removeFile(principal: Principal, f: Stored) {
     }
   }
   if (f.thumb) await removeThumb(principal, f);
+  await removeVersions(principal, f);
   await db.send(new DeleteCommand({ TableName: table(), Key: { PK: f.PK, SK: f.SK } }));
+}
+
+/**
+ * Earlier versions (rev 8) go with the file: their archived bytes, the
+ * previews of every version, and a new version still in quarantine.
+ */
+async function removeVersions(principal: Principal, f: Stored) {
+  const artistId = f.artistId;
+  const keys: string[] = [];
+  for (const v of f.versions ?? []) keys.push(archivedKey(f.scope, f.fileId, artistId, v.v));
+  for (let v = 2; v <= currentVersion(f); v++) {
+    keys.push(storedKey(f.scope, f.fileId, artistId, 'thumb', v));
+  }
+  const p = f.pendingVersion;
+  if (p) {
+    for (const part of ['file', 'thumb'] as const) {
+      await s3
+        .send(
+          new DeleteObjectCommand({
+            Bucket: env('QUARANTINE_BUCKET'),
+            Key: quarantineKey(f.scope, f.fileId, artistId, part, p.v),
+          }),
+        )
+        .catch(() => undefined);
+    }
+    keys.push(storedKey(f.scope, f.fileId, artistId, 'thumb', p.v));
+  }
+  if (keys.length === 0) return;
+  const client =
+    f.scope === 'library'
+      ? s3
+      : new S3Client({
+          credentials: await sessions.credentials({
+            roleArn: env('DATA_ACCESS_ROLE_ARN'),
+            artistId: artistId!,
+            role: principal.role,
+          }),
+        });
+  const bucket = env(f.scope === 'library' ? 'LIBRARY_BUCKET' : 'ARTIST_BUCKET');
+  for (const Key of keys) {
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key })).catch(() => undefined);
+  }
+}
+
+// ── Versions (rev 8) ──────────────────────────────────────────────────────
+/**
+ * Starts a new version: records it as pending and returns where to upload it
+ * (and its preview). It replaces the document once the malware scan is clean.
+ */
+async function startVersion(
+  principal: Principal,
+  event: APIGatewayProxyEvent,
+  f: Stored,
+  body: z.infer<typeof VersionUpload>,
+) {
+  const refused = editAllowed(principal, f);
+  if (refused) throw new HttpError(403, refused);
+  const blocked = versionBlocked(f);
+  if (blocked) throw new HttpError(409, blocked);
+  const v = nextVersion(f);
+  const pending = {
+    v,
+    name: body.name,
+    size: body.size,
+    contentType: body.contentType,
+    uploadedBy: principal.sub,
+    createdAt: new Date().toISOString(),
+    ...(body.note ? { note: body.note } : {}),
+    status: 'pending' as const,
+    ...(body.thumbnail ? { thumb: { status: 'pending' as const, v, ...body.thumbnail } } : {}),
+  };
+  await db.send(
+    new UpdateCommand({
+      TableName: table(),
+      Key: { PK: f.PK, SK: f.SK },
+      UpdateExpression: 'SET pendingVersion = :p',
+      // Nobody else started one in the meantime.
+      ConditionExpression: f.pendingVersion
+        ? 'pendingVersion.v = :was'
+        : 'attribute_exists(PK) AND attribute_not_exists(pendingVersion)',
+      ExpressionAttributeValues: {
+        ':p': pending,
+        ...(f.pendingVersion ? { ':was': f.pendingVersion.v } : {}),
+      },
+    }),
+  );
+  const artistId = f.scope === 'artist' ? f.artistId : undefined;
+  const upload = await uploadTarget(
+    quarantineKey(f.scope, f.fileId, artistId, 'file', v),
+    body.size,
+    body.contentType,
+  );
+  const thumbUpload = body.thumbnail
+    ? await uploadTarget(
+        quarantineKey(f.scope, f.fileId, artistId, 'thumb', v),
+        body.thumbnail.size,
+        body.thumbnail.contentType,
+      )
+    : null;
+  await audit(event, 'file.version-requested', 'success', {
+    fileId: f.fileId,
+    v,
+    size: body.size,
+    ...(artistId ? { artistId } : { library: true }),
+  });
+  return {
+    file: (await withThumbnails(principal, [{ ...f, pendingVersion: pending }]))[0],
+    upload,
+    thumbUpload,
+  };
+}
+
+/**
+ * POST …/versions (rev 8): either a new version to upload, or
+ * `{ restoreFrom: n }` to bring back an earlier one. One route for both keeps
+ * the API stack's resource count down.
+ */
+async function versions(principal: Principal, event: APIGatewayProxyEvent, f: Stored) {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(event.body ?? '{}');
+  } catch {
+    throw new HttpError(400, 'Body must be JSON');
+  }
+  if (raw && typeof raw === 'object' && 'restoreFrom' in raw) {
+    const { restoreFrom } = parseBody(event, VersionRestore);
+    return json(202, await restoreVersion(principal, event, f, restoreFrom));
+  }
+  return json(201, await startVersion(principal, event, f, parseBody(event, VersionUpload)));
+}
+
+/** Which version a download is for: the current one unless the body names another. */
+function downloadVersion(event: APIGatewayProxyEvent): number | undefined {
+  if (!event.body) return undefined;
+  return parseBody(event, DownloadBody).v;
+}
+
+/** A short-lived link to an earlier version, named after that version's file. */
+async function versionDownloadUrl(principal: Principal, f: Stored, v: number) {
+  const meta = (f.versions ?? []).find((x) => x.v === v);
+  if (!meta) throw new HttpError(404, 'That version is no longer kept');
+  const Key = archivedKey(f.scope, f.fileId, f.artistId, v);
+  const params = {
+    ResponseContentDisposition: contentDisposition(meta.name, meta.contentType),
+    ResponseContentType: meta.contentType,
+    ResponseCacheControl: 'private, no-store',
+  };
+  if (f.scope === 'library') {
+    return getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: env('LIBRARY_BUCKET'), Key, ...params }),
+      {
+        expiresIn: URL_LIFETIME_SECONDS,
+      },
+    );
+  }
+  const credentials = await sessions.credentials(
+    { roleArn: env('DATA_ACCESS_ROLE_ARN'), artistId: f.artistId!, role: principal.role },
+    { minRemainingMs: (URL_LIFETIME_SECONDS + 60) * 1000 },
+  );
+  return getSignedUrl(
+    new S3Client({ credentials }),
+    new GetObjectCommand({ Bucket: env('ARTIST_BUCKET'), Key, ...params }),
+    { expiresIn: URL_LIFETIME_SECONDS },
+  );
+}
+
+/**
+ * Restore: an earlier version becomes the newest one (nothing is lost; the
+ * current version goes into the history). The copy happens in the promoter,
+ * triggered by the `file.restore` event this writes.
+ */
+async function restoreVersion(
+  principal: Principal,
+  event: APIGatewayProxyEvent,
+  f: Stored,
+  from: number,
+) {
+  const refused = editAllowed(principal, f);
+  if (refused) throw new HttpError(403, refused);
+  const blocked = versionBlocked(f);
+  if (blocked) throw new HttpError(409, blocked);
+  const meta = (f.versions ?? []).find((x) => x.v === from);
+  if (!meta) throw new HttpError(404, 'That version is no longer kept');
+  const v = nextVersion(f);
+  const pending = {
+    v,
+    name: meta.name,
+    size: meta.size,
+    contentType: meta.contentType,
+    uploadedBy: principal.sub,
+    createdAt: new Date().toISOString(),
+    note: `Restored version ${from}`,
+    status: 'pending' as const,
+    restoredFrom: from,
+  };
+  await db.send(
+    new UpdateCommand({
+      TableName: table(),
+      Key: { PK: f.PK, SK: f.SK },
+      UpdateExpression: 'SET pendingVersion = :p',
+      ConditionExpression: f.pendingVersion
+        ? 'pendingVersion.v = :was'
+        : 'attribute_exists(PK) AND attribute_not_exists(pendingVersion)',
+      ExpressionAttributeValues: {
+        ':p': pending,
+        ...(f.pendingVersion ? { ':was': f.pendingVersion.v } : {}),
+      },
+    }),
+  );
+  await audit(event, 'file.restore', 'success', {
+    fileId: f.fileId,
+    v,
+    restoredFrom: from,
+    ...(f.scope === 'artist' ? { artistId: f.artistId! } : { library: true }),
+  });
+  return (await withThumbnails(principal, [{ ...f, pendingVersion: pending }]))[0];
 }
 
 /** The preview goes with the file, wherever it is in the pipeline. */
@@ -599,6 +834,13 @@ export const handler = handle(async (event) => {
       return json(200, (await withThumbnails(principal, [next as Stored]))[0]);
     }
 
+    case 'POST /artists/{artistId}/files/{fileId}/versions': {
+      const artistId = artistIdParam(event);
+      const f = await load(artistPk(artistId), fileIdParam(event));
+      ensure(canArtistFile(principal, 'write', artistId, f));
+      return versions(principal, event, f);
+    }
+
     case 'PUT /artists/{artistId}/files/{fileId}/asset': {
       // Add a file to the asset library, or change its details and approvals.
       // The artist and Blueprint can both do this (design: assets are shared work).
@@ -650,8 +892,16 @@ export const handler = handle(async (event) => {
       const f = await load(artistPk(artistId), fileIdParam(event));
       ensure(canArtistFile(principal, 'read', artistId, f));
       if (f.status !== 'available') throw new HttpError(409, 'This file isn’t available yet');
-      const url = await artistDownloadUrl(principal, f);
-      await audit(event, 'file.download', 'success', { artistId, fileId: f.fileId });
+      const v = downloadVersion(event);
+      const url =
+        v && v !== currentVersion(f)
+          ? await versionDownloadUrl(principal, f, v)
+          : await artistDownloadUrl(principal, f);
+      await audit(event, 'file.download', 'success', {
+        artistId,
+        fileId: f.fileId,
+        ...(v ? { v } : {}),
+      });
       return json(200, { url, expiresIn: URL_LIFETIME_SECONDS });
     }
 
@@ -798,12 +1048,26 @@ export const handler = handle(async (event) => {
       return json(200, (await withThumbnails(principal, [next as Stored]))[0]);
     }
 
+    case 'POST /library/files/{fileId}/versions': {
+      const f = await load(LIBRARY_PK, fileIdParam(event));
+      ensure(authorize(principal, 'write', librarySharing(f)));
+      return versions(principal, event, f);
+    }
+
     case 'POST /library/files/{fileId}/download': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
       ensure(authorize(principal, 'read', librarySharing(f)));
       if (f.status !== 'available') throw new HttpError(409, 'This file isn’t available yet');
-      const url = await libraryDownloadUrl(f);
-      await audit(event, 'file.download', 'success', { library: true, fileId: f.fileId });
+      const v = downloadVersion(event);
+      const url =
+        v && v !== currentVersion(f)
+          ? await versionDownloadUrl(principal, f, v)
+          : await libraryDownloadUrl(f);
+      await audit(event, 'file.download', 'success', {
+        library: true,
+        fileId: f.fileId,
+        ...(v ? { v } : {}),
+      });
       return json(200, { url, expiresIn: URL_LIFETIME_SECONDS });
     }
 

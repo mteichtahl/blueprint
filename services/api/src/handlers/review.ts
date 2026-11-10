@@ -121,9 +121,12 @@ async function domainEvent(type: string, detail: Record<string, unknown>) {
   );
 }
 
-/** Only files from the artist's own library that are ready can be attached. */
-async function checkFiles(artistId: string, fileIds: string[]) {
-  if (fileIds.length === 0) return;
+/**
+ * Only files from the artist's own library that are ready can be attached.
+ * Returns the version of each one as sent (rev 8).
+ */
+async function checkFiles(artistId: string, fileIds: string[]): Promise<Record<string, number>> {
+  if (fileIds.length === 0) return {};
   const res = await db.send(
     new BatchGetCommand({
       RequestItems: {
@@ -136,6 +139,7 @@ async function checkFiles(artistId: string, fileIds: string[]) {
   if (ok.length !== new Set(fileIds).size) {
     throw new HttpError(400, 'Attach files from your library that are ready and not private');
   }
+  return Object.fromEntries(ok.map((f) => [String(f.fileId), Number(f.version ?? 1)]));
 }
 
 /**
@@ -202,7 +206,7 @@ export const handler = handle(async (event) => {
       ensure(principal, 'write', artistId);
       if (principal.role !== 'artist') throw new HttpError(403, 'Submissions come from the artist');
       const body = parseBody(event, SubmissionCreate);
-      await checkFiles(artistId, body.fileIds);
+      const fileVersions = await checkFiles(artistId, body.fileIds);
       const submissionId = newId();
       const sub: Submission = {
         submissionId,
@@ -213,6 +217,7 @@ export const handler = handle(async (event) => {
         neededBy: body.neededBy,
         ...(body.phaseId ? { phaseId: body.phaseId } : {}),
         fileIds: [...new Set(body.fileIds)],
+        fileVersions,
         ...(body.note
           ? { noteCipher: await (await cipher(principal, artistId)).seal(body.note) }
           : {}),

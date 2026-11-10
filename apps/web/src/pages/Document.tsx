@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
   download,
   EDIT_ACCESS_LABEL,
+  fileTypeOf,
   formatSize,
+  uploadVersion,
+  waitForVersion,
   type EditAccess,
   type FileItem,
   type Person,
 } from '../lib/files.ts';
+import { makeThumbnail } from '../lib/thumbnail.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
 import {
   Avatar,
@@ -52,8 +56,8 @@ export interface DocumentPageProps {
   artists?: ArtistSummary[];
   /** Back to the list. */
   onBack: () => void;
-  /** Something changed: refresh the list. */
-  onChanged: () => void;
+  /** Something changed: refresh the list (with the document as it is now, when known). */
+  onChanged: (next?: FileItem) => void;
 }
 
 function whoCanSee(f: FileItem, names: Record<string, string>): string {
@@ -159,6 +163,10 @@ export function DocumentPage(props: DocumentPageProps) {
           props.onChanged();
           props.onBack();
         }}
+        onVersion={(next) => {
+          doc.setFile(next);
+          props.onChanged();
+        }}
       />
     );
   }
@@ -170,6 +178,10 @@ export function DocumentPage(props: DocumentPageProps) {
       error={doc.error}
       onError={doc.setError}
       onEdit={() => setEditing(true)}
+      onChanged={(next) => {
+        if (next) doc.setFile(next);
+        props.onChanged();
+      }}
     />
   );
 }
@@ -193,6 +205,7 @@ function DocumentDetail({
   onError,
   onBack,
   onEdit,
+  onChanged,
 }: DocumentPageProps & {
   file: FileItem;
   people: Person[] | null;
@@ -232,6 +245,7 @@ function DocumentDetail({
         </div>
       </div>
       {f.status === 'rejected' && f.rejectReason && <Notice tone="error">{f.rejectReason}</Notice>}
+      <PendingVersionNotice f={f} />
       {error && <Notice tone="error">{error}</Notice>}
       <div className="flex flex-wrap gap-2">
         <Button
@@ -265,10 +279,320 @@ function DocumentDetail({
           </span>
         </Row>
         <Row label="Uploaded">{shortDate(f.createdAt)}</Row>
+        <Row label="Version">
+          {f.version > 1 ? (
+            <>
+              Version {f.version} · {f.versionUploadedByName}, {shortDate(f.versionCreatedAt)}
+              {f.versionNote && <span className="src block">“{f.versionNote}”</span>}
+            </>
+          ) : (
+            'Version 1'
+          )}
+        </Row>
         <Row label="Who can see it">{whoCanSee(f, names)}</Row>
         <Row label="Who can edit it">{whoCanEdit(f, people)}</Row>
       </dl>
+      {f.versions.length > 0 && (
+        <VersionHistory
+          cfg={cfg}
+          token={token}
+          path={path}
+          f={f}
+          onError={onError}
+          onChanged={onChanged}
+        />
+      )}
     </Card>
+  );
+}
+
+/** A new version on its way, or one that wasn't kept. */
+function PendingVersionNotice({ f }: { f: FileItem }) {
+  const p = f.pendingVersion;
+  if (!p || p.v <= f.version) return null;
+  if (p.status === 'pending') {
+    return (
+      <Notice>
+        {p.restoredFrom
+          ? `Bringing back version ${p.restoredFrom} as version ${p.v}…`
+          : `Version ${p.v} (${p.name}) is being checked for malware. It replaces this one when it’s clean.`}
+      </Notice>
+    );
+  }
+  return (
+    <Notice tone="error">
+      Version {p.v} ({p.name}) was not kept: {p.rejectReason ?? 'it failed the malware scan'}.
+    </Notice>
+  );
+}
+
+/**
+ * Earlier versions, newest first. Each can be downloaded; people who can
+ * edit the document can bring one back (it becomes the newest version).
+ */
+function VersionHistory({
+  cfg,
+  token,
+  path,
+  f,
+  onError,
+  onChanged,
+}: {
+  cfg: AppConfig;
+  token: string;
+  path: string;
+  f: FileItem;
+  onError: (e: string | null) => void;
+  onChanged: (next?: FileItem) => void;
+}) {
+  const [busy, setBusy] = useState<number | null>(null);
+  const restoring = f.pendingVersion?.status === 'pending';
+  async function restore(v: number) {
+    setBusy(v);
+    onError(null);
+    try {
+      const next = await api<FileItem>(cfg, token, 'POST', `${path}/versions`, { restoreFrom: v });
+      onChanged(next);
+      const done = await waitForVersion(cfg, token, path, next.pendingVersion?.v ?? f.version + 1);
+      if (done) onChanged(done);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <section
+      aria-labelledby="versions"
+      className="flex flex-col gap-1.5 border-t border-input pt-3"
+    >
+      <h3 id="versions" className="text-[15px] font-bold">
+        Version history
+      </h3>
+      <ul className="flex flex-col">
+        <li className="flex items-center gap-3 border-b border-input py-2">
+          <span className="min-w-0 flex-1">
+            <b className="block">Version {f.version} (current)</b>
+            <span className="src">
+              {f.name} · {formatSize(f.size)} · {f.versionUploadedByName},{' '}
+              {shortDate(f.versionCreatedAt)}
+            </span>
+          </span>
+        </li>
+        {f.versions.map((v) => (
+          <li
+            key={v.v}
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-input py-2 last:border-b-0"
+          >
+            <span className="min-w-0 flex-[1_1_200px]">
+              <b className="block">Version {v.v}</b>
+              <span className="src block [overflow-wrap:anywhere]">
+                {v.name} · {formatSize(v.size)} · {v.uploadedByName}, {shortDate(v.createdAt)}
+              </span>
+              {v.note && <span className="src block">“{v.note}”</span>}
+            </span>
+            <span className="flex gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={`Download version ${v.v}`}
+                onClick={() =>
+                  void download(cfg, token, path, v.v).catch((e) => onError((e as Error).message))
+                }
+              >
+                <Icon name="download" size={15} />
+                <span className="max-sm:sr-only">Download</span>
+              </Button>
+              {f.canEdit && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Restore version ${v.v}`}
+                  disabled={restoring || busy !== null}
+                  onClick={() => void restore(v.v)}
+                >
+                  {busy === v.v ? 'Restoring…' : 'Restore'}
+                </Button>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <span className="src">
+        Restoring makes that version the newest one; nothing is lost. Submissions for review keep
+        the version that was sent.
+      </span>
+    </section>
+  );
+}
+
+/**
+ * Upload a new version (rev 8). The name, sharing, owner, who can edit it and
+ * everywhere it's used stay the same; it replaces the current version once
+ * the malware scan is clean.
+ */
+function NewVersion({
+  cfg,
+  token,
+  path,
+  f,
+  onUploaded,
+}: {
+  cfg: AppConfig;
+  token: string;
+  path: string;
+  f: FileItem;
+  onUploaded: (next: FileItem) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [note, setNote] = useState('');
+  const [thumb, setThumb] = useState<Blob | null | undefined>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const making = useRef<Promise<Blob | null> | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const checking = f.pendingVersion?.status === 'pending' && f.pendingVersion.v > f.version;
+
+  useEffect(() => {
+    if (!thumb) {
+      setThumbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(thumb);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [thumb]);
+
+  function pick(next: File | null) {
+    setFile(next);
+    setResult(null);
+    if (!next) {
+      setThumb(null);
+      making.current = null;
+      return;
+    }
+    setThumb(undefined);
+    const p = makeThumbnail(next);
+    making.current = p;
+    void p.then((b) => {
+      if (making.current === p) setThumb(b);
+    });
+  }
+
+  async function go() {
+    if (!file) return;
+    setResult(null);
+    try {
+      setBusy('Uploading…');
+      const preview = thumb === undefined ? await making.current : thumb;
+      const started = await uploadVersion(cfg, token, path, file, {
+        note,
+        thumbnail: preview ?? null,
+      });
+      onUploaded(started);
+      const v = started.pendingVersion?.v ?? f.version + 1;
+      setBusy('Checking for malware…');
+      const settled = await waitForVersion(cfg, token, path, v);
+      if (settled) onUploaded(settled);
+      setResult(
+        !settled
+          ? {
+              tone: 'success',
+              text: 'Uploaded. The scan is taking a while; it replaces this version when it’s done.',
+            }
+          : settled.version >= v
+            ? { tone: 'success', text: `Version ${v} is now the current version.` }
+            : {
+                tone: 'error',
+                text: `Version ${v} was not kept: ${settled.pendingVersion?.rejectReason ?? 'it failed the scan'}.`,
+              },
+      );
+      pick(null);
+      setNote('');
+      if (input.current) input.current.value = '';
+    } catch (e) {
+      setResult({ tone: 'error', text: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const type = file ? fileTypeOf(file) : null;
+  const changesType =
+    !!type &&
+    !!f.fileType.ext &&
+    !!type.ext &&
+    type.ext.toLowerCase() !== f.fileType.ext.toLowerCase();
+  return (
+    <section
+      aria-labelledby="new-version"
+      className="flex flex-col gap-3 border-t border-input pt-4"
+    >
+      <h3 id="new-version" className="text-[15px] font-bold">
+        Upload a new version
+      </h3>
+      <p className="src">
+        Replaces version {f.version}. The name, sharing and everywhere it’s used stay the same, and
+        earlier versions are kept in the history.
+      </p>
+      <label className="flex min-h-[80px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-[10px] border border-dashed border-[#9AA4B0] bg-background px-4 py-3 text-center">
+        {file && type ? (
+          <span className="flex w-full items-center gap-3 text-left">
+            <FileThumb
+              src={thumbUrl}
+              kind={type.kind}
+              ext={type.ext}
+              label={type.label}
+              size={56}
+              loading={thumb === undefined}
+            />
+            <span className="min-w-0 flex-1">
+              <b className="line-clamp-2 block text-[15px] [overflow-wrap:anywhere]">{file.name}</b>
+              <span className="src">
+                {type.label} · {formatSize(file.size)}
+              </span>
+              <span className="src block underline">Choose a different file</span>
+            </span>
+          </span>
+        ) : (
+          <>
+            <Icon name="upload" size={20} />
+            <b className="text-[15px]">Choose the new version</b>
+            <span className="src">Up to 500 MB · scanned for malware first</span>
+          </>
+        )}
+        <input
+          ref={input}
+          type="file"
+          className="sr-only"
+          disabled={!!busy || checking}
+          onChange={(e) => pick(e.target.files?.[0] ?? null)}
+        />
+      </label>
+      {changesType && (
+        <Notice>
+          This version is a {type!.label}; the current one is a {f.fileType.label}.
+        </Notice>
+      )}
+      <Field
+        label="What changed? (optional)"
+        value={note}
+        maxLength={300}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="e.g. Updated set times"
+      />
+      {checking && !busy && (
+        <Notice>A new version is still being checked. Try again in a minute.</Notice>
+      )}
+      <span>
+        <Button variant="navy" disabled={!file || !!busy || checking} onClick={() => void go()}>
+          <Icon name="upload" size={16} />
+          {busy ?? 'Upload new version'}
+        </Button>
+      </span>
+      {result && <Notice tone={result.tone}>{result.text}</Notice>}
+    </section>
   );
 }
 
@@ -359,11 +683,14 @@ function EditDocument({
   people,
   onDone,
   onDeleted,
+  onVersion,
 }: DocumentPageProps & {
   file: FileItem;
   people: Person[] | null;
   onDone: (next?: FileItem) => void;
   onDeleted: () => void;
+  /** A new version was uploaded or settled: show it, stay on the Edit page. */
+  onVersion: (next: FileItem) => void;
 }) {
   const path = `${collection}/${f.fileId}`;
   const library = f.scope === 'library';
@@ -573,6 +900,16 @@ function EditDocument({
           </Button>
         </span>
       </form>
+
+      {f.canEdit && (
+        <NewVersion
+          cfg={cfg}
+          token={token}
+          path={path}
+          f={f}
+          onUploaded={(next) => onVersion(next)}
+        />
+      )}
 
       {f.canManage && !isPrivate && (people?.length ?? 0) > 0 && (
         <section

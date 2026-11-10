@@ -71,6 +71,30 @@ const file = {
   locked: false,
   canEdit: true,
   canManage: true,
+  version: 2,
+  versionUploadedBy: '0f8fad5b-d9cb-469f-a165-70867728950e',
+  versionUploadedByName: 'Chloe Poli',
+  versionCreatedAt: now,
+  versionNote: 'Brighter edit',
+  versions: [
+    {
+      v: 1,
+      name: 'press-shot-old.jpg',
+      size: 2_000_000,
+      fileType: {
+        kind: 'image',
+        label: 'JPEG image',
+        ext: 'jpg',
+        mime: 'image/jpeg',
+        detected: true,
+      },
+      uploadedBy: '0f8fad5b-d9cb-469f-a165-70867728950e',
+      uploadedByName: 'Chloe Poli',
+      createdAt: now,
+      note: null,
+    },
+  ],
+  pendingVersion: null,
   createdAt: now,
   sharedWith: [],
   sharedWithArtistIds: [],
@@ -566,11 +590,14 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     expect(screen.getByRole('heading', { name: 'Document' })).toBeTruthy();
     expect(screen.getByText('Kyra Teichtahl', { exact: false })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Version history' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Restore version 1' })).toBeTruthy();
     expect(await violations()).toEqual([]);
     await click('Edit');
     expect(screen.getByRole('heading', { name: 'Edit document' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Delete Press shot/ })).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Who can edit it' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Upload a new version' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
