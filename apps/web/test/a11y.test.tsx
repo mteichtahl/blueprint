@@ -130,7 +130,90 @@ function answer(method: string, path: string): [number, unknown] {
     [/^\/artists\/[^/]+\/gigs$/, { gigs: [] }],
     [/^\/notifications$/, { notifications: [], unread: 0 }],
     [/^\/conversations$/, { conversations: [] }],
-    [/^\/events$/, { events: [] }],
+    [
+      /^\/events$/,
+      {
+        events: [
+          {
+            eventId: 'evt000000001',
+            name: 'Industry Mixer Night',
+            date: '2027-02-12',
+            startTime: '18:00',
+            endTime: '23:00',
+            venue: 'The Toff in Town',
+            capacity: 200,
+            ticketTarget: 150,
+            ticketPriceCents: 2500,
+            ticketsSold: 40,
+            takingsCents: 0,
+            compsTarget: 20,
+            surveyAfter: true,
+          },
+        ],
+      },
+    ],
+    [
+      /^\/events\/evt000000001$/,
+      {
+        event: {
+          eventId: 'evt000000001',
+          name: 'Industry Mixer Night',
+          date: '2027-02-12',
+          startTime: '18:00',
+          endTime: '23:00',
+          venue: 'The Toff in Town',
+          capacity: 200,
+          ticketTarget: 150,
+          ticketPriceCents: 2500,
+          ticketsSold: 40,
+          takingsCents: 0,
+          compsTarget: 20,
+          surveyAfter: true,
+        },
+        guests: [],
+        speakers: [],
+        crew: [],
+        run: [],
+        budget: [],
+        summary: {
+          ticketsSold: 40,
+          ticketTarget: 150,
+          compsAccepted: 0,
+          compsTarget: 20,
+          inRoom: 40,
+          capacity: 200,
+          budgetCents: 0,
+          spentCents: 0,
+          ticketIncomeCents: 100000,
+          takingsCents: 0,
+          profitCents: 0,
+        },
+      },
+    ],
+    [
+      /^\/venues$/,
+      {
+        venues: [
+          {
+            venueId: 'ven000000001',
+            name: 'The Toff in Town',
+            capacity: 200,
+            backline: true,
+            website: '',
+            address: '252 Swanston St',
+            suburb: 'Melbourne',
+            manager: null,
+            booker: null,
+            autoLogo: false,
+            logo: null,
+            archived: false,
+            addedByArtist: false,
+            canEdit: true,
+            bookings: 3,
+          },
+        ],
+      },
+    ],
     [
       /^\/access\/settings$/,
       {
@@ -209,6 +292,8 @@ async function violations(): Promise<string[]> {
   const res = await axe.run(document.body, {
     runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
     rules: { 'color-contrast': { enabled: false } },
+    // jsdom can't run axe inside frames (the venue map is a Google iframe).
+    iframes: false,
   });
   return res.violations.flatMap((v) =>
     v.nodes.map(
@@ -319,10 +404,25 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     ['stats', /^My stats/],
     ['connectors', /^Connect Instagram/],
     ['submit', /^Upload music or lyrics/],
-    ['profile', /Profile & preferences$/],
   ] as const)('artist phone: %s', async (_view, name) => {
     await phone();
     await click(name);
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist phone: account menu open', async () => {
+    await phone();
+    await click(/your account$/i);
+    expect(screen.getByRole('menu', { name: 'Your account' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist phone: profile (from the account menu)', async () => {
+    await phone();
+    await click(/your account$/i);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile & preferences' }));
+    await settle();
+    expect(screen.getByRole('button', { name: 'Upload a photo' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
@@ -375,6 +475,30 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /^Events/ })[0]!);
     await settle();
     await click(/^New event/);
+    expect(await violations()).toEqual([]);
+  });
+
+  it('BMG: all events as cards, opening one', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Events/ })[0]!);
+    await settle();
+    await click(/^All events/);
+    const card = screen.getByRole('button', { name: /Industry Mixer Night/ });
+    expect(await violations()).toEqual([]);
+    fireEvent.click(card);
+    await settle();
+    expect(screen.queryByRole('heading', { name: 'All events' })).toBeNull();
+  });
+
+  it('BMG: venue detail with booking count and map', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Venues/ })[0]!);
+    await settle();
+    await click('The Toff in Town');
+    expect(screen.getByText('Booked 3 times')).toBeTruthy();
+    expect(screen.getByTitle('Map of The Toff in Town')).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 

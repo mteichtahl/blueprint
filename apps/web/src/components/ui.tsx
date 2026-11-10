@@ -169,12 +169,26 @@ export function Avatar({
   name,
   size = 40,
   className = '',
+  src,
 }: {
   name: string;
   size?: number;
   className?: string;
+  /** A profile picture (data URL); the initials show when there isn't one. */
+  src?: string | null | undefined;
 }) {
   const tone = AVATAR_TONES[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % 3];
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        aria-hidden="true"
+        className={`av ${className} !bg-transparent object-cover`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   return (
     <span
       aria-hidden="true"
@@ -257,6 +271,66 @@ export function Logo({ light = true, compact = false }: { light?: boolean; compa
   );
 }
 
+/** The nine bars of the waveform logo: x position and full height (centred on y=30). */
+const WAVE_BARS: [number, number][] = [
+  [12, 6],
+  [20, 18],
+  [28, 34],
+  [36, 16],
+  [44, 46],
+  [52, 26],
+  [60, 12],
+  [68, 22],
+  [76, 6],
+];
+
+/**
+ * The loading indicator: the waveform logo with its bars oscillating like a
+ * sound wave. Use instead of "Loading…" text. `label` is read by screen readers.
+ */
+export function WaveLoader({
+  label = 'Loading',
+  size = 56,
+  inline = false,
+  className = '',
+}: {
+  label?: string;
+  size?: number;
+  inline?: boolean;
+  className?: string;
+}) {
+  const Tag = inline ? 'span' : 'div';
+  return (
+    <Tag
+      role="status"
+      aria-live="polite"
+      className={`${inline ? 'inline-flex' : 'flex py-6'} items-center justify-center ${className}`}
+    >
+      <svg
+        className="wave-loader"
+        width={size}
+        height={Math.round((size * 60) / 88)}
+        viewBox="0 0 88 60"
+        aria-hidden="true"
+      >
+        <g stroke="currentColor" strokeWidth="4" strokeLinecap="round">
+          {WAVE_BARS.map(([x, h], i) => (
+            <line
+              key={x}
+              x1={x}
+              x2={x}
+              y1={30 - h / 2}
+              y2={30 + h / 2}
+              style={{ animationDelay: `${i * 0.09 - 1.2}s` }}
+            />
+          ))}
+        </g>
+      </svg>
+      <span className="sr-only">{label}</span>
+    </Tag>
+  );
+}
+
 /** Kept for older screens: the text wordmark. */
 export function Wordmark({ light = false }: { light?: boolean }) {
   return <Logo light={light} />;
@@ -293,6 +367,8 @@ const ICONS = {
   back: 'M15 18l-6-6 6-6',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6',
   pencil: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
+  user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0',
+  logout: 'M14 4h5v16h-5M10 8l-4 4 4 4M6 12h11',
 } as const;
 export type IconName = keyof typeof ICONS;
 

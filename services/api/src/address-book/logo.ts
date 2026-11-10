@@ -98,17 +98,20 @@ export function pngSize(b: Uint8Array): { width: number; height: number } | null
  * Checks a logo the browser sends: a base64 data URL of a PNG, JPEG or WebP,
  * whose bytes really are that type, small enough to store.
  */
-export function parseLogoDataUrl(dataUrl: string): { contentType: StoredType; bytes: Buffer } {
+export function parseLogoDataUrl(
+  dataUrl: string,
+  what = 'logo',
+): { contentType: StoredType; bytes: Buffer } {
   const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl);
-  if (!m) throw new Error('The logo must be a PNG, JPEG or WebP image');
+  if (!m) throw new Error(`The ${what} must be a PNG, JPEG or WebP image`);
   const contentType = m[1] as StoredType;
   const bytes = Buffer.from(m[2]!, 'base64');
-  if (bytes.length === 0) throw new Error('The logo is empty');
-  if (bytes.length > LOGO_MAX_BYTES) throw new Error('The logo is too large');
-  if (sniffImage(bytes) !== contentType) throw new Error("The logo isn't a valid image");
+  if (bytes.length === 0) throw new Error(`The ${what} is empty`);
+  if (bytes.length > LOGO_MAX_BYTES) throw new Error(`The ${what} is too large`);
+  if (sniffImage(bytes) !== contentType) throw new Error(`The ${what} isn't a valid image`);
   const size = pngSize(bytes);
   if (size && (size.width > LOGO_MAX_SIDE || size.height > LOGO_MAX_SIDE))
-    throw new Error(`The logo must be at most ${LOGO_MAX_SIDE}px on each side`);
+    throw new Error(`The ${what} must be at most ${LOGO_MAX_SIDE}px on each side`);
   return { contentType, bytes };
 }
 

@@ -22,6 +22,7 @@ import {
   shortDate,
   Tag,
   usePhone,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 const VISIBILITY_LABEL: Record<NonNullable<FileItem['visibility']>, string> = {
@@ -430,7 +431,7 @@ function FileTable({
     setRenaming(null);
   };
   const renamable = (f: FileItem) => !!onRename && canRename(f);
-  if (!files) return <p className="src">Loading…</p>;
+  if (!files) return <WaveLoader />;
   if (files.length === 0) return <p className="src pb-5">{empty}</p>;
   if (compact || phone) {
     return (

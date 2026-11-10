@@ -12,6 +12,7 @@ import {
   Select,
   shortDate,
   Tag,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 /**
@@ -145,7 +146,7 @@ export function AccessPage({
   }
 
   if (!saved || !rules || !team) {
-    return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+    return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   }
   const dirty = SWITCHES.some((s) => rules[s.key] !== saved[s.key]);
   const artistName = (id: string) => artists.find((a) => a.artistId === id)?.displayName ?? id;

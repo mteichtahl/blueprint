@@ -390,6 +390,17 @@ describe('environment audit trail', () => {
 describe('environment files', () => {
   const [staging] = stacks.environments.map((e) => Template.fromStack(e.files));
 
+  it('lets the app read artist and library images (GET only) in the browser', () => {
+    for (const bucket of ['artist-data', 'org-data'] as const) {
+      staging!.hasResourceProperties('AWS::S3::Bucket', {
+        BucketName: names.bucket(cfg, 'staging', bucket),
+        CorsConfiguration: {
+          CorsRules: [Match.objectLike({ AllowedMethods: ['GET', 'HEAD'] })],
+        },
+      });
+    }
+  });
+
   it('keeps uploads in a 7-day quarantine under its own key, open to browser POSTs only', () => {
     staging!.hasResourceProperties('AWS::S3::Bucket', {
       BucketName: names.bucket(cfg, 'staging', 'quarantine'),
@@ -567,6 +578,8 @@ describe('environment web app', () => {
         .ContentSecurityPolicy;
     expect(JSON.stringify(csp)).toContain("frame-ancestors 'none'");
     expect(JSON.stringify(csp)).not.toContain('unsafe-inline');
+    // Only Google Maps may be framed (venue details), nothing else.
+    expect(JSON.stringify(csp)).toMatch(/frame-src https:\/\/www\.google\.com;/);
   });
 
   it('owns the web client: our own sign-in, with no hosted UI', () => {

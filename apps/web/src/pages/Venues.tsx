@@ -7,10 +7,12 @@ import {
   Chips,
   DataTable,
   Field,
+  Icon,
   Notice,
   RowCard,
   Tag,
   TextArea,
+  WaveLoader,
 } from '../components/ui.tsx';
 import { ContactPicker, type Contact } from './Contacts.tsx';
 import {
@@ -53,6 +55,48 @@ export interface Venue {
   addedByArtist: boolean;
   canEdit: boolean;
   bmgNotes?: string;
+  /** Times booked: confirmed, booked or played gigs and Blueprint events at this venue. */
+  bookings?: number;
+}
+
+/** "Booked 3 times" for the venue cards and details. */
+export const bookedLabel = (n = 0) =>
+  n === 0 ? 'Not booked yet' : `Booked ${n} ${n === 1 ? 'time' : 'times'}`;
+
+/** A Google Maps search for the venue's address (also used for the embedded map). */
+export function mapsQuery(v: Pick<Venue, 'name' | 'address' | 'suburb'>): string {
+  const where = [v.address, v.suburb]
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .join(', ');
+  return where ? `${v.name}, ${where}` : '';
+}
+
+/** The venue's address on an embedded Google map, with a link to open it in Maps. */
+export function VenueMap({ venue }: { venue: Pick<Venue, 'name' | 'address' | 'suburb'> }) {
+  const q = mapsQuery(venue);
+  if (!q) return null;
+  const query = encodeURIComponent(q);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <iframe
+        title={`Map of ${venue.name}`}
+        src={`https://www.google.com/maps?q=${query}&output=embed`}
+        className="h-64 w-full rounded-xl border border-input"
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      />
+      <a
+        className="self-start text-sm font-bold underline"
+        href={`https://www.google.com/maps/search/?api=1&query=${query}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Open in Google Maps
+      </a>
+    </div>
+  );
 }
 
 type Backline = '' | 'yes' | 'no';
@@ -574,10 +618,12 @@ export function Venues({
             <div className="flex flex-wrap gap-1.5">
               <Tag tone="n">{v.capacity ? `Capacity ${v.capacity}` : 'Capacity not set'}</Tag>
               <Tag tone={v.backline ? 'c' : 's'}>Backline: {v.backline ? 'Yes' : 'No'}</Tag>
+              <Tag tone={v.bookings ? 'c' : 's'}>{bookedLabel(v.bookings)}</Tag>
             </div>
             {(v.address || v.suburb) && (
               <p className="m-0">{[v.address, v.suburb].filter(Boolean).join(', ')}</p>
             )}
+            <VenueMap venue={v} />
             {v.website && (
               <a href={v.website} target="_blank" rel="noreferrer">
                 {v.website}
@@ -702,7 +748,7 @@ export function Venues({
         )}
       </div>
       {venues === null ? (
-        <p className="src">Loading…</p>
+        <WaveLoader />
       ) : venues.length === 0 ? (
         <p className="src">
           {q || backline || minCapacity ? 'No venues match.' : 'No venues yet. Add the first one.'}
@@ -726,6 +772,7 @@ export function Venues({
               <th scope="col">Suburb</th>
               <th scope="col">Capacity</th>
               <th scope="col">Backline</th>
+              <th scope="col">Booked</th>
               <th scope="col">Manager</th>
               <th scope="col">Booker</th>
             </tr>
@@ -748,6 +795,11 @@ export function Venues({
                 <td>{v.suburb || '—'}</td>
                 <td>{v.capacity || '—'}</td>
                 <td>{v.backline ? 'Yes' : 'No'}</td>
+                <td>
+                  <span className="bk-count" title={bookedLabel(v.bookings)}>
+                    {v.bookings ?? 0}
+                  </span>
+                </td>
                 <td>{v.manager?.name ?? '—'}</td>
                 <td>{v.booker?.name ?? '—'}</td>
               </tr>
@@ -774,6 +826,11 @@ function venueCards(
       sub={[v.suburb, v.capacity ? `Capacity ${v.capacity}` : ''].filter(Boolean).join(' · ')}
       tags={
         <>
+          <span className="bk-count" title={bookedLabel(v.bookings)}>
+            <Icon name="calendar" size={14} />
+            <span aria-hidden="true">{v.bookings ?? 0}</span>
+            <span className="sr-only">{bookedLabel(v.bookings)}</span>
+          </span>
           {v.backline && <Tag tone="n">Backline</Tag>}
           {v.booker?.name && <span className="src">Booker: {v.booker.name}</span>}
           {!v.booker?.name && v.manager?.name && (

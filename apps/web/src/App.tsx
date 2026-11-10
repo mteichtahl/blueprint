@@ -3,7 +3,7 @@ import { api, type Me } from './lib/api.ts';
 import { currentSession, profileOf, refresh, signOut, type Session } from './lib/auth.ts';
 import { loadConfig, type AppConfig } from './lib/config.ts';
 import { captureCallback } from './lib/connectors.ts';
-import { Notice } from './components/ui.tsx';
+import { Notice, WaveLoader } from './components/ui.tsx';
 import { Consent } from './pages/Consent.tsx';
 import { Home } from './pages/Home.tsx';
 import { SignIn, type SignInReason } from './pages/SignIn.tsx';
@@ -77,7 +77,11 @@ export function App() {
   }, [resume]);
 
   if (state.kind === 'loading') {
-    return <p className="p-8 text-sm text-muted-foreground">Loading…</p>;
+    return (
+      <div className="grid min-h-dvh place-items-center">
+        <WaveLoader size={88} />
+      </div>
+    );
   }
   if (state.kind === 'error') {
     return (

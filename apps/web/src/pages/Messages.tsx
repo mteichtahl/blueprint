@@ -4,7 +4,7 @@ import type { AppConfig } from '../lib/config.ts';
 import { EmojiPicker } from '../components/EmojiPicker.tsx';
 import { formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
 import { inboxChannels, subscribeInbox } from '../lib/realtime.ts';
-import { Avatar, Icon } from '../components/ui.tsx';
+import { Avatar, Icon, WaveLoader } from '../components/ui.tsx';
 import type { Gig } from './Gigs.tsx';
 
 /* ------------------------------------------------------------------------ */
@@ -726,7 +726,7 @@ function ChatList({
             Couldn’t load chats: {inbox.error}
           </p>
         )}
-        {!inbox.conversations && !inbox.error && <p className="wa-empty">Loading chats…</p>}
+        {!inbox.conversations && !inbox.error && <WaveLoader label="Loading chats" />}
         {inbox.conversations && shown.length === 0 && (
           <p className="wa-empty">
             {q
@@ -1336,7 +1336,7 @@ function SharePanel({
           <b>Share a {SHARE[picking].label.toLowerCase()}</b>
         </div>
         <div className="wa-share-list">
-          {!items && <p className="wa-empty">Loading…</p>}
+          {!items && <WaveLoader />}
           {items?.length === 0 && !status && <p className="wa-empty">Nothing to share yet.</p>}
           {status && (
             <p className="wa-empty" role="status">
@@ -1870,7 +1870,7 @@ function Conversation({
         )}
         {!thread.page && !thread.error && (
           <div className="wa-dayrow">
-            <span className="wa-day">Loading…</span>
+            <WaveLoader inline size={40} />
           </div>
         )}
         {thread.error && (

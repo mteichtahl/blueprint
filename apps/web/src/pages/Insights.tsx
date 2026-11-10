@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { SOURCE_LABEL, type AccountInsight, type InsightsData } from '../lib/connectors.ts';
-import { Avatar, Button, Card, Chips, DataTable, Notice, Tag } from '../components/ui.tsx';
+import {
+  Avatar,
+  Button,
+  Card,
+  Chips,
+  DataTable,
+  Notice,
+  Tag,
+  WaveLoader,
+} from '../components/ui.tsx';
 
 /** Screens: X-Insights (Blueprint), the workspace Stats tab and the artist's My stats. */
 
@@ -104,7 +113,7 @@ export function Insights({
     })();
   }, [cfg, token, range]);
 
-  if (!data) return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!data) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   const w = data.website;
   const maxDay = Math.max(1, ...w.daily.map((d) => d.visits));
   const bmg = data.accounts.find((a) => a.account === 'bmg');
@@ -322,7 +331,7 @@ export function ArtistStats({
       }
     })();
   }, [cfg, token, artistId, range]);
-  if (!data) return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!data) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   const a: AccountInsight = { ...data, account: artistId, name };
   return (
     <Card

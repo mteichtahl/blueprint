@@ -12,7 +12,16 @@ import {
   type AssetUse,
   type FileItem,
 } from '../lib/files.ts';
-import { Button, Card, Field, Notice, Select, Tag, shortDate } from '../components/ui.tsx';
+import {
+  Button,
+  Card,
+  Field,
+  Notice,
+  Select,
+  Tag,
+  shortDate,
+  WaveLoader,
+} from '../components/ui.tsx';
 
 /**
  * Asset library (screens doc "Assets"): an artist's press photos, artwork,
@@ -372,7 +381,7 @@ export function AssetLibrary({
         </nav>
 
         {files === null ? (
-          <p className="src">Loading…</p>
+          <WaveLoader />
         ) : shown.length === 0 ? (
           <p className="src">
             {assets.length === 0

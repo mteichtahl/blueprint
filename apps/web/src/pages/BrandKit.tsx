@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import type { FileItem } from '../lib/files.ts';
+import { linkFor, type FileItem } from '../lib/files.ts';
 import {
   Button,
   Card,
@@ -11,6 +11,7 @@ import {
   Tag,
   TextArea,
   shortDate,
+  WaveLoader,
 } from '../components/ui.tsx';
 import { Thumb, useArtistFiles, useThumbs } from './Assets.tsx';
 
@@ -125,6 +126,7 @@ export function BrandKit({
   const [note, setNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState<'logo' | 'imagery' | null>(null);
+  const [exporting, setExporting] = useState(false);
   const { files } = useArtistFiles(cfg, token, artistId);
   const images = useMemo(
     () =>
@@ -145,8 +147,7 @@ export function BrandKit({
   }, [cfg, token, artistId]);
   useEffect(() => void load(), [load]);
 
-  if (!kit || !saved)
-    return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!kit || !saved) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
 
   const dirty = JSON.stringify(kit) !== JSON.stringify(saved);
   const badHex = kit.colours.some((c) => !HEX.test(c.hex) || !c.name.trim());
@@ -181,6 +182,43 @@ export function BrandKit({
     }
   }
 
+  /** The PDF uses the saved kit plus any unsaved edits on screen. */
+  async function exportPdf() {
+    if (!kit) return;
+    setExporting(true);
+    setError(null);
+    try {
+      // Fresh links for every image (the thumbnails' links may have expired).
+      const link = (id: string) =>
+        byId.has(id)
+          ? linkFor(cfg, token, `/artists/${artistId}/files/${id}`).catch(() => undefined)
+          : Promise.resolve(undefined);
+      const [logoUrls, photoUrls] = await Promise.all([
+        Promise.all(kit.logos.map((l) => link(l.fileId))),
+        Promise.all(kit.imagery.fileIds.map(link)),
+      ]);
+      const { exportBrandKitPdf } = await import('../lib/brandKitPdf.ts');
+      await exportBrandKitPdf({
+        artistName,
+        logos: kit.logos.map((l, i) => ({ label: l.label, url: logoUrls[i] })),
+        logoRules: kit.logoRules,
+        colours: kit.colours.map((c) => ({
+          ...c,
+          role: ROLES.find((r) => r.value === c.role)?.label ?? c.role,
+        })),
+        contrast: checks(kit.colours),
+        fonts: kit.fonts,
+        voice: kit.voice,
+        socials: SOCIALS.map((x) => ({ label: x.label, value: kit.socials[x.id] })),
+        imagery: { note: kit.imagery.note, urls: photoUrls },
+      });
+    } catch (e) {
+      setError(`Couldn't export the PDF: ${(e as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function pick(f: FileItem) {
     if (!kit) return;
     if (picking === 'logo' && !kit.logos.some((l) => l.fileId === f.fileId)) {
@@ -211,8 +249,8 @@ export function BrandKit({
           ? ` · last change by ${saved.updatedByName ?? 'Blueprint'}, ${shortDate(saved.updatedAt)}`
           : ' · not saved yet'}
       </span>
-      <Button variant="ghost" size="sm" onClick={() => window.print()}>
-        Export PDF
+      <Button variant="ghost" size="sm" disabled={exporting} onClick={() => void exportPdf()}>
+        {exporting ? 'Exporting…' : 'Export PDF'}
       </Button>
       <Button
         variant="cta"

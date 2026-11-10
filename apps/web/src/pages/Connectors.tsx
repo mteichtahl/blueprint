@@ -9,7 +9,17 @@ import {
   type ConnectorApp,
   type ConnectorCard,
 } from '../lib/connectors.ts';
-import { Button, Card, DataTable, Field, Notice, RowCard, Select, Tag } from '../components/ui.tsx';
+import {
+  Button,
+  Card,
+  DataTable,
+  Field,
+  Notice,
+  RowCard,
+  Select,
+  Tag,
+  WaveLoader,
+} from '../components/ui.tsx';
 
 /** Screens: X-Connectors (Blueprint) and P-Connectors (artist "My connectors"). */
 
@@ -310,8 +320,7 @@ export function BmgConnectors({
   const { cards, artists, msg, setMsg, act } = useCards(cfg, token, '/connectors');
   const [open, setOpen] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
-  if (!cards)
-    return msg ? <Notice tone="error">{msg.text}</Notice> : <p className="src">Loading…</p>;
+  if (!cards) return msg ? <Notice tone="error">{msg.text}</Notice> : <WaveLoader />;
   const meta = cards.find((c) => c.id === 'meta');
   const viaMeta = (src: 'instagram' | 'facebook') =>
     meta?.connection?.accounts?.some((a) => a.source === src) ?? false;
@@ -614,7 +623,7 @@ function ConnectorApps({
       </p>
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       {!apps ? (
-        !msg && <p className="src">Loading…</p>
+        !msg && <WaveLoader />
       ) : (
         <div className="flex flex-col divide-y divide-input">
           {apps.map((a) => (
@@ -822,8 +831,7 @@ export function MyConnectors({
   const base = `/artists/${artistId}/connectors`;
   const { cards, msg, setMsg, act } = useCards(cfg, token, base);
   const [open, setOpen] = useState<string | null>(null);
-  if (!cards)
-    return msg ? <Notice tone="error">{msg.text}</Notice> : <p className="src">Loading…</p>;
+  if (!cards) return msg ? <Notice tone="error">{msg.text}</Notice> : <WaveLoader />;
   const byId = new Map(cards.map((c) => [c.id, c]));
 
   return (

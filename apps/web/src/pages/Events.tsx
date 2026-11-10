@@ -11,6 +11,7 @@ import {
   PageHeader,
   RowCard,
   Tag,
+  WaveLoader,
 } from '../components/ui.tsx';
 import { aud, PRESET_COSTS } from '../components/Money.tsx';
 import { VenuePicker, type Venue } from './Venues.tsx';
@@ -108,7 +109,7 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
 
   const actions = (
     <>
-      <Button variant="default" onClick={() => setListing((v) => !v)}>
+      <Button variant="default" onClick={() => setListing(true)}>
         All events
       </Button>
       <Button variant="cta" onClick={() => setCreating(true)}>
@@ -127,47 +128,52 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
           onCancel={() => setCreating(false)}
           onSaved={(id) => {
             setCreating(false);
+            setListing(false);
             setOpenId(id);
             void loadList();
           }}
         />
       )}
       {listing && events && (
-        <Card title="All events">
+        <>
+          <PageHeader
+            eyebrow="BMG only · Events"
+            title="All events"
+            sub={`${events.length} event${events.length === 1 ? '' : 's'}`}
+            actions={
+              <>
+                {openId && (
+                  <Button variant="default" onClick={() => setListing(false)}>
+                    ← Back to event
+                  </Button>
+                )}
+                <Button variant="cta" onClick={() => setCreating(true)}>
+                  New event
+                </Button>
+              </>
+            }
+          />
           {events.length === 0 ? (
-            <p className="src">No events yet.</p>
+            <Notice>No events yet. Start with the Industry Mixer Night.</Notice>
           ) : (
-            <div className="flex flex-col">
-              {events.map((e) => (
-                <button
-                  key={e.eventId}
-                  type="button"
-                  className="li text-left"
-                  onClick={() => {
-                    setOpenId(e.eventId);
-                    setListing(false);
-                  }}
-                >
-                  <b className="flex-1">{e.name}</b>
-                  <span className="src">
-                    {[longDate(e.date), eventTimes(e.startTime, e.endTime)]
-                      .filter(Boolean)
-                      .join(', ')}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <EventCards
+              events={events}
+              onOpen={(id) => {
+                setOpenId(id);
+                setListing(false);
+              }}
+            />
           )}
-        </Card>
+        </>
       )}
-      {events === null && <p className="src">Loading…</p>}
-      {events?.length === 0 && !creating && (
+      {events === null && <WaveLoader />}
+      {events?.length === 0 && !creating && !listing && (
         <>
           <PageHeader eyebrow="BMG only · Events" title="Events" actions={actions} />
           <Notice>No events yet. Start with the Industry Mixer Night.</Notice>
         </>
       )}
-      {openId && (
+      {openId && !listing && (
         <EventDetail
           key={openId}
           cfg={cfg}
@@ -177,6 +183,88 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
           onChanged={loadList}
         />
       )}
+    </div>
+  );
+}
+
+/** When an event is, relative to today. */
+function eventWhen(date: string): { label: string; tone: 'n' | 'c' | 's' } {
+  const days = daysTo(date);
+  if (days === 0) return { label: 'Today', tone: 'c' };
+  if (days < 0) return { label: 'Done', tone: 's' };
+  if (days <= 14) return { label: `In ${days} day${days === 1 ? '' : 's'}`, tone: 'c' };
+  return { label: 'Upcoming', tone: 'n' };
+}
+
+/** All events as cards (upcoming first, then past); tapping one opens its detail. */
+function EventCards({
+  events,
+  onOpen,
+}: {
+  events: EventInfo[];
+  onOpen: (eventId: string) => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = events.filter((e) => e.date >= today);
+  const past = events.filter((e) => e.date < today).reverse();
+  const group = (title: string, list: EventInfo[]) =>
+    list.length > 0 && (
+      <section className="flex flex-col gap-3" aria-label={title}>
+        <span className="eyebrow">{title}</span>
+        <ul className="m-0 grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
+          {list.map((e) => {
+            const when = eventWhen(e.date);
+            const d = new Date(`${e.date}T00:00:00`);
+            return (
+              <li key={e.eventId} className="flex">
+                <button
+                  type="button"
+                  className="card ev-card flex-1 gap-3 text-left"
+                  onClick={() => onOpen(e.eventId)}
+                >
+                  <span className="flex items-start gap-3">
+                    <span className="flex w-14 flex-none flex-col items-center rounded-lg bg-primary py-1.5 leading-none text-primary-foreground">
+                      <span className="text-[11px] font-bold tracking-wide uppercase opacity-80">
+                        {d.toLocaleDateString('en-AU', { month: 'short' })}
+                      </span>
+                      <span className="t text-[24px]">{d.getDate()}</span>
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                      <b className="t line-clamp-2 text-[19px] leading-tight">{e.name}</b>
+                      <span className="src">
+                        {[
+                          d.toLocaleDateString('en-AU', { weekday: 'short' }),
+                          eventTimes(e.startTime, e.endTime),
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    </span>
+                    <Tag tone={when.tone}>{when.label}</Tag>
+                  </span>
+                  <span className="src line-clamp-1">{e.venue || 'Venue not set'}</span>
+                  <span className="flex flex-col gap-1.5">
+                    <span className="flex text-sm">
+                      <span className="flex-1">Tickets</span>
+                      <b>
+                        {e.ticketsSold}
+                        {e.ticketTarget ? ` / ${e.ticketTarget}` : ''}
+                      </b>
+                    </span>
+                    <Bar pct={pct(e.ticketsSold, e.ticketTarget)} color="#D9534F" />
+                  </span>
+                  <span className="text-sm font-bold underline">Open event</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
+  return (
+    <div className="flex flex-col gap-6">
+      {group('Upcoming', upcoming)}
+      {group('Past', past)}
     </div>
   );
 }
@@ -394,7 +482,15 @@ function EventDetail({
       setAdding(null);
     });
 
-  if (!d) return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!d)
+    return error ? (
+      <>
+        <PageHeader eyebrow="BMG only · Events" title="Event" actions={actions} />
+        <Notice tone="error">{error}</Notice>
+      </>
+    ) : (
+      <WaveLoader />
+    );
   const { event: e, summary: s } = d;
   const days = daysTo(e.date);
 

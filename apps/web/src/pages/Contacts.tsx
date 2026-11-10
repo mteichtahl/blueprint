@@ -12,6 +12,7 @@ import {
   RowCard,
   Tag,
   TextArea,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 /**
@@ -465,7 +466,7 @@ export function Contacts({
         )}
       </div>
       {contacts === null ? (
-        <p className="src">Loading…</p>
+        <WaveLoader />
       ) : contacts.length === 0 ? (
         <p className="src">
           {q || tag ? 'No contacts match.' : 'No contacts yet. Add the first one.'}

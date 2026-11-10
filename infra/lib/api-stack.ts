@@ -676,10 +676,12 @@ export class ApiStack extends BmgStack {
       ],
       [main],
     );
+    // Booking counts on venue cards read the shared-gigs index.
+    allow(addressBook, 'VenueBookings', ['dynamodb:Query'], [`${main}/index/GSI3`]);
     putEvents(addressBook);
     putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
-    // Job title (rev 7) lives on USER#<sub> / PROFILE.
+    // Job title (rev 7) and profile picture live on USER#<sub> / PROFILE.
     allow(me, 'ReadProfile', ['dynamodb:GetItem'], [main]);
     props.platformKey.grant(me, 'kms:Decrypt');
     new Rule(this, 'AiConsentChanges', {

@@ -44,6 +44,8 @@ export interface Me {
   artistId: string | null;
   /** Always "Artist" for artists; Blueprint people set their own (rev 7). */
   jobTitle?: string;
+  /** Profile picture as a data URL, or null when there isn't one. */
+  avatar?: string | null;
   mfaLevel: 'cognito' | 'federated';
   stepUpRequired: boolean;
   consent: { termsVersion: string; aiOptIn: boolean; decidedAt: string } | null;

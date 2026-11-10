@@ -134,6 +134,16 @@ export class FilesStack extends BmgStack {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       serverAccessLogsBucket: accessLogs,
       serverAccessLogsPrefix: 'artist-data/',
+      // The app reads images through presigned links (brand kit PDF, profile
+      // pictures); that fetch needs CORS. Links are still presigned and short-lived.
+      cors: [
+        {
+          allowedMethods: [HttpMethods.GET, HttpMethods.HEAD],
+          allowedOrigins: appOrigins,
+          allowedHeaders: ['*'],
+          maxAge: 3600,
+        },
+      ],
       lifecycleRules: [{ noncurrentVersionExpiration: Duration.days(35) }],
       removalPolicy: RemovalPolicy.RETAIN,
     });
@@ -169,6 +179,15 @@ export class FilesStack extends BmgStack {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       serverAccessLogsBucket: accessLogs,
       serverAccessLogsPrefix: 'org-data/',
+      // As for artist data: library images are read in the browser (profile pictures).
+      cors: [
+        {
+          allowedMethods: [HttpMethods.GET, HttpMethods.HEAD],
+          allowedOrigins: appOrigins,
+          allowedHeaders: ['*'],
+          maxAge: 3600,
+        },
+      ],
       lifecycleRules: [{ noncurrentVersionExpiration: Duration.days(35) }],
       removalPolicy: RemovalPolicy.RETAIN,
     });
