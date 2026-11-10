@@ -130,7 +130,66 @@ function answer(method: string, path: string): [number, unknown] {
     [/^\/artists\/[^/]+\/gigs$/, { gigs: [] }],
     [/^\/notifications$/, { notifications: [], unread: 0 }],
     [/^\/conversations$/, { conversations: [] }],
-    [/^\/events$/, { events: [] }],
+    [
+      /^\/events$/,
+      {
+        events: [
+          {
+            eventId: 'evt000000001',
+            name: 'Industry Mixer Night',
+            date: '2027-02-12',
+            startTime: '18:00',
+            endTime: '23:00',
+            venue: 'The Toff in Town',
+            capacity: 200,
+            ticketTarget: 150,
+            ticketPriceCents: 2500,
+            ticketsSold: 40,
+            takingsCents: 0,
+            compsTarget: 20,
+            surveyAfter: true,
+          },
+        ],
+      },
+    ],
+    [
+      /^\/events\/evt000000001$/,
+      {
+        event: {
+          eventId: 'evt000000001',
+          name: 'Industry Mixer Night',
+          date: '2027-02-12',
+          startTime: '18:00',
+          endTime: '23:00',
+          venue: 'The Toff in Town',
+          capacity: 200,
+          ticketTarget: 150,
+          ticketPriceCents: 2500,
+          ticketsSold: 40,
+          takingsCents: 0,
+          compsTarget: 20,
+          surveyAfter: true,
+        },
+        guests: [],
+        speakers: [],
+        crew: [],
+        run: [],
+        budget: [],
+        summary: {
+          ticketsSold: 40,
+          ticketTarget: 150,
+          compsAccepted: 0,
+          compsTarget: 20,
+          inRoom: 40,
+          capacity: 200,
+          budgetCents: 0,
+          spentCents: 0,
+          ticketIncomeCents: 100000,
+          takingsCents: 0,
+          profitCents: 0,
+        },
+      },
+    ],
     [
       /^\/venues$/,
       {
@@ -417,6 +476,19 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     await settle();
     await click(/^New event/);
     expect(await violations()).toEqual([]);
+  });
+
+  it('BMG: all events as cards, opening one', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Events/ })[0]!);
+    await settle();
+    await click(/^All events/);
+    const card = screen.getByRole('button', { name: /Industry Mixer Night/ });
+    expect(await violations()).toEqual([]);
+    fireEvent.click(card);
+    await settle();
+    expect(screen.queryByRole('heading', { name: 'All events' })).toBeNull();
   });
 
   it('BMG: venue detail with booking count and map', async () => {

@@ -2092,3 +2092,25 @@ nav,
   background: #f1f4f7;
   color: #011935;
 }
+
+/* Event cards (All events): the whole card is the button. */
+.ev-card {
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+.ev-card:hover {
+  box-shadow: 0 6px 18px rgba(1, 25, 53, 0.12);
+  transform: translateY(-1px);
+}
+.ev-card:focus-visible {
+  outline: 2px solid #d9534f;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ev-card,
+  .ev-card:hover {
+    transition: none;
+    transform: none;
+  }
+}
