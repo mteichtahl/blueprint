@@ -3,6 +3,7 @@ import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
   download,
+  EDIT_ACCESS_LABEL,
   fileTypeOf,
   formatSize,
   uploadFile,
@@ -286,6 +287,46 @@ function Select({
         ))}
       </select>
     </label>
+  );
+}
+
+/** "Owned by me" / the owner's name, and a lock when only the owner can edit it. */
+function OwnerCell({ f }: { f: FileItem }) {
+  return (
+    <span className="whitespace-nowrap">
+      {f.locked && (
+        <span role="img" aria-label="Locked" title="Locked: only the owner can edit it">
+          🔒{' '}
+        </span>
+      )}
+      {f.ownedByMe ? 'Me' : f.ownerName}
+    </span>
+  );
+}
+
+function EditAccessSelect({
+  value,
+  onChange,
+  team,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  /** Library: "everyone" means the Blueprint team. */
+  team?: boolean;
+}) {
+  return (
+    <Select
+      label="Who can edit it"
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: 'owner', label: EDIT_ACCESS_LABEL.owner },
+        {
+          value: 'everyone',
+          label: team ? 'Everyone at Blueprint' : EDIT_ACCESS_LABEL.everyone,
+        },
+      ]}
+    />
   );
 }
 
@@ -585,7 +626,6 @@ export function ArtistFiles({
   token,
   artistId,
   isBmg,
-  isAdmin = false,
   kind = 'all',
 }: {
   cfg: AppConfig;
@@ -599,6 +639,7 @@ export function ArtistFiles({
   const collection = `/artists/${artistId}/files`;
   const { files, error, setError, load } = useFiles(cfg, token, collection);
   const [visibility, setVisibility] = useState('normal');
+  const [editAccess, setEditAccess] = useState('owner');
   const [filter, setFilter] = useState<ArtistFilter>('all');
   // Phones get an "Upload document" button that opens the upload page.
   const phone = usePhone();
@@ -627,14 +668,9 @@ export function ArtistFiles({
       setError((e as Error).message);
     }
   };
-  // Same rule as the API: your own uploads; an admin may also remove Blueprint's.
-  const canDelete = (f: FileItem) =>
-    isBmg
-      ? f.uploaderRole !== 'artist' && (isAdmin || f.uploadedByMe)
-      : f.uploaderRole === 'artist' && f.uploadedByMe;
-  // Same rule as the API: the artist renames their own uploads; Blueprint renames Blueprint's.
-  const canRename = (f: FileItem) =>
-    isBmg ? f.uploaderRole !== 'artist' : f.uploaderRole === 'artist' && f.uploadedByMe;
+  // The API says what each person can do (owner, who can edit; rev 8).
+  const canDelete = (f: FileItem) => f.canManage;
+  const canRename = (f: FileItem) => f.canEdit;
   const rename = async (f: FileItem, title: string) => {
     await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
     await load();
@@ -646,7 +682,10 @@ export function ArtistFiles({
       token={token}
       collection={collection}
       title={isBmg ? 'Upload & share' : 'Upload'}
-      options={() => ({ visibility })}
+      options={() => ({
+        visibility,
+        editAccess: visibility === 'private' ? 'owner' : editAccess,
+      })}
       onDone={() => void load()}
       asPage={phone}
       onBack={() => setUploading(false)}
@@ -667,6 +706,7 @@ export function ArtistFiles({
               ]
         }
       />
+      {visibility !== 'private' && <EditAccessSelect value={editAccess} onChange={setEditAccess} />}
     </UploadBox>
   );
   const ofKind = files && (kind === 'documents' ? files.filter((f) => !f.asset) : files);
@@ -689,10 +729,7 @@ export function ArtistFiles({
           VISIBILITY_LABEL[f.visibility ?? 'normal']
         ),
     },
-    {
-      label: 'From',
-      cell: (f: FileItem) => (f.uploaderRole === 'artist' ? 'Artist' : 'Blueprint'),
-    },
+    { label: 'Owner', cell: (f: FileItem) => <OwnerCell f={f} /> },
   ];
 
   if (phone && uploading) return upload;
@@ -710,7 +747,10 @@ export function ArtistFiles({
           canDelete={canDelete}
           onRename={rename}
           canRename={canRename}
-          columns={[{ label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] }]}
+          columns={[
+            { label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] },
+            { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
+          ]}
           compact
         />
       </div>
@@ -770,7 +810,7 @@ export function Library({
   cfg,
   token,
   isBmg,
-  isAdmin = false,
+
   artists,
 }: {
   cfg: AppConfig;
@@ -782,6 +822,7 @@ export function Library({
   const collection = '/library/files';
   const { files, error, setError, load } = useFiles(cfg, token, collection);
   const [sharing, setSharing] = useState('bmg-only');
+  const [editAccess, setEditAccess] = useState('everyone');
   const [libraryFilter, setLibraryFilter] = useState<
     'all' | 'all-artists' | 'selected' | 'bmg-only'
   >('all');
@@ -825,7 +866,7 @@ export function Library({
       token={token}
       collection={collection}
       title="Upload & share"
-      options={() => ({ sharing })}
+      options={() => ({ sharing, editAccess })}
       onDone={() => void load()}
       asPage={phone}
       onBack={() => setUploading(false)}
@@ -842,6 +883,7 @@ export function Library({
       <span className="src">
         To share with chosen artists, upload first, then pick them under “Shared with”.
       </span>
+      <EditAccessSelect value={editAccess} onChange={setEditAccess} team />
     </UploadBox>
   );
   if (phone && uploading) return uploadBox;
@@ -874,19 +916,20 @@ export function Library({
           empty="Nothing here."
           onOpen={open}
           onDelete={remove}
-          canDelete={(f) => isAdmin || f.uploadedByMe}
+          canDelete={(f) => f.canManage}
           onRename={async (f, title) => {
             await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
             await load();
           }}
-          canRename={() => true}
+          canRename={(f) => f.canEdit}
           columns={[
             {
               label: 'Shared with',
               cell: (f) => (
                 <button
                   type="button"
-                  className="text-left font-semibold underline"
+                  className="text-left font-semibold underline disabled:no-underline"
+                  disabled={!f.canManage}
                   onClick={() => setEditing(f)}
                 >
                   {f.sharing === 'selected'
@@ -896,6 +939,7 @@ export function Library({
                 </button>
               ),
             },
+            { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
           ]}
         />
       </Card>

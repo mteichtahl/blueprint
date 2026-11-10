@@ -48,10 +48,40 @@ export interface FileItem {
   sharedWithArtistIds: string[];
   uploadedByMe: boolean;
   uploaderRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+  /** The owner (rev 8): the uploader, until they hand it on. */
+  ownerId: string;
+  ownerRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+  ownerName: string;
+  ownerJobTitle: string;
+  ownedByMe: boolean;
+  /** Who else can rename it and upload new versions. */
+  editAccess: EditAccess;
+  /** The chosen editors (shown to the owner only). */
+  editorIds: string[];
+  locked: boolean;
+  /** What you can do with it (the API checks again). */
+  canEdit: boolean;
+  canManage: boolean;
   createdAt: string;
   availableAt: string | null;
   /** Set when the file is in the artist's asset library. */
   asset: AssetMeta | null;
+}
+
+export type EditAccess = 'owner' | 'chosen' | 'everyone';
+
+export const EDIT_ACCESS_LABEL: Record<EditAccess, string> = {
+  owner: 'Only me (locked)',
+  chosen: 'Me and chosen people',
+  everyone: 'Everyone who can see it',
+};
+
+/** Someone who can be given edit access or ownership of a document. */
+export interface Person {
+  sub: string;
+  displayName: string;
+  jobTitle: string;
+  isArtist: boolean;
 }
 
 export type AssetCategory = 'press-photo' | 'artwork' | 'logo' | 'video' | 'audio' | 'other';

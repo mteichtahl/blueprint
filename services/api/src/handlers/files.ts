@@ -15,23 +15,29 @@ import {
   ArtistFilePatch,
   AssetMetaSchema,
   ArtistUpload,
+  canBeEditor,
   contentDisposition,
+  defaultEditAccess,
   deleteAllowed,
+  editAccessOf,
+  editAllowed,
   FILE_ID_PATTERN,
   fileSk,
   LIBRARY_PK,
   LibraryPatch,
   LibraryUpload,
   librarySharing,
+  manageAllowed,
+  ownerOf,
   PENDING_TTL_SECONDS,
   publicFile,
   quarantineKey,
-  renameAllowed,
   storedKey,
   URL_LIFETIME_SECONDS,
   visibilityAllowed,
   type FileRecord,
 } from '../files/model.ts';
+import { namesFor, people, type Person } from '../files/people.ts';
 import { artistPk, newId } from '../workspace/model.ts';
 import {
   audit,
@@ -207,14 +213,117 @@ async function thumbnailUrl(principal: Principal, f: FileRecord): Promise<string
   );
 }
 
-/** Adds preview links (signing is local: no call per file). A failure just means no preview. */
-async function withThumbnails(principal: Principal, files: Stored[], viewerSub: string) {
+/**
+ * What the client gets for each file: the public fields, a preview link
+ * (signing is local: no call per file; a failure just means no preview) and
+ * the owner's name and job title (rev 8).
+ */
+async function withThumbnails(principal: Principal, files: Stored[]) {
+  const names = await namesFor([...new Set(files.map((f) => ownerOf(f).sub))]);
   return Promise.all(
-    files.map(async (f) => ({
-      ...publicFile(f, viewerSub),
-      thumbnailUrl: await thumbnailUrl(principal, f).catch(() => null),
-    })),
+    files.map(async (f) => {
+      const owner = names.get(ownerOf(f).sub);
+      return {
+        ...publicFile(f, principal),
+        ownerName: owner?.displayName ?? (ownerOf(f).role === 'artist' ? 'Artist' : 'Blueprint'),
+        ownerJobTitle: owner?.jobTitle ?? '',
+        thumbnailUrl: await thumbnailUrl(principal, f).catch(() => null),
+      };
+    }),
   );
+}
+
+/** People who can be given edit access to, or ownership of, this file. */
+async function candidates(f: FileRecord): Promise<Person[]> {
+  return (await people()).filter((p) => canBeEditor(p, f));
+}
+
+/** Chosen editors and new owners must be people who can see the file. */
+async function checkPeople(f: FileRecord, subs: string[]) {
+  if (subs.length === 0) return;
+  const ok = new Set((await candidates(f)).map((p) => p.sub));
+  if (subs.some((s) => !ok.has(s))) {
+    throw new HttpError(400, 'Only people who can see this document can edit or own it');
+  }
+}
+
+/**
+ * The owner-only part of a PATCH (rev 8): who can edit, and handing the
+ * document to someone else. Returns the update clauses and the new record.
+ */
+async function ownerChanges(
+  principal: Principal,
+  f: FileRecord,
+  patch: { editAccess?: FileRecord['editAccess']; editorIds?: string[]; ownerId?: string },
+) {
+  const sets: string[] = [];
+  const values: Record<string, unknown> = {};
+  const next: Partial<FileRecord> = {};
+  if (patch.editAccess === undefined && patch.editorIds === undefined && !patch.ownerId) {
+    return { sets, values, next };
+  }
+  const refused = manageAllowed(principal, f);
+  if (refused) throw new HttpError(403, refused);
+  if (patch.editAccess !== undefined || patch.editorIds !== undefined) {
+    const access = patch.editAccess ?? editAccessOf(f);
+    const ids = access === 'chosen' ? (patch.editorIds ?? f.editorIds ?? []) : [];
+    await checkPeople(f, ids);
+    sets.push('editAccess = :ea', 'editorIds = :eds');
+    values[':ea'] = access;
+    values[':eds'] = ids;
+    next.editAccess = access;
+    next.editorIds = ids;
+  }
+  if (patch.ownerId && patch.ownerId !== ownerOf(f).sub) {
+    const to = (await candidates(f)).find((p) => p.sub === patch.ownerId);
+    if (!to) throw new HttpError(400, 'Only someone who can see this document can own it');
+    sets.push('ownerId = :oid', 'ownerRole = :orole');
+    values[':oid'] = to.sub;
+    values[':orole'] = to.role;
+    next.ownerId = to.sub;
+    next.ownerRole = to.role;
+    // The old owner keeps edit access if the new owner had chosen editors.
+    const access = next.editAccess ?? editAccessOf(f);
+    if (access === 'chosen') {
+      const ids = [...new Set([...(next.editorIds ?? f.editorIds ?? []), ownerOf(f).sub])].filter(
+        (s) => s !== to.sub,
+      );
+      if (!sets.includes('editAccess = :ea')) sets.push('editAccess = :ea', 'editorIds = :eds');
+      values[':ea'] = access;
+      values[':eds'] = ids;
+      next.editAccess = access;
+      next.editorIds = ids;
+    }
+  }
+  return { sets, values, next };
+}
+
+/**
+ * One file. `?include=people` adds who can be given edit access or ownership
+ * (rev 8; owner and managers only), so the picker needs no route of its own.
+ */
+async function single(principal: Principal, event: APIGatewayProxyEvent, f: Stored) {
+  const shown = (await withThumbnails(principal, [f]))[0]!;
+  if (event.queryStringParameters?.include !== 'people') return shown;
+  return { ...shown, people: await peopleFor(principal, f) };
+}
+
+/** The people picker for a file (owner and managers only). */
+async function peopleFor(principal: Principal, f: FileRecord) {
+  const refused = manageAllowed(principal, f);
+  if (refused) throw new HttpError(403, refused);
+  const owner = ownerOf(f).sub;
+  return (await candidates(f))
+    .filter((p) => p.sub !== owner)
+    .map((p) => ({
+      sub: p.sub,
+      displayName: p.displayName,
+      jobTitle: p.jobTitle,
+      isArtist: p.role === 'artist',
+    }))
+    .sort((a, b) =>
+      a.isArtist === b.isArtist ? a.displayName.localeCompare(b.displayName) : a.isArtist ? -1 : 1,
+    );
 }
 
 /** The preview's upload target, when the browser made one. */
@@ -331,7 +440,7 @@ async function attachedToOpenSubmission(artistId: string, fileId: string): Promi
 export const handler = handle(async (event) => {
   const principal = await principalFor(authContext(event));
   const route = `${event.httpMethod} ${event.resource}`;
-  const show = (f: FileRecord) => publicFile(f, principal.sub);
+  const show = (f: FileRecord) => publicFile(f, principal);
 
   switch (route) {
     // ── Artist workspace files ──
@@ -343,7 +452,6 @@ export const handler = handle(async (event) => {
         (await list(artistPk(artistId))).filter(
           (f) => canArtistFile(principal, 'read', artistId, f).allow,
         ),
-        principal.sub,
       );
       return json(200, { files });
     }
@@ -388,8 +496,16 @@ export const handler = handle(async (event) => {
           : {}),
         uploadedBy: principal.sub,
         uploaderRole: principal.role,
+        editAccess:
+          body.visibility === 'private'
+            ? 'owner'
+            : (body.editAccess ?? defaultEditAccess('artist')),
         createdAt: new Date().toISOString(),
       };
+      if (rec.editAccess === 'chosen') {
+        await checkPeople(rec, body.editorIds);
+        rec.editorIds = body.editorIds;
+      }
       await createRecord(artistPk(artistId), rec);
       const upload = await uploadTarget(
         quarantineKey('artist', fileId, artistId),
@@ -405,7 +521,7 @@ export const handler = handle(async (event) => {
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
       ensure(canArtistFile(principal, 'read', artistId, f));
-      return json(200, (await withThumbnails(principal, [f], principal.sub))[0]);
+      return json(200, await single(principal, event, f));
     }
 
     case 'PATCH /artists/{artistId}/files/{fileId}': {
@@ -425,19 +541,27 @@ export const handler = handle(async (event) => {
         if (f.uploaderRole === 'artist') {
           throw new HttpError(409, 'An artist’s own uploads always stay visible to them');
         }
+        const refused = manageAllowed(principal, f);
+        if (refused) throw new HttpError(403, refused);
         sets.push('visibility = :v');
         values[':v'] = patch.visibility;
         values[':private'] = 'private';
         condition += ' AND visibility <> :private';
       }
       if (patch.title !== undefined) {
-        const refused = renameAllowed(principal, f);
+        const refused = editAllowed(principal, f);
         if (refused) throw new HttpError(403, refused);
         if (patch.title) {
           sets.push('title = :t');
           values[':t'] = patch.title;
         } else removes.push('title');
       }
+      if (f.visibility === 'private' && (patch.editAccess ?? 'owner') !== 'owner') {
+        throw new HttpError(409, 'Only you can open a private file, so only you can edit it');
+      }
+      const owned = await ownerChanges(principal, f, patch);
+      sets.push(...owned.sets);
+      Object.assign(values, owned.values);
       await db.send(
         new UpdateCommand({
           TableName: table(),
@@ -456,15 +580,23 @@ export const handler = handle(async (event) => {
         );
       if (patch.title !== undefined)
         await audit(event, 'file.rename', 'success', { artistId, fileId: f.fileId });
+      if (owned.sets.length)
+        await audit(event, 'file.access', 'success', {
+          artistId,
+          fileId: f.fileId,
+          editAccess: owned.next.editAccess ?? editAccessOf(f),
+          transferred: !!owned.next.ownerId,
+        });
       const next: FileRecord = {
         ...f,
+        ...owned.next,
         ...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}),
       };
       if (patch.title !== undefined) {
         if (patch.title) next.title = patch.title;
         else delete next.title;
       }
-      return json(200, (await withThumbnails(principal, [next as Stored], principal.sub))[0]);
+      return json(200, (await withThumbnails(principal, [next as Stored]))[0]);
     }
 
     case 'PUT /artists/{artistId}/files/{fileId}/asset': {
@@ -543,7 +675,7 @@ export const handler = handle(async (event) => {
         .filter((f) => authorize(principal, 'read', librarySharing(f)).allow)
         // Artists only see files once they are ready, and never who else they're shared with.
         .filter((f) => principal.role !== 'artist' || f.status === 'available');
-      const files = (await withThumbnails(principal, visible, principal.sub)).map((f) =>
+      const files = (await withThumbnails(principal, visible)).map((f) =>
         principal.role === 'artist' ? { ...f, sharedWithArtistIds: [] } : f,
       );
       return json(200, { files });
@@ -566,8 +698,13 @@ export const handler = handle(async (event) => {
         sharedWithArtistIds: body.sharing === 'selected' ? body.sharedWithArtistIds : [],
         uploadedBy: principal.sub,
         uploaderRole: principal.role,
+        editAccess: body.editAccess ?? defaultEditAccess('library'),
         createdAt: new Date().toISOString(),
       };
+      if (rec.editAccess === 'chosen') {
+        await checkPeople(rec, body.editorIds);
+        rec.editorIds = body.editorIds;
+      }
       await createRecord(LIBRARY_PK, rec);
       const upload = await uploadTarget(
         quarantineKey('library', fileId),
@@ -586,7 +723,7 @@ export const handler = handle(async (event) => {
     case 'GET /library/files/{fileId}': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
       ensure(authorize(principal, 'read', librarySharing(f)));
-      return json(200, (await withThumbnails(principal, [f], principal.sub))[0]);
+      return json(200, await single(principal, event, f));
     }
 
     case 'PATCH /library/files/{fileId}': {
@@ -594,9 +731,14 @@ export const handler = handle(async (event) => {
       ensure(authorize(principal, 'write', librarySharing(f)));
       const patch = parseBody(event, LibraryPatch);
       if (patch.title !== undefined) {
-        const refused = renameAllowed(principal, f);
+        const refused = editAllowed(principal, f);
         if (refused) throw new HttpError(403, refused);
       }
+      if (patch.sharing !== undefined) {
+        const refused = manageAllowed(principal, f);
+        if (refused) throw new HttpError(403, refused);
+      }
+      const owned = await ownerChanges(principal, f, patch);
       const sets = ['updatedAt = :at', 'updatedBy = :by'];
       const removes: string[] = [];
       const values: Record<string, unknown> = {
@@ -615,6 +757,8 @@ export const handler = handle(async (event) => {
           values[':t'] = patch.title;
         } else removes.push('title');
       }
+      sets.push(...owned.sets);
+      Object.assign(values, owned.values);
       await db.send(
         new UpdateCommand({
           TableName: table(),
@@ -624,6 +768,13 @@ export const handler = handle(async (event) => {
           ExpressionAttributeValues: values,
         }),
       );
+      if (owned.sets.length)
+        await audit(event, 'file.access', 'success', {
+          library: true,
+          fileId: f.fileId,
+          editAccess: owned.next.editAccess ?? editAccessOf(f),
+          transferred: !!owned.next.ownerId,
+        });
       if (patch.sharing !== undefined)
         await audit(event, 'file.share', 'success', {
           library: true,
@@ -635,6 +786,7 @@ export const handler = handle(async (event) => {
         await audit(event, 'file.rename', 'success', { library: true, fileId: f.fileId });
       const next: FileRecord = {
         ...f,
+        ...owned.next,
         ...(patch.sharing !== undefined
           ? { sharing: patch.sharing, sharedWithArtistIds: ids }
           : {}),
@@ -643,7 +795,7 @@ export const handler = handle(async (event) => {
         if (patch.title) next.title = patch.title;
         else delete next.title;
       }
-      return json(200, (await withThumbnails(principal, [next as Stored], principal.sub))[0]);
+      return json(200, (await withThumbnails(principal, [next as Stored]))[0]);
     }
 
     case 'POST /library/files/{fileId}/download': {

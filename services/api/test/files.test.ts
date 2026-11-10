@@ -1,13 +1,21 @@
 import { authorize, type Principal } from '@bmg/authz';
 import { describe, expect, it } from 'vitest';
 import {
+  ArtistFilePatch,
   ArtistUpload,
+  canBeEditor,
   contentDisposition,
+  defaultEditAccess,
   deleteAllowed,
+  editAccessOf,
+  editAllowed,
   isInlineSafe,
+  LibraryPatch,
   LibraryUpload,
   librarySharing,
+  manageAllowed,
   MAX_UPLOAD_BYTES,
+  ownerOf,
   parseQuarantineKey,
   publicFile,
   quarantineKey,
@@ -68,6 +76,7 @@ describe('upload requests', () => {
       size: 10,
       contentType: 'audio/mpeg',
       visibility: 'normal',
+      editorIds: [],
       sharedWithArtistIds: [],
     });
   });
@@ -152,10 +161,10 @@ describe('downloads', () => {
       uploaderRole: 'artist',
       createdAt: '2026-11-09T00:00:00Z',
     };
-    const shown = publicFile(f, 'u-a');
+    const shown = publicFile(f, artistA);
     expect(shown.uploadedByMe).toBe(true);
     expect(JSON.stringify(shown)).not.toContain('artists/');
-    expect(publicFile(f, 'u-b').uploadedByMe).toBe(false);
+    expect(publicFile(f, artistB).uploadedByMe).toBe(false);
   });
 });
 
@@ -167,19 +176,143 @@ describe('deleting files', () => {
   const art = (uploadedBy: string, uploaderRole: FileRecord['uploaderRole']) =>
     ({ scope: 'artist', uploadedBy, uploaderRole }) as const;
 
-  it('lets an admin or the uploader delete library documents, never artists', () => {
+  it('lets an admin or the owner delete library documents, never artists', () => {
     expect(deleteAllowed(admin, lib('someone'))).toBeUndefined();
     expect(deleteAllowed(staff, lib('u-staff'))).toBeUndefined();
-    expect(deleteAllowed(staff, lib('someone'))).toMatch(/admin or the person/);
-    expect(deleteAllowed(artistA, lib('u-a'))).toMatch(/Only Blueprint/);
+    expect(deleteAllowed(staff, lib('someone'))).toMatch(/owner or an admin/);
+    expect(deleteAllowed(artistA, lib('someone'))).toMatch(/owner or an admin/);
   });
 
   it('keeps an artist’s own uploads theirs to delete', () => {
     expect(deleteAllowed(artistA, art('u-a', 'artist'))).toBeUndefined();
-    expect(deleteAllowed(artistA, art('u-staff', 'bmg-staff'))).toMatch(/your own uploads/);
-    expect(deleteAllowed(admin, art('u-a', 'artist'))).toMatch(/Only the artist/);
+    expect(deleteAllowed(artistA, art('u-staff', 'bmg-staff'))).toMatch(/owner or an admin/);
+    expect(deleteAllowed(admin, art('u-a', 'artist'))).toMatch(/artist who owns/);
     expect(deleteAllowed(admin, art('u-staff', 'bmg-staff'))).toBeUndefined();
-    expect(deleteAllowed(staff, art('u-other', 'bmg-staff'))).toMatch(/admin or the person/);
+    expect(deleteAllowed(staff, art('u-other', 'bmg-staff'))).toMatch(/owner or an admin/);
+  });
+
+  it('follows the owner once a document has been handed over (rev 8)', () => {
+    const handed = { ...art('u-staff', 'bmg-staff'), ownerId: 'u-a', ownerRole: 'artist' as const };
+    expect(deleteAllowed(artistA, handed)).toBeUndefined();
+    expect(deleteAllowed(staff, handed)).toMatch(/artist who owns/);
+    expect(deleteAllowed(admin, handed)).toMatch(/artist who owns/);
+  });
+});
+
+describe('owner and who can edit (rev 8)', () => {
+  const admin = { sub: 'u-admin', role: 'bmg-admin' as const };
+  const staff = { sub: 'u-staff', role: 'bmg-staff' as const };
+  const kyra = { sub: 'u-kyra', role: 'bmg-staff' as const };
+  const artistFile = {
+    scope: 'artist' as const,
+    artistId: A,
+    uploadedBy: 'u-a',
+    uploaderRole: 'artist' as const,
+  };
+
+  it('the uploader owns it until they hand it on', () => {
+    expect(ownerOf(artistFile)).toEqual({ sub: 'u-a', role: 'artist' });
+    expect(ownerOf({ ...artistFile, ownerId: 'u-staff', ownerRole: 'bmg-staff' })).toEqual({
+      sub: 'u-staff',
+      role: 'bmg-staff',
+    });
+  });
+
+  it('library documents start open to the team; everything else starts locked', () => {
+    expect(defaultEditAccess('library')).toBe('everyone');
+    expect(defaultEditAccess('artist')).toBe('owner');
+    expect(editAccessOf(artistFile)).toBe('owner');
+  });
+
+  it('a lock keeps everyone else out, even an admin', () => {
+    expect(editAllowed(artistA, artistFile)).toBeUndefined();
+    expect(editAllowed(admin, artistFile)).toMatch(/locked/);
+    expect(editAllowed(staff, artistFile)).toMatch(/locked/);
+  });
+
+  it('chosen people can edit; others cannot', () => {
+    const chosen = { ...artistFile, editAccess: 'chosen' as const, editorIds: ['u-staff'] };
+    expect(editAllowed(staff, chosen)).toBeUndefined();
+    expect(editAllowed(kyra, chosen)).toMatch(/given you edit access/);
+  });
+
+  it('everyone who can see it can edit when the owner opens it up', () => {
+    expect(editAllowed(kyra, { ...artistFile, editAccess: 'everyone' })).toBeUndefined();
+  });
+
+  it('only the owner manages it, plus an admin for Blueprint-owned documents', () => {
+    expect(manageAllowed(artistA, artistFile)).toBeUndefined();
+    expect(manageAllowed(admin, artistFile)).toMatch(/artist who owns/);
+    const staffDoc = { ...artistFile, uploadedBy: 'u-staff', uploaderRole: 'bmg-staff' as const };
+    expect(manageAllowed(admin, staffDoc)).toBeUndefined();
+    expect(manageAllowed(kyra, staffDoc)).toMatch(/owner or an admin/);
+    // A chosen editor still can't manage it.
+    expect(
+      manageAllowed(staff, { ...artistFile, editAccess: 'chosen', editorIds: ['u-staff'] }),
+    ).toBeDefined();
+  });
+
+  it('offers edit access only to people who can see the file', () => {
+    const f = { scope: 'artist' as const, artistId: A, visibility: 'normal' as const };
+    expect(canBeEditor({ role: 'artist', artistId: A }, f)).toBe(true);
+    expect(canBeEditor({ role: 'artist', artistId: B }, f)).toBe(false);
+    expect(canBeEditor({ role: 'bmg-admin' }, f)).toBe(true);
+    expect(canBeEditor({ role: 'bmg-staff', assignedArtistIds: [A] }, f)).toBe(true);
+    expect(canBeEditor({ role: 'bmg-staff', assignedArtistIds: [B] }, f)).toBe(false);
+    expect(canBeEditor({ role: 'artist', artistId: A }, { ...f, visibility: 'bmg-only' })).toBe(
+      false,
+    );
+    expect(canBeEditor({ role: 'bmg-admin' }, { ...f, visibility: 'private' })).toBe(false);
+    const lib = { scope: 'library' as const };
+    expect(canBeEditor({ role: 'bmg-staff', assignedArtistIds: [] }, lib)).toBe(true);
+    expect(canBeEditor({ role: 'artist', artistId: A }, lib)).toBe(false);
+  });
+
+  it('shows each viewer what they can do, and chosen editors only to the owner', () => {
+    const rec: FileRecord = {
+      fileId,
+      scope: 'artist',
+      artistId: A,
+      name: 'rider.pdf',
+      size: 1,
+      contentType: 'application/pdf',
+      status: 'available',
+      visibility: 'normal',
+      uploadedBy: 'u-a',
+      uploaderRole: 'artist',
+      editAccess: 'chosen',
+      editorIds: ['u-staff'],
+      createdAt: '2026-11-10T00:00:00Z',
+    };
+    expect(publicFile(rec, artistA)).toMatchObject({
+      ownedByMe: true,
+      canEdit: true,
+      canManage: true,
+      locked: false,
+      editorIds: ['u-staff'],
+    });
+    expect(publicFile(rec, { sub: 'u-staff', role: 'bmg-staff' })).toMatchObject({
+      ownedByMe: false,
+      canEdit: true,
+      canManage: false,
+      editorIds: [],
+    });
+    expect(publicFile({ ...rec, editAccess: 'owner' }, admin)).toMatchObject({
+      canEdit: false,
+      locked: true,
+    });
+  });
+
+  it('accepts who-can-edit and a new owner, and nothing odd', () => {
+    const sub = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    expect(ArtistFilePatch.parse({ editAccess: 'chosen', editorIds: [sub, sub] })).toEqual({
+      editAccess: 'chosen',
+      editorIds: [sub],
+    });
+    expect(LibraryPatch.parse({ ownerId: sub }).ownerId).toBe(sub);
+    expect(ArtistFilePatch.safeParse({ editAccess: 'anyone' }).success).toBe(false);
+    expect(ArtistFilePatch.safeParse({ editorIds: ['bob'] }).success).toBe(false);
+    expect(LibraryPatch.safeParse({}).success).toBe(false);
   });
 });
 

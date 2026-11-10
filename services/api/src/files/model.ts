@@ -52,11 +52,31 @@ export interface FileRecord {
   sharedWithArtistIds?: string[];
   uploadedBy: string;
   uploaderRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+  /**
+   * The document's owner (rev 8). The uploader, until they hand it to someone
+   * else. Older records have none, so `ownerOf` falls back to the uploader.
+   */
+  ownerId?: string;
+  ownerRole?: 'artist' | 'bmg-admin' | 'bmg-staff';
+  /** Who else can rename it and upload new versions (rev 8). See `editAccessOf`. */
+  editAccess?: EditAccess;
+  /** With `editAccess: 'chosen'`: the people (Cognito subs) who can edit. */
+  editorIds?: string[];
   createdAt: string;
   availableAt?: string;
   /** Set when the file is part of the artist's asset library. */
   asset?: AssetMeta;
 }
+
+/**
+ * Who can edit a document (rev 8), chosen by its owner:
+ * - `owner`: only the owner (locked);
+ * - `chosen`: the owner and the people in `editorIds`;
+ * - `everyone`: everyone who can see it and can change files there.
+ */
+export const EDIT_ACCESS = ['owner', 'chosen', 'everyone'] as const;
+export type EditAccess = (typeof EDIT_ACCESS)[number];
+type Role = FileRecord['uploaderRole'];
 
 // ── Assets (screens doc "Assets") ────────────────────────────────────────
 /**
@@ -207,6 +227,14 @@ const ContentType = z
   .regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i, 'Unknown file type')
   .transform((t) => t.toLowerCase());
 
+/** A person, by their Cognito sub. */
+export const SUB_PATTERN = /^[0-9a-f-]{36}$/;
+const Sub = z.string().regex(SUB_PATTERN, 'Unknown person');
+const EditorIds = z
+  .array(Sub)
+  .max(100)
+  .transform((ids) => [...new Set(ids)]);
+
 const Size = z
   .number()
   .int()
@@ -221,6 +249,9 @@ export const ArtistUpload = z.object({
   size: Size,
   contentType: ContentType.default('application/octet-stream'),
   visibility: z.enum(['normal', 'bmg-only', 'private']).default('normal'),
+  /** Who else can edit it (rev 8). Artist files default to only the owner. */
+  editAccess: z.enum(EDIT_ACCESS).optional(),
+  editorIds: EditorIds.default([]),
   /** Upload straight into the asset library. */
   asset: AssetMetaSchema.optional(),
   /**
@@ -243,6 +274,9 @@ export const LibraryUpload = z.object({
   contentType: ContentType.default('application/octet-stream'),
   sharing: z.enum(['bmg-only', 'all-artists', 'selected']).default('bmg-only'),
   sharedWithArtistIds: ArtistIds.default([]),
+  /** Who else can edit it (rev 8). Library documents default to the whole Blueprint team. */
+  editAccess: z.enum(EDIT_ACCESS).optional(),
+  editorIds: EditorIds.default([]),
 });
 
 /** A new name; an empty one goes back to showing the file name. */
@@ -256,6 +290,15 @@ const Rename = z
     'Names cannot contain control characters',
   );
 
+/** Owner-only changes (rev 8): who can edit, and handing the document to someone else. */
+const OwnerFields = {
+  editAccess: z.enum(EDIT_ACCESS).optional(),
+  /** Replaces the list of chosen editors. */
+  editorIds: EditorIds.optional(),
+  /** Transfer ownership to this person. */
+  ownerId: Sub.optional(),
+};
+
 const somethingToChange = (v: Record<string, unknown>) =>
   Object.values(v).some((x) => x !== undefined);
 
@@ -265,6 +308,7 @@ export const ArtistFilePatch = z
     visibility: z.enum(['normal', 'bmg-only']).optional(),
     /** Rename: the name shown in lists ('' shows the file name again). */
     title: Rename.optional(),
+    ...OwnerFields,
   })
   .strict()
   .refine(somethingToChange, 'Nothing to change');
@@ -274,30 +318,18 @@ export const LibraryPatch = z
     sharing: z.enum(['bmg-only', 'all-artists', 'selected']).optional(),
     sharedWithArtistIds: ArtistIds.default([]),
     title: Rename.optional(),
+    ...OwnerFields,
   })
   .strict()
-  .refine((v) => v.sharing !== undefined || v.title !== undefined, 'Nothing to change');
-
-/**
- * Who may rename a file (on top of write access):
- * - Library documents: anyone at Blueprint.
- * - Artist files: the artist renames their own uploads; Blueprint renames the
- *   ones Blueprint uploaded. Nobody renames someone else's side's files.
- */
-export function renameAllowed(
-  principal: { sub: string; role: FileRecord['uploaderRole'] },
-  f: Pick<FileRecord, 'scope' | 'uploadedBy' | 'uploaderRole'>,
-): string | undefined {
-  if (f.scope === 'library') {
-    return principal.role === 'artist' ? 'Only Blueprint can rename library documents' : undefined;
-  }
-  if (principal.role === 'artist') {
-    return f.uploaderRole === 'artist' && f.uploadedBy === principal.sub
-      ? undefined
-      : 'You can only rename your own uploads';
-  }
-  return f.uploaderRole === 'artist' ? 'Only the artist can rename their own uploads' : undefined;
-}
+  .refine(
+    (v) =>
+      v.sharing !== undefined ||
+      v.title !== undefined ||
+      v.editAccess !== undefined ||
+      v.editorIds !== undefined ||
+      v.ownerId !== undefined,
+    'Nothing to change',
+  );
 
 /** Which visibilities each side may choose for an artist file. */
 export function visibilityAllowed(role: FileRecord['uploaderRole'], v: FileVisibility): boolean {
@@ -306,30 +338,101 @@ export function visibilityAllowed(role: FileRecord['uploaderRole'], v: FileVisib
   return true;
 }
 
+// ── Owner and who can edit (rev 8) ─────────────────────────────────────────
+type Viewer = { sub: string; role: Role };
+type Owned = Pick<
+  FileRecord,
+  'scope' | 'uploadedBy' | 'uploaderRole' | 'ownerId' | 'ownerRole' | 'editAccess' | 'editorIds'
+>;
+
+/** The owner: whoever uploaded it, until it's handed to someone else. */
+export function ownerOf(f: Owned): Viewer {
+  return { sub: f.ownerId ?? f.uploadedBy, role: f.ownerRole ?? f.uploaderRole };
+}
+
 /**
- * Who may delete a file (on top of write access):
- * - Library documents: a BMG admin, or the staff member who uploaded it.
- * - Artist files: the artist deletes their own uploads; BMG deletes the ones
- *   Blueprint uploaded to the workspace (an admin, or the uploader).
+ * New library documents are open to the whole Blueprint team (as renaming
+ * was before rev 8); everything else starts locked to its owner.
  */
-export function deleteAllowed(
-  principal: { sub: string; role: FileRecord['uploaderRole'] },
-  f: Pick<FileRecord, 'scope' | 'uploadedBy' | 'uploaderRole'>,
-): string | undefined {
-  const own = f.uploadedBy === principal.sub;
-  if (f.scope === 'library') {
-    if (principal.role === 'artist') return 'Only Blueprint can delete library documents';
-    return principal.role === 'bmg-admin' || own
-      ? undefined
-      : 'Only an admin or the person who uploaded it can delete this document';
+export function defaultEditAccess(scope: FileScope): EditAccess {
+  return scope === 'library' ? 'everyone' : 'owner';
+}
+
+export function editAccessOf(f: Owned): EditAccess {
+  return f.editAccess ?? defaultEditAccess(f.scope);
+}
+
+export const isOwner = (p: Viewer, f: Owned) => ownerOf(f).sub === p.sub;
+
+/**
+ * Who manages a document: its sharing, who can edit it, ownership and
+ * deleting. The owner, plus a Blueprint admin for documents owned by the
+ * Blueprint team (for when someone leaves). Nobody overrides an artist's
+ * own documents.
+ */
+export function manageAllowed(p: Viewer, f: Owned): string | undefined {
+  if (isOwner(p, f)) return undefined;
+  const owner = ownerOf(f);
+  if (p.role === 'bmg-admin' && owner.role !== 'artist') return undefined;
+  if (owner.role === 'artist') {
+    return p.role === 'artist'
+      ? 'Only the owner can change this document'
+      : 'Only the artist who owns this document can change that';
   }
-  if (principal.role === 'artist') {
-    return f.uploaderRole === 'artist' && own ? undefined : 'You can only delete your own uploads';
+  return 'Only the owner or an admin can change that';
+}
+
+/**
+ * Who may rename it or upload a new version (on top of write access to
+ * where it lives). The owner always; others as the owner chose. A lock is
+ * a lock: an admin can't edit an artist's locked document.
+ */
+export function editAllowed(p: Viewer, f: Owned): string | undefined {
+  if (!manageAllowed(p, f)) return undefined;
+  if (f.scope === 'library' && p.role === 'artist') {
+    return 'Only Blueprint can change library documents';
   }
-  if (f.uploaderRole === 'artist') return 'Only the artist can delete their own uploads';
-  return principal.role === 'bmg-admin' || own
-    ? undefined
-    : 'Only an admin or the person who uploaded it can delete this file';
+  switch (editAccessOf(f)) {
+    case 'everyone':
+      return undefined;
+    case 'chosen':
+      return (f.editorIds ?? []).includes(p.sub)
+        ? undefined
+        : 'The owner hasn’t given you edit access to this document';
+    case 'owner':
+      return 'This document is locked by its owner';
+  }
+}
+
+/** Deleting is the owner's call (or an admin's, for Blueprint's documents). */
+export function deleteAllowed(p: Viewer, f: Owned): string | undefined {
+  if (!manageAllowed(p, f)) return undefined;
+  return ownerOf(f).role === 'artist'
+    ? 'Only the artist who owns this document can delete it'
+    : 'Only the owner or an admin can delete this document';
+}
+
+/**
+ * Who can be given edit access or ownership: people who can already see the
+ * document and change files where it lives.
+ * - Library documents: the Blueprint team.
+ * - Artist files: that artist and the Blueprint people on their workspace;
+ *   Blueprint only for a BMG-only file; nobody else for a private one (only
+ *   the artist can open it).
+ */
+export function canBeEditor(
+  person: { role: Role; artistId?: string; assignedArtistIds?: string[] },
+  f: Pick<FileRecord, 'scope' | 'visibility' | 'artistId'>,
+): boolean {
+  const bmg =
+    person.role === 'bmg-admin' ||
+    (person.role === 'bmg-staff' &&
+      (f.scope === 'library' || (person.assignedArtistIds ?? []).includes(f.artistId ?? '')));
+  if (f.scope === 'library') return bmg;
+  if (f.visibility === 'private') return false;
+  if (person.role === 'artist')
+    return f.visibility !== 'bmg-only' && person.artistId === f.artistId;
+  return bmg;
 }
 
 /** The authz resource for a library file (per-file sharing). */
@@ -379,7 +482,10 @@ export function contentDisposition(name: string, contentType: string): string {
 }
 
 /** What the client sees: no S3 keys, no internal fields. */
-export function publicFile(f: FileRecord & { uploadedBy: string }, viewerSub: string) {
+export function publicFile(f: FileRecord & { uploadedBy: string }, viewer: Viewer) {
+  const viewerSub = viewer.sub;
+  const owner = ownerOf(f);
+  const access = editAccessOf(f);
   return {
     fileId: f.fileId,
     scope: f.scope,
@@ -400,6 +506,17 @@ export function publicFile(f: FileRecord & { uploadedBy: string }, viewerSub: st
     sharedWithArtistIds: f.sharedWithArtistIds ?? [],
     uploadedByMe: f.uploadedBy === viewerSub,
     uploaderRole: f.uploaderRole,
+    /** The owner (rev 8); `ownerName` is filled in by the API. */
+    ownerId: owner.sub,
+    ownerRole: owner.role,
+    ownedByMe: owner.sub === viewerSub,
+    editAccess: access,
+    /** Only the owner (and whoever manages it) sees who the chosen editors are. */
+    editorIds: access === 'chosen' && !manageAllowed(viewer, f) ? (f.editorIds ?? []) : [],
+    locked: access === 'owner',
+    /** What this viewer can do (the API checks again on every change). */
+    canEdit: !editAllowed(viewer, f),
+    canManage: !manageAllowed(viewer, f),
     createdAt: f.createdAt,
     availableAt: f.availableAt ?? null,
     asset: f.asset ?? null,
