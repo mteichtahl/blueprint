@@ -1469,6 +1469,7 @@ function Conversation({
   pendingReply,
   onPendingUsed,
   onBack,
+  backLabel = 'Back to chats',
   backCount,
   onInfo,
   onReplyPrivately,
@@ -1482,6 +1483,8 @@ function Conversation({
   pendingReply: PendingReply | null;
   onPendingUsed: () => void;
   onBack?: () => void;
+  /** What the back button returns to (phone). */
+  backLabel?: string;
   backCount?: number;
   onInfo: () => void;
   onReplyPrivately: (m: ChatMessage) => void;
@@ -1714,7 +1717,7 @@ function Conversation({
           <button
             type="button"
             className="wa-backbtn"
-            aria-label={`Back to chats${backCount ? `, ${backCount} unread` : ''}`}
+            aria-label={`${backLabel}${backCount ? `, ${backCount} unread` : ''}`}
             onClick={onBack}
           >
             <Icon name="back" />
@@ -2784,6 +2787,7 @@ export function ArtistChatTab({
   artist,
   onNavigate,
   onOpenChat,
+  onBack,
 }: {
   cfg: AppConfig;
   token: string;
@@ -2791,6 +2795,8 @@ export function ArtistChatTab({
   artist: ArtistSummary;
   onNavigate?: (view: string) => void;
   onOpenChat?: (conversationId: string) => void;
+  /** Phone: leaves the full-screen chat for the rest of the workspace. */
+  onBack?: () => void;
 }) {
   const ctx = useMemo<ChatCtx>(
     () => ({
@@ -2806,7 +2812,8 @@ export function ArtistChatTab({
   const narrow = useNarrow();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState(true);
+  // Phone opens on the conversation (composer in reach); desktop shows contact info beside it.
+  const [info, setInfo] = useState(!narrow);
   useEffect(() => {
     let live = true;
     setConversationId(null);
@@ -2835,7 +2842,7 @@ export function ArtistChatTab({
     );
   return (
     <div className="flex flex-col gap-2">
-      {onOpenChat && conversationId && (
+      {onOpenChat && conversationId && !narrow && (
         <div className="flex justify-end">
           <button type="button" className="wa-link" onClick={() => onOpenChat(conversationId)}>
             Open in Chat <Icon name="arrow" size={14} />
@@ -2854,6 +2861,8 @@ export function ArtistChatTab({
                 infoOpen={info}
                 pendingReply={null}
                 onPendingUsed={noop}
+                onBack={narrow ? onBack : undefined}
+                backLabel={`Back to ${artist.displayName}’s workspace`}
                 onInfo={() => setInfo((x) => !x)}
                 onReplyPrivately={noop}
                 searchSignal={0}

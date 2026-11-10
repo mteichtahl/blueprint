@@ -128,7 +128,7 @@ export function ArtistWorkspace({
 
   return (
     <>
-      <header className="flex flex-wrap items-center gap-[18px]">
+      <header className="page-head flex flex-wrap items-center gap-[18px]">
         <Avatar name={artist.displayName} size={64} />
         <div className="flex min-w-[min(300px,100%)] flex-1 flex-col gap-1">
           <span className="eyebrow">Artist workspace</span>
@@ -139,7 +139,11 @@ export function ArtistWorkspace({
           </p>
         </div>
       </header>
-      <nav aria-label="Workspace" role="tablist" className="flex flex-wrap border-b border-input">
+      <nav
+        aria-label="Workspace"
+        role="tablist"
+        className="page-head flex flex-wrap border-b border-input"
+      >
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -174,6 +178,7 @@ export function ArtistWorkspace({
           artist={artist}
           onNavigate={onNavigate}
           onOpenChat={onOpenChat}
+          onBack={() => setTab('overview')}
         />
       )}
       {tab === 'plan' && (
