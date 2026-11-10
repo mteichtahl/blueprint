@@ -328,7 +328,7 @@ export function AssetLibrary({
                 onClick={() =>
                   void api(cfg, token, 'PUT', `/artists/${artistId}/files/${f.fileId}/asset`, {
                     category: guessCategory(f.contentType),
-                    title: titleFrom(f.name),
+                    title: f.title || titleFrom(f.name),
                     approvedFor: [],
                     status: 'draft',
                   })
@@ -340,7 +340,7 @@ export function AssetLibrary({
                     .catch((e: Error) => setError(e.message))
                 }
               >
-                <span className="flex-1">{f.name}</span>
+                <span className="flex-1">{f.displayName}</span>
                 <span className="src">{formatSize(f.size)}</span>
               </button>
             ))}
