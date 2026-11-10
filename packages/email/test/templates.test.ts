@@ -10,6 +10,7 @@ import {
   renderLayout,
   safeUrl,
   submissionUpdatedEmail,
+  teamInviteEmail,
   todoReminderEmail,
   todoUpdatedEmail,
 } from '../src/index.ts';
@@ -49,6 +50,14 @@ const all = {
     displayName: 'Chloe',
     email: 'chloe@example.com',
     temporaryPassword: 'Ab3$xyz123456',
+    expiresInDays: 7,
+  }),
+  teamInvite: teamInviteEmail(ctx, {
+    displayName: 'Sam',
+    email: 'sam@example.com',
+    temporaryPassword: 'Ab3$xyz123456',
+    roleLabel: 'Team member',
+    invitedBy: 'Kyra Teichtahl',
     expiresInDays: 7,
   }),
   todoUpdated: todoUpdatedEmail(ctx, {

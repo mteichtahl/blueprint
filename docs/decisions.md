@@ -261,3 +261,19 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **No Docker, so ZAP comes from its GitHub release,** pinned by version and SHA-256. The load test is plain Node rather than k6, so there's no other binary to pin.
 - **Scans are unauthenticated.** Per-role access is covered by the authorisation matrix in CI. A staging scanner user would need a TOTP secret on the runner, which isn't worth the exposure for this app.
 - **New finding W5:** the API WAF rate rule counts CloudFront edge addresses, not users. It gets fixed with the edge WAF when the custom domain arrives.
+
+## Notes: Access & permissions (10 Nov 2026)
+
+- **The Access & permissions screen** (BMG only, canvas X-Artists "What artists can see and do") has three switches. They apply to every artist account and are enforced on the server, not only in the UI.
+  - **Message other artists directly** (default on). When it's off, no one can start a new artist ↔ artist chat, and existing ones become read-only: artists can still read them but not post. Artists also stop seeing other artists in New chat.
+  - **Start their own group chats** (default off; the screens doc lists it as an open decision). When it's on, artists can start groups. Blueprint is in them like every group, so they aren't private, and the admin-only group settings stay at Blueprint's defaults.
+  - **Share their gigs with other artists** (default on). When it's off, artists can't post gig cards in chats with other artists. Sharing with Blueprint isn't affected.
+  - **Saving:** admin only, with a fresh step-up. Saves are versioned (409 on a clash) and audited (`access.settings`). The settings are stored at `ORG#access / SETTINGS`.
+- **Blueprint team:**
+  - **Who's on it:** everyone in the Cognito `bmg-admin` and `bmg-staff` groups. Names and job titles come from `USER#<sub> / PROFILE`, and staff artists from `STAFF#<sub> / ASSIGNMENTS`, which the authorizer already reads.
+  - **What admins can do:** invite (branded email, temporary password), change access or job title, choose a team member's artists, turn a login off or back on, and resend an invite. All of it needs a fresh step-up and is audited.
+  - **Access changes apply at once:** changing someone's role or turning off their login also signs them out everywhere (global sign-out).
+  - **Guards:** you can't change your own role or turn off your own login, and the last enabled admin can't be demoted or turned off.
+  - **Who sees emails:** staff can view the team list, but without email addresses.
+- **One proxy route:** `/access/{proxy+}` on the artists function (which already manages Cognito users), to keep the API stack under CloudFormation's limit. It's now at 448.
+- **Roster Terms and AI columns:** the consent handler (and `GET /me`, for artists who chose earlier) records the accepted terms version and date on `ARTIST#id / AI`, next to the AI choice. The roster shows these to Blueprint only.

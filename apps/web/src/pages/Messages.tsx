@@ -818,8 +818,25 @@ function NewChat({
   const [settings, setSettings] = useState<GroupSettings>(DEFAULT_SETTINGS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Access & permissions: what artists may start (Blueprint is never limited).
+  const [rules, setRules] = useState({ artistDirectChats: true, artistGroups: false });
+  useEffect(() => {
+    if (ctx.isBmg) return;
+    api<{ artistDirectChats: boolean; artistGroups: boolean }>(
+      ctx.cfg,
+      ctx.token,
+      'GET',
+      '/access/settings',
+    )
+      .then((r) =>
+        setRules({ artistDirectChats: r.artistDirectChats, artistGroups: r.artistGroups }),
+      )
+      .catch(() => undefined);
+  }, [ctx.isBmg, ctx.cfg, ctx.token]);
+  const canGroup = ctx.isBmg || rules.artistGroups;
   const q = query.trim().toLowerCase();
   const matches = roster.filter((a) => !q || a.displayName.toLowerCase().includes(q));
+  const contacts = ctx.isBmg || rules.artistDirectChats ? matches : [];
   const name = (id: string) => roster.find((a) => a.artistId === id)?.displayName ?? id;
 
   async function create(body: Record<string, unknown>) {
@@ -904,8 +921,8 @@ function NewChat({
             <button
               type="button"
               className="wa-row"
-              disabled={!ctx.isBmg}
-              title={ctx.isBmg ? undefined : 'Ask Blueprint to set one up'}
+              disabled={!canGroup}
+              title={canGroup ? undefined : 'Ask Blueprint to set one up'}
               onClick={() => {
                 setKind('group');
                 setStep('pick');
@@ -916,7 +933,10 @@ function NewChat({
               </span>
               <span className="wa-row-body wa-row-solo">
                 <span className="wa-name">New group</span>
-                {!ctx.isBmg && <span className="wa-sub">Ask Blueprint to set one up</span>}
+                {!canGroup && <span className="wa-sub">Ask Blueprint to set one up</span>}
+                {!ctx.isBmg && canGroup && (
+                  <span className="wa-sub">Blueprint is in every group</span>
+                )}
               </span>
             </button>
             {ctx.isBmg && (
@@ -952,7 +972,7 @@ function NewChat({
                 </span>
               </button>
             )}
-            {matches.map((a) => (
+            {contacts.map((a) => (
               <button
                 key={a.artistId}
                 type="button"
@@ -967,7 +987,10 @@ function NewChat({
                 </span>
               </button>
             ))}
-            {matches.length === 0 && q && <p className="wa-empty">No one matches that name.</p>}
+            {contacts.length === 0 && q && <p className="wa-empty">No one matches that name.</p>}
+            {!ctx.isBmg && !rules.artistDirectChats && (
+              <p className="wa-empty">Blueprint has turned off chats between artists.</p>
+            )}
           </>
         )}
         {step === 'pick' && (
@@ -1032,7 +1055,7 @@ function NewChat({
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
-            {kind === 'group' && (
+            {kind === 'group' && ctx.isBmg && (
               <div className="wa-sec wa-sec-flat">
                 <div className="wa-sechd">Group settings</div>
                 <SettingSwitch
@@ -1053,7 +1076,7 @@ function NewChat({
               </div>
             )}
             <p className="wa-sub">
-              {kind === 'group' ? 'Members' : 'Goes to'}: Blueprint,{' '}
+              {kind === 'group' ? 'Members' : 'Goes to'}: Blueprint, {!ctx.isBmg && 'you, '}
               {picked.map((id) => name(id)).join(', ')}
             </p>
           </div>
@@ -1085,7 +1108,7 @@ function NewChat({
                 title: title.trim(),
                 description: description.trim(),
                 artistIds: picked,
-                ...(kind === 'group' ? { settings } : {}),
+                ...(kind === 'group' && ctx.isBmg ? { settings } : {}),
               })
             }
           >

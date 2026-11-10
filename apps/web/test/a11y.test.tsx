@@ -126,6 +126,46 @@ function answer(method: string, path: string): [number, unknown] {
     [/^\/notifications$/, { notifications: [], unread: 0 }],
     [/^\/conversations$/, { conversations: [] }],
     [/^\/events$/, { events: [] }],
+    [
+      /^\/access\/settings$/,
+      {
+        artistDirectChats: true,
+        artistGroups: false,
+        artistGigSharing: true,
+        version: 2,
+        updatedAt: now,
+        updatedByName: 'Kyra Teichtahl',
+      },
+    ],
+    [
+      /^\/access\/team$/,
+      {
+        team: [
+          {
+            sub: 'u1',
+            email: 'kyra@example.com',
+            displayName: 'Kyra Teichtahl',
+            jobTitle: 'Founder & Director',
+            role: 'bmg-admin',
+            enabled: true,
+            status: 'CONFIRMED',
+            artistIds: [],
+            createdAt: now,
+          },
+          {
+            sub: 'u2',
+            email: 'sam@example.com',
+            displayName: 'Sam Lee',
+            jobTitle: 'Events coordinator',
+            role: 'bmg-staff',
+            enabled: true,
+            status: 'FORCE_CHANGE_PASSWORD',
+            artistIds: [ARTIST],
+            createdAt: now,
+          },
+        ],
+      },
+    ],
   ];
   for (const [re, body] of routes) if (re.test(p)) return [200, body];
   return [404, { detail: 'Not found in the test fixtures' }];
@@ -213,6 +253,7 @@ describe('WCAG 2.2 AA (axe-core)', () => {
     'Events',
     'Newsroom',
     'Connectors',
+    'Access & permissions',
     'AI prompts',
   ];
   it.each(BMG_VIEWS)('BMG desktop: %s', async (label) => {
@@ -340,6 +381,21 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Assets' }));
     await settle();
     expect(screen.getByRole('complementary', { name: 'Asset details' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+});
+
+describe('WCAG 2.2 AA (axe-core): Access & permissions', () => {
+  it('BMG: editing a team member and adding one', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Access & permissions/ })[0]!);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Sam' }));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Add team member' }));
+    await settle();
+    expect(screen.getByRole('form', { name: 'Add team member' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 });
