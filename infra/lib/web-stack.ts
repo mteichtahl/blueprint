@@ -112,7 +112,7 @@ export class WebStack extends BmgStack {
             "font-src 'self'",
             `img-src 'self' data: blob: ${props.downloadOrigins.join(' ')}`,
             `media-src 'self' ${props.downloadOrigins.join(' ')}`,
-            // Download origins: the app reads images itself (brand kit PDF).
+            // Download origins: the app reads images itself (brand kit PDF, profile pictures).
             `connect-src 'self' ${cognitoIdp} ${props.uploadOrigin} ${props.downloadOrigins.join(' ')} wss://${props.realtime.realtimeDns}`,
             "frame-ancestors 'none'",
             "base-uri 'none'",
