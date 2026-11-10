@@ -244,3 +244,13 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Full findings are in [security-review.md](security-review.md).** The gate is met: no high findings are open.
 - **The key admin can no longer rewrite artist key policies (K1).** New keys are created with `BypassPolicyLockoutSafetyCheck`, because the policy deliberately takes `PutKeyPolicy` away from the creating role. The account root keeps policy administration, so no key is orphaned. Older keys are moved to the new policy on deploy by `Custom::BmgKeyPolicyRefresh`.
 - **Data-access sessions are limited to 8 named roles (I1),** listed in `DATA_ACCESS_CALLERS` in `infra/lib/keys-stack.ts`. A new function that opens artist data must be added there. The infra test fails until it is.
+
+## Notes: Phase 6 accessibility (10 Nov 2026)
+
+- **WCAG 2.2 AA is checked in CI.** axe-core runs on 42 rendered screens and states, plus a contrast test on the CSS colours. The full audit is in [accessibility.md](accessibility.md).
+- **These colour changes depart from the design canvas, for contrast:**
+  - Form field borders are #7D8794, not #D3D8DE.
+  - Placeholders are #66707C.
+  - The dark-mode eyebrow is #E8726E.
+  - Focus is a solid 2px outline, not a soft glow.
+- **No `eslint-plugin-jsx-a11y`:** it doesn't support ESLint 10 yet. The axe tests cover more anyway, because they check the rendered result.
