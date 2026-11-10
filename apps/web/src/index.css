@@ -508,6 +508,64 @@ main {
     opacity: 0.45;
     cursor: default;
   }
+  .wtab {
+    gap: 8px;
+  }
+  /* Workspace section switch under the four tabs (rev 9). */
+  .seg {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-self: flex-start;
+    gap: 4px;
+    padding: 4px;
+    background: #e6e9ed;
+    border-radius: 6px;
+  }
+  .seg > button {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    border-radius: 4px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #5c6775;
+  }
+  .seg > button[aria-selected='true'] {
+    background: #fff;
+    color: #011935;
+    box-shadow: 0 0 0 1px #d3d8de;
+  }
+  /* Counts on workspace tabs and sections: coral when Blueprint has something to do. */
+  .cnt {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    background: #e6e9ed;
+    color: #011935;
+  }
+  .cnt-hot {
+    background: #b5403c;
+    color: #fff;
+  }
+  /* Workspace chat side panel (rev 9). */
+  .ws-chat {
+    position: sticky;
+    top: 16px;
+    flex: 0 0 400px;
+    min-width: 0;
+  }
+  .wa-panel.wa-phone {
+    height: calc(100dvh - 120px);
+    min-height: 520px;
+  }
   /* Plan section tabs: the workspace tab style, a little smaller. */
   .stab {
     min-height: 40px;
@@ -675,6 +733,23 @@ html {
 .dark .tn {
   background: #f1f4f7;
   color: #011935;
+}
+.dark .seg,
+.dark .cnt {
+  background: #1c2e47;
+  color: #f1f4f7;
+}
+.dark .seg > button {
+  color: #a9b3bf;
+}
+.dark .seg > button[aria-selected='true'] {
+  background: #13233a;
+  color: #f1f4f7;
+  box-shadow: 0 0 0 1px #2c405c;
+}
+.dark .cnt-hot {
+  background: #b5403c;
+  color: #fff;
 }
 .dark .dt th {
   background: #1c2e47;

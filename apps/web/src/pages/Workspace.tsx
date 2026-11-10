@@ -11,30 +11,65 @@ import {
 import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
 import { markdownToText } from '../lib/markdown.ts';
-import { Avatar, Bar, Button, Card, shortDate, Tag } from '../components/ui.tsx';
+import { Avatar, Bar, Button, Card, Chips, Icon, shortDate, Tag } from '../components/ui.tsx';
 import { GigsTab } from './Gigs.tsx';
 import { AssetLibrary } from './Assets.tsx';
 import { BrandKit } from './BrandKit.tsx';
-import { ArtistFiles } from './Library.tsx';
-import { ArtistChatTab } from './Messages.tsx';
+import { ArtistFiles, LIBRARY_KIND_OPTIONS, type LibraryKind } from './Library.tsx';
+import { ArtistChatTab, useNarrow } from './Messages.tsx';
 import { PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG } from './Review.tsx';
 import { ArtistTodos } from './Todos.tsx';
 
-/** Workspace tabs from the screens doc. */
-const TABS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'chat', label: 'Chat' },
-  { id: 'plan', label: 'Plan' },
-  { id: 'todo', label: 'To-do' },
-  { id: 'submissions', label: 'Submissions' },
-  { id: 'gigs', label: 'Gigs' },
-  { id: 'library', label: 'Library' },
-  { id: 'assets', label: 'Assets' },
-  { id: 'brand', label: 'Brand kit' },
-  { id: 'stats', label: 'Stats' },
+/**
+ * Workspace tabs (screens doc rev 9): four tabs, each with a section switch
+ * underneath. Chat isn't a tab; it opens as a side panel beside any tab.
+ */
+const GROUPS = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    sections: [
+      { id: 'summary', label: 'Summary' },
+      { id: 'stats', label: 'Stats' },
+    ],
+  },
+  {
+    id: 'plan',
+    label: 'Plan',
+    sections: [
+      { id: 'plan', label: 'Outcome and stages' },
+      { id: 'todo', label: 'To-dos' },
+    ],
+  },
+  {
+    id: 'work',
+    label: 'Work',
+    sections: [
+      { id: 'submissions', label: 'Submissions' },
+      { id: 'gigs', label: 'Gigs' },
+    ],
+  },
+  {
+    id: 'files',
+    label: 'Files',
+    sections: [
+      { id: 'library', label: 'Library' },
+      { id: 'brand', label: 'Brand kit' },
+    ],
+  },
 ] as const;
-type TabId = (typeof TABS)[number]['id'];
+type Group = (typeof GROUPS)[number];
+type GroupId = Group['id'];
+type TabId = Group['sections'][number]['id'];
+const groupOf = (s: TabId): Group => GROUPS.find((g) => g.sections.some((x) => x.id === s))!;
+
+/** A count on a tab or section; coral when it's waiting on Blueprint. */
+function Count({ n, hot = false }: { n: number; hot?: boolean }) {
+  if (!n) return null;
+  // Named with the tab, as it reads: "Work 2".
+  return <span className={`cnt ${hot ? 'cnt-hot' : ''}`}>{n}</span>;
+}
 
 const STATUS_TAG = { done: ['n', 'Done'], now: ['c', 'Now'], next: ['s', 'Next'] } as const;
 const STATUS_COLOR = { done: '#011935', now: '#D9534F', next: '#5C6775' } as const;
@@ -112,19 +147,68 @@ export function ArtistWorkspace({
   /** "Open in Chat": the full Chat page on this conversation. */
   onOpenChat?: (conversationId: string) => void;
 }) {
-  const [tab, setTab] = useState<TabId>('overview');
+  const [tab, setTabState] = useState<TabId>('summary');
+  // Each tab reopens on the section last used in it.
+  const [lastIn, setLastIn] = useState<Partial<Record<GroupId, TabId>>>({});
+  const setTab = useCallback((t: TabId) => {
+    setTabState(t);
+    setLastIn((m) => ({ ...m, [groupOf(t).id]: t }));
+  }, []);
+  const [libKind, setLibKind] = useState<LibraryKind>('all');
+  const [chatOpen, setChatOpen] = useState(false);
+  const narrow = useNarrow();
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [startPlan, setStartPlan] = useState(false);
+  const [counts, setCounts] = useState({ submissions: 0, todos: 0 });
   const loadPlan = useCallback(() => {
     api<PlanResponse>(cfg, token, 'GET', `/artists/${artist.artistId}/plan`)
       .then(setPlan)
       .catch(() => setPlan(null));
   }, [cfg, token, artist.artistId]);
+  const loadCounts = useCallback(() => {
+    const base = `/artists/${artist.artistId}`;
+    void Promise.all([
+      api<{ submissions: SubmissionSummary[] }>(cfg, token, 'GET', `${base}/submissions`)
+        .then((r) => r.submissions.filter((x) => x.status === 'open').length)
+        .catch(() => 0),
+      api<{ todos: Todo[] }>(cfg, token, 'GET', `${base}/todos`)
+        .then((r) => r.todos.length)
+        .catch(() => 0),
+    ]).then(([submissions, todos]) => setCounts({ submissions, todos }));
+  }, [cfg, token, artist.artistId]);
   useEffect(() => {
-    setTab('overview');
+    setTabState('summary');
+    setLastIn({});
+    setLibKind('all');
+    setChatOpen(false);
     setStartPlan(false);
     loadPlan();
-  }, [loadPlan]);
+    loadCounts();
+  }, [loadPlan, loadCounts]);
+  // Counts follow what's open, so a review or a ticked to-do shows on the tabs.
+  useEffect(() => loadCounts(), [tab, loadCounts]);
+
+  const group = groupOf(tab);
+  const sectionCount: Partial<Record<TabId, { n: number; hot?: boolean }>> = {
+    todo: { n: counts.todos },
+    submissions: { n: counts.submissions, hot: true },
+  };
+  const groupCount: Partial<Record<GroupId, { n: number; hot?: boolean }>> = {
+    plan: sectionCount.todo,
+    work: sectionCount.submissions,
+  };
+  const chat = (
+    <ArtistChatTab
+      cfg={cfg}
+      token={token}
+      me={me}
+      artist={artist}
+      onNavigate={onNavigate}
+      onOpenChat={onOpenChat}
+      onBack={() => setChatOpen(false)}
+      panel
+    />
+  );
 
   return (
     <>
@@ -138,96 +222,141 @@ export function ArtistWorkspace({
             {artist.status ? ` · ${artist.status}` : ''}
           </p>
         </div>
+        <Button
+          size="sm"
+          variant={chatOpen ? 'navy' : 'default'}
+          aria-expanded={chatOpen}
+          aria-controls="ws-chat"
+          onClick={() => setChatOpen((v) => !v)}
+        >
+          <Icon name="chat" size={16} />
+          {chatOpen ? 'Close chat' : 'Chat'}
+        </Button>
       </header>
       <nav
         aria-label="Workspace"
         role="tablist"
         className="page-head flex flex-wrap border-b border-input"
       >
-        {TABS.map((t) => (
+        {GROUPS.map((g) => (
           <button
-            key={t.id}
+            key={g.id}
             type="button"
             role="tab"
             className="wtab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
+            aria-selected={group.id === g.id}
+            onClick={() => setTab(lastIn[g.id] ?? g.sections[0].id)}
           >
-            {t.label}
+            {g.label} {groupCount[g.id] && <Count {...groupCount[g.id]!} />}
           </button>
         ))}
       </nav>
-      {tab === 'overview' && (
-        <>
-          <PlanStrip
-            plan={plan}
-            onOpenPlan={() => setTab('plan')}
-            onStartPlan={() => {
-              setStartPlan(true);
-              setTab('plan');
-            }}
-          />
-          <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
-        </>
-      )}
-      {tab === 'chat' && (
-        <ArtistChatTab
-          cfg={cfg}
-          token={token}
-          me={me}
-          artist={artist}
-          onNavigate={onNavigate}
-          onOpenChat={onOpenChat}
-          onBack={() => setTab('overview')}
-        />
-      )}
-      {tab === 'plan' && (
-        <PlanTab
-          cfg={cfg}
-          token={token}
-          artistId={artist.artistId}
-          artistName={artist.displayName}
-          canEdit
-          autoStart={startPlan}
-          onChanged={loadPlan}
-        />
-      )}
-      {tab === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artist.artistId} isBmg />}
-      {tab === 'submissions' && (
-        <ArtistSubmissions cfg={cfg} token={token} artistId={artist.artistId} isBmg />
-      )}
-      {tab === 'gigs' && <GigsTab cfg={cfg} token={token} artist={artist} />}
-      {tab === 'stats' && (
-        <ArtistStats cfg={cfg} token={token} artistId={artist.artistId} name={artist.displayName} />
-      )}
-      {tab === 'library' && (
-        <ArtistFiles
-          cfg={cfg}
-          token={token}
-          artistId={artist.artistId}
-          isBmg
-          isAdmin={me.role === 'bmg-admin'}
-        />
-      )}
-      {tab === 'assets' && (
-        <AssetLibrary
-          cfg={cfg}
-          token={token}
-          artistId={artist.artistId}
-          artistName={artist.displayName}
-          isArtist={false}
-          onOpenBrandKit={() => setTab('brand')}
-        />
-      )}
-      {tab === 'brand' && (
-        <BrandKit
-          cfg={cfg}
-          token={token}
-          artistId={artist.artistId}
-          artistName={artist.displayName}
-          isArtist={false}
-          onOpenAssets={() => setTab('assets')}
-        />
+      <div role="tablist" aria-label={`${group.label} sections`} className="page-head seg">
+        {group.sections.map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === x.id}
+            onClick={() => setTab(x.id)}
+          >
+            {x.label} {sectionCount[x.id] && <Count {...sectionCount[x.id]!} />}
+          </button>
+        ))}
+      </div>
+      {chatOpen && narrow ? (
+        chat
+      ) : (
+        <div className="flex items-start gap-5">
+          <div className="flex min-w-0 flex-1 flex-col gap-[22px]">
+            {tab === 'summary' && (
+              <>
+                <PlanStrip
+                  plan={plan}
+                  onOpenPlan={() => setTab('plan')}
+                  onStartPlan={() => {
+                    setStartPlan(true);
+                    setTab('plan');
+                  }}
+                />
+                <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
+              </>
+            )}
+            {tab === 'plan' && (
+              <PlanTab
+                cfg={cfg}
+                token={token}
+                artistId={artist.artistId}
+                artistName={artist.displayName}
+                canEdit
+                autoStart={startPlan}
+                onChanged={loadPlan}
+              />
+            )}
+            {tab === 'todo' && (
+              <ArtistTodos cfg={cfg} token={token} artistId={artist.artistId} isBmg />
+            )}
+            {tab === 'submissions' && (
+              <ArtistSubmissions cfg={cfg} token={token} artistId={artist.artistId} isBmg />
+            )}
+            {tab === 'gigs' && <GigsTab cfg={cfg} token={token} artist={artist} />}
+            {tab === 'stats' && (
+              <ArtistStats
+                cfg={cfg}
+                token={token}
+                artistId={artist.artistId}
+                name={artist.displayName}
+              />
+            )}
+            {tab === 'library' && (
+              <>
+                <Chips
+                  label="Type"
+                  value={libKind}
+                  onChange={setLibKind}
+                  options={LIBRARY_KIND_OPTIONS}
+                />
+                {libKind === 'assets' ? (
+                  <AssetLibrary
+                    cfg={cfg}
+                    token={token}
+                    artistId={artist.artistId}
+                    artistName={artist.displayName}
+                    isArtist={false}
+                    onOpenBrandKit={() => setTab('brand')}
+                  />
+                ) : (
+                  <ArtistFiles
+                    cfg={cfg}
+                    token={token}
+                    artistId={artist.artistId}
+                    isBmg
+                    isAdmin={me.role === 'bmg-admin'}
+                    kind={libKind}
+                  />
+                )}
+              </>
+            )}
+            {tab === 'brand' && (
+              <BrandKit
+                cfg={cfg}
+                token={token}
+                artistId={artist.artistId}
+                artistName={artist.displayName}
+                isArtist={false}
+                onOpenAssets={() => {
+                  setLibKind('assets');
+                  setTab('library');
+                }}
+              />
+            )}
+          </div>
+          {chatOpen && (
+            <aside id="ws-chat" aria-label={`Chat with ${artist.displayName}`} className="ws-chat">
+              {chat}
+            </aside>
+          )}
+        </div>
       )}
     </>
   );
