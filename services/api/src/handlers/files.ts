@@ -67,6 +67,7 @@ function canArtistFile(principal: Principal, action: Action, artistId: string, f
     kind: 'artist-data',
     artistId,
     visibility: f?.visibility ?? 'normal',
+    sharedWithArtistIds: f?.sharedWithArtistIds ?? [],
   });
 }
 
@@ -268,6 +269,11 @@ export const handler = handle(async (event) => {
         contentType: body.contentType,
         status: 'pending',
         visibility: body.visibility,
+        // Never shared back to the owner; BMG-only files are never shared with artists.
+        ...(body.visibility !== 'bmg-only' &&
+        body.sharedWithArtistIds.filter((id) => id !== artistId).length
+          ? { sharedWithArtistIds: body.sharedWithArtistIds.filter((id) => id !== artistId) }
+          : {}),
         ...(body.asset
           ? {
               asset: {

@@ -8,6 +8,7 @@ import {
   type Todo,
 } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
+import { EmojiPicker } from '../components/EmojiPicker.tsx';
 import {
   Avatar,
   Bar,
@@ -66,7 +67,13 @@ const REMINDER_SHORT: Record<Reminder, string> = {
 };
 
 function DueTag({ t }: { t: Todo }) {
-  if (!t.due) return <span className="src">No date</span>;
+  if (!t.due)
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="src">No date</span>
+        <CommentCount t={t} />
+      </span>
+    );
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <Tag tone={!t.done && t.due < today() ? 'c' : 's'}>
@@ -84,6 +91,18 @@ function DueTag({ t }: { t: Todo }) {
           <span className="sr-only">Reminder {REMINDER_SHORT[t.reminder]}</span>
         </span>
       )}
+      <CommentCount t={t} />
+    </span>
+  );
+}
+
+/** "💬 3" when a to-do's thread has comments. */
+function CommentCount({ t }: { t: Todo }) {
+  if (!t.commentCount) return null;
+  return (
+    <span className="text-[13px] text-muted-foreground" title="Comments">
+      💬 {t.commentCount}
+      <span className="sr-only"> comments</span>
     </span>
   );
 }
@@ -202,7 +221,203 @@ function TodoEditor({
           Cancel
         </Button>
       </div>
+      <TodoThread cfg={cfg} token={token} todo={todo} isBmg={isBmg} />
     </section>
+  );
+}
+
+interface ThreadComment {
+  commentId: string;
+  parentId: string | null;
+  text: string;
+  deleted: boolean;
+  authorName: string;
+  authorRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+  mine: boolean;
+  createdAt: string;
+}
+type ThreadItem = ThreadComment & { replies: ThreadComment[] };
+
+const when = (iso: string) =>
+  new Date(iso).toLocaleString('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+/**
+ * The to-do's conversation (rev 7): the artist and Blueprint talk it through
+ * under the to-do. Replies are one level deep; people remove their own
+ * comments. BMG-only to-dos keep their threads BMG-only.
+ */
+function TodoThread({
+  cfg,
+  token,
+  todo,
+  isBmg,
+}: {
+  cfg: AppConfig;
+  token: string;
+  todo: Todo;
+  isBmg: boolean;
+}) {
+  const base = `/artists/${todo.artistId}/todos/${todo.todoId}/comments`;
+  const [thread, setThread] = useState<ThreadItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<ThreadComment | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setThread((await api<{ thread: ThreadItem[] }>(cfg, token, 'GET', base)).thread);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [cfg, token, base]);
+  useEffect(() => void load(), [load]);
+
+  async function remove(c: ThreadComment) {
+    try {
+      await api(cfg, token, 'DELETE', `${base}/${c.commentId}`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  const who = todo.bmgOnly ? 'Blueprint only' : isBmg ? 'You and the artist' : 'You and Blueprint';
+  const Comment = ({ c, reply }: { c: ThreadComment; reply?: boolean }) => (
+    <li className={`flex flex-col gap-0.5 ${reply ? 'ml-6 border-l-2 border-input pl-3' : ''}`}>
+      <span className="text-[13px]">
+        <b>{c.mine ? 'You' : c.authorName}</b>{' '}
+        <span className="text-muted-foreground">{when(c.createdAt)}</span>
+      </span>
+      {c.deleted ? (
+        <span className="src italic">Comment removed</span>
+      ) : (
+        <span className="whitespace-pre-line text-[15px]">{c.text}</span>
+      )}
+      {!c.deleted && (
+        <span className="flex gap-3 text-[13px]">
+          {!reply && (
+            <button type="button" className="font-bold underline" onClick={() => setReplyTo(c)}>
+              Reply
+            </button>
+          )}
+          {c.mine && (
+            <button type="button" className="underline" onClick={() => void remove(c)}>
+              Remove
+            </button>
+          )}
+        </span>
+      )}
+    </li>
+  );
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-input pt-3">
+      <div className="flex items-center gap-2">
+        <h4 className="t text-[15px]">Conversation</h4>
+        <span className="src ml-auto">{who}</span>
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+      {thread === null ? (
+        <p className="src">Loading…</p>
+      ) : thread.length === 0 ? (
+        <p className="src">No comments yet. Ask a question or give an update.</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-3 p-0">
+          {thread.map((c) => (
+            <li key={c.commentId}>
+              <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                <Comment c={c} />
+                {c.replies.map((r) => (
+                  <Comment key={r.commentId} c={r} reply />
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+      <CommentBox
+        key={replyTo?.commentId ?? 'new'}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+        onSend={async (text) => {
+          await api(cfg, token, 'POST', base, {
+            text,
+            ...(replyTo ? { parentId: replyTo.commentId } : {}),
+          });
+          setReplyTo(null);
+          await load();
+        }}
+      />
+    </div>
+  );
+}
+
+function CommentBox({
+  replyTo,
+  onCancelReply,
+  onSend,
+}: {
+  replyTo: ThreadComment | null;
+  onCancelReply: () => void;
+  onSend: (text: string) => Promise<void>;
+}) {
+  const [text, setText] = useState('');
+  const [emoji, setEmoji] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSend(text.trim());
+      setText('');
+      setEmoji(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {replyTo && (
+        <span className="src flex items-center gap-2">
+          Replying to {replyTo.mine ? 'yourself' : replyTo.authorName}
+          <button type="button" className="underline" onClick={onCancelReply}>
+            Cancel
+          </button>
+        </span>
+      )}
+      <textarea
+        aria-label={replyTo ? 'Write a reply' : 'Write a comment'}
+        className="min-h-20 w-full rounded-lg border border-input bg-white px-3 py-2 text-[15px]"
+        maxLength={2000}
+        placeholder={replyTo ? 'Write a reply…' : 'Write a comment…'}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim()) void send();
+        }}
+      />
+      {emoji && <EmojiPicker onPick={(e) => setText((t) => t + e)} />}
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="navy"
+          disabled={busy || !text.trim()}
+          onClick={() => void send()}
+        >
+          {replyTo ? 'Reply' : 'Comment'}
+        </Button>
+        <Button size="sm" variant="ghost" aria-pressed={emoji} onClick={() => setEmoji((v) => !v)}>
+          😊 Emoji
+        </Button>
+      </div>
+    </div>
   );
 }
 

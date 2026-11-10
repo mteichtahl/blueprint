@@ -1371,11 +1371,19 @@ html {
     text-align: center;
     flex: none;
   }
+  .wa-emoji-picker {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid #e3e7eb;
+  }
   .wa-emoji {
     display: grid;
     grid-template-columns: repeat(10, 1fr);
     gap: 2px;
     padding: 8px 10px 0;
+    max-height: 240px;
+    overflow-y: auto;
+    align-content: start;
   }
   .wa-emoji button {
     height: 40px;

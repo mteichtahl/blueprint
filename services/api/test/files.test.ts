@@ -52,6 +52,7 @@ describe('upload requests', () => {
       size: 10,
       contentType: 'audio/mpeg',
       visibility: 'normal',
+      sharedWithArtistIds: [],
     });
   });
 
@@ -163,5 +164,22 @@ describe('deleting files', () => {
     expect(deleteAllowed(admin, art('u-a', 'artist'))).toMatch(/Only the artist/);
     expect(deleteAllowed(admin, art('u-staff', 'bmg-staff'))).toBeUndefined();
     expect(deleteAllowed(staff, art('u-other', 'bmg-staff'))).toMatch(/admin or the person/);
+  });
+});
+
+describe('files sent in chat (rev 7)', () => {
+  it('records the other artists in the chat on upload', () => {
+    const up = ArtistUpload.parse({
+      name: 'demo.mp3',
+      size: 1000,
+      contentType: 'audio/mpeg',
+      visibility: 'private',
+      sharedWithArtistIds: ['art_bbbbbbbbbbbb'],
+    });
+    expect(up.sharedWithArtistIds).toEqual(['art_bbbbbbbbbbbb']);
+    expect(ArtistUpload.parse({ name: 'a.pdf', size: 1 }).sharedWithArtistIds).toEqual([]);
+    expect(
+      ArtistUpload.safeParse({ name: 'a.pdf', size: 1, sharedWithArtistIds: ['bob'] }).success,
+    ).toBe(false);
   });
 });

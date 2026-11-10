@@ -151,6 +151,14 @@ export const ArtistUpload = z.object({
   visibility: z.enum(['normal', 'bmg-only', 'private']).default('normal'),
   /** Upload straight into the asset library. */
   asset: AssetMetaSchema.optional(),
+  /**
+   * Other artists who can open it: the artists in the chat it was sent to
+   * (rev 7). Set by the uploader at upload time.
+   */
+  sharedWithArtistIds: z
+    .array(z.string().regex(new RegExp(`^${ARTIST}$`)))
+    .max(200)
+    .default([]),
 });
 
 const ArtistIds = z.array(z.string().regex(new RegExp(`^${ARTIST}$`))).max(200);

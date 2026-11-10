@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { Bar, Button, Card, DataTable, Field, Notice, PageHeader, Tag } from '../components/ui.tsx';
+import { aud, PRESET_COSTS } from '../components/Money.tsx';
+import { VenuePicker, type Venue } from './Venues.tsx';
+import { ContactPicker } from './Contacts.tsx';
 
 /** BMG-only events (screen: Events · Industry Mixer Night). */
 
@@ -10,10 +13,14 @@ interface EventInfo {
   name: string;
   date: string;
   venue: string;
+  venueId?: string;
+  startTime?: string;
+  endTime?: string;
   capacity: number;
   ticketTarget: number;
   ticketPriceCents: number;
   ticketsSold: number;
+  takingsCents: number;
   compsTarget: number;
   surveyAfter: boolean;
   humanitixEventId?: string;
@@ -36,6 +43,8 @@ interface Detail {
     budgetCents: number;
     spentCents: number;
     ticketIncomeCents: number;
+    takingsCents: number;
+    profitCents: number;
   };
 }
 type Part = 'guests' | 'speakers' | 'crew' | 'run' | 'budget';
@@ -102,11 +111,11 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
     <div className="flex flex-col gap-5">
       {error && <Notice tone="error">{error}</Notice>}
       {creating && (
-        <NewEvent
+        <EventForm
           cfg={cfg}
           token={token}
           onCancel={() => setCreating(false)}
-          onCreated={(id) => {
+          onSaved={(id) => {
             setCreating(false);
             setOpenId(id);
             void loadList();
@@ -130,7 +139,11 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
                   }}
                 >
                   <b className="flex-1">{e.name}</b>
-                  <span className="src">{longDate(e.date)}</span>
+                  <span className="src">
+                    {[longDate(e.date), eventTimes(e.startTime, e.endTime)]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </span>
                 </button>
               ))}
             </div>
@@ -158,47 +171,85 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
   );
 }
 
-function NewEvent({
+/** "6 pm – 11:30 pm", with "(next day)" when it runs past midnight. */
+export const eventTimes = (start?: string, end?: string) =>
+  start && end ? `${time12(start)} – ${time12(end)}${end < start ? ' (next day)' : ''}` : '';
+
+/** Create an event, or edit one's details. Start and end times are required (rev 7). */
+function EventForm({
   cfg,
   token,
+  event,
   onCancel,
-  onCreated,
+  onSaved,
 }: {
   cfg: AppConfig;
   token: string;
+  event?: EventInfo;
   onCancel: () => void;
-  onCreated: (id: string) => void;
+  onSaved: (id: string) => void;
 }) {
   const [f, setF] = useState({
-    name: '',
-    date: '',
-    venue: '',
-    capacity: '',
-    ticketTarget: '',
-    ticketPrice: '',
-    compsTarget: '',
+    name: event?.name ?? '',
+    date: event?.date ?? '',
+    startTime: event?.startTime ?? '',
+    endTime: event?.endTime ?? '',
+    capacity: event?.capacity ? String(event.capacity) : '',
+    ticketTarget: event?.ticketTarget ? String(event.ticketTarget) : '',
+    ticketPrice: event?.ticketPriceCents ? String(event.ticketPriceCents / 100) : '',
+    compsTarget: event?.compsTarget ? String(event.compsTarget) : '',
   });
+  const [venue, setVenue] = useState<{ venueId: string | null; name: string } | null>(
+    event?.venue ? { venueId: event.venueId ?? null, name: event.venue } : null,
+  );
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
-  async function create() {
+  const timeError =
+    !f.startTime || !f.endTime
+      ? 'Add a start and an end time'
+      : f.startTime === f.endTime
+        ? 'The end time must be after the start time'
+        : null;
+  /** Picking a venue from the list fills in its capacity if none is set. */
+  async function pickVenue(v: { venueId: string | null; name: string } | null) {
+    setVenue(v);
+    if (!v?.venueId || f.capacity) return;
     try {
-      const e = await api<EventInfo>(cfg, token, 'POST', '/events', {
-        name: f.name,
-        date: f.date,
-        venue: f.venue,
-        capacity: Number(f.capacity) || 0,
-        ticketTarget: Number(f.ticketTarget) || 0,
-        ticketPriceCents: Math.round((Number(f.ticketPrice) || 0) * 100),
-        compsTarget: Number(f.compsTarget) || 0,
-      });
-      onCreated(e.eventId);
+      const full = await api<Venue>(cfg, token, 'GET', `/venues/${v.venueId}`);
+      if (full.capacity)
+        setF((cur) => ({ ...cur, capacity: cur.capacity || String(full.capacity) }));
+    } catch {
+      // Capacity is only a convenience.
+    }
+  }
+  async function save() {
+    const body = {
+      name: f.name,
+      date: f.date,
+      startTime: f.startTime,
+      endTime: f.endTime,
+      venue: venue?.name ?? '',
+      ...(venue?.venueId ? { venueId: venue.venueId } : {}),
+      capacity: Number(f.capacity) || 0,
+      ticketTarget: Number(f.ticketTarget) || 0,
+      ticketPriceCents: Math.round((Number(f.ticketPrice) || 0) * 100),
+      compsTarget: Number(f.compsTarget) || 0,
+    };
+    try {
+      if (event) {
+        await api(cfg, token, 'PATCH', `/events/${event.eventId}`, body);
+        onSaved(event.eventId);
+      } else {
+        const e = await api<EventInfo>(cfg, token, 'POST', '/events', body);
+        onSaved(e.eventId);
+      }
     } catch (e) {
       setError((e as Error).message);
     }
   }
   return (
-    <Card title="New event">
+    <Card title={event ? 'Event details' : 'New event'}>
       {error && <Notice tone="error">{error}</Notice>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
@@ -208,7 +259,32 @@ function NewEvent({
           placeholder="Industry Mixer Night"
         />
         <Field label="Date" type="date" value={f.date} onChange={set('date')} />
-        <Field label="Venue" value={f.venue} onChange={set('venue')} />
+        <Field
+          label="Start time"
+          type="time"
+          required
+          value={f.startTime}
+          onChange={set('startTime')}
+        />
+        <Field
+          label="End time"
+          type="time"
+          required
+          value={f.endTime}
+          onChange={set('endTime')}
+          {...(f.startTime && f.endTime && f.endTime < f.startTime
+            ? { hint: 'Finishes after midnight' }
+            : f.startTime && f.startTime === f.endTime
+              ? { hint: 'The end time must be after the start time' }
+              : {})}
+        />
+        <VenuePicker
+          cfg={cfg}
+          token={token}
+          isBmg
+          value={venue}
+          onChange={(v) => void pickVenue(v)}
+        />
         <Field
           label="Capacity"
           type="number"
@@ -240,8 +316,12 @@ function NewEvent({
         />
       </div>
       <div className="flex gap-2">
-        <Button variant="cta" disabled={!f.name.trim() || !f.date} onClick={() => void create()}>
-          Create event
+        <Button
+          variant="cta"
+          disabled={!f.name.trim() || !f.date || !!timeError}
+          onClick={() => void save()}
+        >
+          {event ? 'Save details' : 'Create event'}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
           Cancel
@@ -268,6 +348,7 @@ function EventDetail({
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState<Part | null>(null);
   const [editingSales, setEditingSales] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
   const base = `/events/${eventId}`;
 
   const load = useCallback(async () => {
@@ -314,14 +395,47 @@ function EventDetail({
         title={e.name}
         sub={[
           longDate(e.date),
+          eventTimes(e.startTime, e.endTime),
           e.venue,
           days > 0 ? `${days} day${days === 1 ? '' : 's'} to go` : days === 0 ? 'Today' : 'Done',
         ]
           .filter(Boolean)
           .join(' · ')}
-        actions={actions}
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setEditingDetails((v) => !v)}>
+              Edit details
+            </Button>
+            {actions}
+          </>
+        }
       />
       {error && <Notice tone="error">{error}</Notice>}
+      {!editingDetails && (!e.startTime || !e.endTime) && (
+        <Notice>
+          This event has no start and end time yet.{' '}
+          <button
+            type="button"
+            className="font-bold underline"
+            onClick={() => setEditingDetails(true)}
+          >
+            Add them
+          </button>
+        </Notice>
+      )}
+      {editingDetails && (
+        <EventForm
+          cfg={cfg}
+          token={token}
+          event={e}
+          onCancel={() => setEditingDetails(false)}
+          onSaved={() => {
+            setEditingDetails(false);
+            void load();
+            onChanged();
+          }}
+        />
+      )}
 
       <div className="flex flex-wrap gap-5">
         <Card className="flex-[1_1_200px]">
@@ -386,9 +500,14 @@ function EventDetail({
           <span className="src">Tickets + comps</span>
         </Card>
         <Card className="flex-[1_1_200px]">
-          <span className="eyebrow">Budget</span>
-          <span className="t text-[36px]">{money(s.budgetCents)}</span>
-          <span className="src">Ticket income so far {money(s.ticketIncomeCents)}</span>
+          <span className="eyebrow">Profit</span>
+          <span className={`t text-[36px] ${s.profitCents < 0 ? 'text-[#8E2F2C]' : ''}`}>
+            {aud(s.profitCents)}
+          </span>
+          <span className="src">
+            Takings {aud(s.takingsCents)} − costs {aud(s.spentCents)} · budget{' '}
+            {money(s.budgetCents)}
+          </span>
         </Card>
       </div>
 
@@ -520,39 +639,17 @@ function EventDetail({
             />
           )}
           {d.crew.length === 0 && <p className="src">No crew roles yet.</p>}
-          {d.crew.map((c) => {
-            const filled = Number(c.filled);
-            const needed = Number(c.needed);
-            return (
-              <div key={c.itemId} className="li">
-                <span className="flex-1">{String(c.role)}</span>
-                <span className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label={`One fewer for ${String(c.role)}`}
-                    className="chip min-h-8 px-2"
-                    disabled={filled <= 0}
-                    onClick={() => void patchRow('crew', c.itemId, { filled: filled - 1 })}
-                  >
-                    −
-                  </button>
-                  <Tag tone={filled >= needed ? 'n' : 'c'}>
-                    {filled} / {needed}
-                  </Tag>
-                  <button
-                    type="button"
-                    aria-label={`One more for ${String(c.role)}`}
-                    className="chip min-h-8 px-2"
-                    disabled={filled >= needed}
-                    onClick={() => void patchRow('crew', c.itemId, { filled: filled + 1 })}
-                  >
-                    +
-                  </button>
-                </span>
-                <RemoveButton onClick={() => void removeRow('crew', c.itemId)} />
-              </div>
-            );
-          })}
+          {d.crew.map((c) => (
+            <CrewRole
+              key={c.itemId}
+              cfg={cfg}
+              token={token}
+              role={c as CrewRow}
+              onPatch={(body) => patchRow('crew', c.itemId, body)}
+              onRemove={() => void removeRow('crew', c.itemId)}
+            />
+          ))}
+          <p className="src">Everyone on the crew is saved to Contacts.</p>
         </Card>
       </div>
 
@@ -577,6 +674,12 @@ function EventDetail({
                 { k: 'time', label: 'Time', type: 'time' },
                 { k: 'item', label: 'Item' },
                 { k: 'who', label: 'Who', optional: true },
+                {
+                  k: 'notes',
+                  label: 'Notes',
+                  optional: true,
+                  placeholder: 'Cues, gear, who to call',
+                },
               ]}
               onCancel={() => setAdding(null)}
               onSave={(b) => void addRow('run', b)}
@@ -585,11 +688,16 @@ function EventDetail({
           {d.run.length === 0 && <p className="src">Nothing on the run sheet yet.</p>}
           <div className="flex flex-col">
             {d.run.map((r) => (
-              <div key={r.itemId} className="li">
+              <div key={r.itemId} className="li flex-wrap">
                 <b className="w-16 flex-none">{time12(String(r.time))}</b>
                 <span className="flex-1">{String(r.item)}</span>
                 <span className="src">{String(r.who ?? '')}</span>
                 <RemoveButton onClick={() => void removeRow('run', r.itemId)} />
+                <RunNotes
+                  item={String(r.item)}
+                  notes={String(r.notes ?? '')}
+                  onSave={(notes) => void patchRow('run', r.itemId, { notes })}
+                />
               </div>
             ))}
           </div>
@@ -597,13 +705,44 @@ function EventDetail({
 
         <Card
           className="flex-[2_1_320px]"
-          title="Budget"
+          title="Takings, costs and profit"
           action={
             <Button size="sm" variant="ghost" onClick={() => setAdding('budget')}>
-              Add line
+              + Add a cost
             </Button>
           }
         >
+          <div className="flex flex-wrap items-end gap-3">
+            <span className="flex flex-col gap-1.5">
+              <span className="text-[15px] font-bold">Tickets sold</span>
+              <span className="t text-[22px]">{e.ticketsSold}</span>
+            </span>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[15px] font-bold">Total event takings ($)</span>
+              <SpentInput
+                label="Total event takings"
+                cents={e.takingsCents ?? 0}
+                onSave={(c) => void patchEvent({ takingsCents: c })}
+              />
+            </label>
+          </div>
+          {PRESET_COSTS.some((p) => !d.budget.some((b) => String(b.item) === p)) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                void run(async () => {
+                  for (const item of PRESET_COSTS.filter(
+                    (p) => !d.budget.some((b) => String(b.item) === p),
+                  )) {
+                    await api(cfg, token, 'POST', `${base}/budget`, { item });
+                  }
+                })
+              }
+            >
+              Add standard costs (venue, photography, videography, content, bands)
+            </Button>
+          )}
           {adding === 'budget' && (
             <RowForm
               fields={[
@@ -624,9 +763,12 @@ function EventDetail({
           <DataTable>
             <thead>
               <tr>
-                <th scope="col">Item</th>
+                <th scope="col">Cost</th>
                 <th scope="col">Budget</th>
                 <th scope="col">Spent</th>
+                <th scope="col">
+                  <span className="sr-only">Delete</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -641,6 +783,9 @@ function EventDetail({
                       onSave={(c) => void patchRow('budget', b.itemId, { spentCents: c })}
                     />
                   </td>
+                  <td>
+                    <RemoveButton onClick={() => void removeRow('budget', b.itemId)} />
+                  </td>
                 </tr>
               ))}
               <tr>
@@ -652,6 +797,18 @@ function EventDetail({
                 </td>
                 <td>
                   <b>{money(s.spentCents)}</b>
+                </td>
+                <td />
+              </tr>
+              <tr>
+                <td colSpan={2}>
+                  <b>Profit</b> <span className="src">(takings − spent)</span>
+                </td>
+                <td colSpan={2}>
+                  <b className={s.profitCents < 0 ? 'text-[#8E2F2C]' : ''}>
+                    {aud(s.profitCents)}
+                    {s.profitCents < 0 && ' loss'}
+                  </b>
                 </td>
               </tr>
             </tbody>
@@ -793,6 +950,248 @@ function TicketsForm({ sold, onSave }: { sold: number; onSave: (n: number) => vo
         Save
       </Button>
     </span>
+  );
+}
+
+interface CrewPerson {
+  contactId?: string;
+  name: string;
+  email: string;
+  phone: string;
+  type: 'crew' | 'volunteer';
+}
+type CrewRow = Row & {
+  role: string;
+  needed: number;
+  filled: number;
+  names?: string;
+  people?: CrewPerson[];
+};
+
+/**
+ * One crew role: who is on it (name, email, phone; crew or volunteer). Adding
+ * someone saves them to Contacts, or links them if they're already there.
+ */
+function CrewRole({
+  cfg,
+  token,
+  role,
+  onPatch,
+  onRemove,
+}: {
+  cfg: AppConfig;
+  token: string;
+  role: CrewRow;
+  onPatch: (body: Record<string, unknown>) => Promise<void>;
+  onRemove: () => void;
+}) {
+  const people = role.people ?? [];
+  const filled = role.people ? people.length : Number(role.filled);
+  const needed = Number(role.needed);
+  const [adding, setAdding] = useState(false);
+  const save = (next: CrewPerson[]) => onPatch({ people: next });
+  return (
+    <div className="flex flex-col gap-1.5 border-b border-input py-2">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 font-bold">{role.role}</span>
+        <Tag tone={filled >= needed ? 'n' : 'c'}>
+          {filled} / {needed}
+        </Tag>
+        <Button size="sm" variant="ghost" onClick={() => setAdding((v) => !v)}>
+          + Person
+        </Button>
+        <RemoveButton onClick={onRemove} />
+      </div>
+      {!role.people && role.names && (
+        <span className="src">
+          Names noted: {role.names}. Add each person with their email and phone to save them to
+          Contacts.
+        </span>
+      )}
+      {people.map((p, i) => (
+        <div
+          key={`${p.contactId ?? p.email}-${i}`}
+          className="flex items-center gap-2 pl-2 text-[15px]"
+        >
+          <span className="flex-1">
+            <b>{p.name}</b>{' '}
+            <span className="src">
+              <a href={`mailto:${p.email}`}>{p.email}</a> ·{' '}
+              <a href={`tel:${p.phone.replace(/\s/g, '')}`}>{p.phone}</a>
+            </span>
+          </span>
+          <Tag tone={p.type === 'volunteer' ? 's' : 'n'}>
+            {p.type === 'volunteer' ? 'Volunteer' : 'Crew'}
+          </Tag>
+          <button
+            type="button"
+            className="src font-bold hover:text-cta"
+            aria-label={`Take ${p.name} off ${role.role}`}
+            onClick={() => void save(people.filter((_, j) => j !== i))}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      {adding && (
+        <CrewPersonForm
+          cfg={cfg}
+          token={token}
+          role={role.role}
+          onCancel={() => setAdding(false)}
+          onSave={async (p) => {
+            await save([...people, p]);
+            setAdding(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CrewPersonForm({
+  cfg,
+  token,
+  role,
+  onSave,
+  onCancel,
+}: {
+  cfg: AppConfig;
+  token: string;
+  role: string;
+  onSave: (p: CrewPerson) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [p, setP] = useState<CrewPerson>({ name: '', email: '', phone: '', type: 'crew' });
+  const [busy, setBusy] = useState(false);
+  const set = (k: 'name' | 'email' | 'phone') => (e: { target: { value: string } }) =>
+    setP({ ...p, [k]: e.target.value });
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email.trim());
+  const phoneOk = p.phone.replace(/\D/g, '').length >= 6;
+  const ready = p.name.trim() && emailOk && phoneOk;
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-input p-3">
+      <ContactPicker
+        cfg={cfg}
+        token={token}
+        isBmg
+        label={`Pick someone for ${role} from contacts`}
+        value={null}
+        defaultTags={[p.type === 'volunteer' ? 'Volunteer' : 'Crew']}
+        onChange={(c) =>
+          c && setP({ ...p, contactId: c.contactId, name: c.name, email: c.email, phone: c.phone })
+        }
+      />
+      <span className="src">…or type their details:</span>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Name" value={p.name} onChange={set('name')} />
+        <Field label="Email" type="email" value={p.email} onChange={set('email')} />
+        <Field label="Phone" type="tel" value={p.phone} onChange={set('phone')} />
+      </div>
+      <div className="flex gap-2" role="group" aria-label="Crew or volunteer">
+        {(['crew', 'volunteer'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            className="chip min-h-9"
+            aria-pressed={p.type === t}
+            onClick={() => setP({ ...p, type: t })}
+          >
+            {t === 'crew' ? 'Crew' : 'Volunteer'}
+          </button>
+        ))}
+      </div>
+      {p.name && (!emailOk || !phoneOk) && (
+        <span className="src">Crew and volunteers need a name, email and phone number.</span>
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="navy"
+          disabled={!ready || busy}
+          onClick={() => {
+            setBusy(true);
+            void onSave({
+              ...p,
+              name: p.name.trim(),
+              email: p.email.trim(),
+              phone: p.phone.trim(),
+            }).finally(() => setBusy(false));
+          }}
+        >
+          Add to {role}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A run sheet item's notes: shown under the row, edited in place. */
+function RunNotes({
+  item,
+  notes,
+  onSave,
+}: {
+  item: string;
+  notes: string;
+  onSave: (notes: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState(notes);
+  if (editing) {
+    return (
+      <div className="flex w-full flex-col gap-2 pl-16">
+        <textarea
+          aria-label={`Notes for ${item}`}
+          className="min-h-20 w-full rounded-lg border border-input bg-white px-3 py-2 text-[15px]"
+          maxLength={1000}
+          value={v}
+          onChange={(e) => setV(e.target.value)}
+        />
+        <span className="flex gap-2">
+          <Button
+            size="sm"
+            variant="navy"
+            onClick={() => {
+              setEditing(false);
+              if (v.trim() !== notes) onSave(v.trim());
+            }}
+          >
+            Save notes
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setV(notes);
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex w-full gap-2 pl-16 text-sm">
+      {notes ? (
+        <span className="src flex-1 whitespace-pre-line">{notes}</span>
+      ) : (
+        <span className="flex-1" />
+      )}
+      <button
+        type="button"
+        className="font-bold underline"
+        aria-label={`${notes ? 'Edit' : 'Add'} notes for ${item}`}
+        onClick={() => setEditing(true)}
+      >
+        {notes ? 'Edit notes' : '+ Notes'}
+      </button>
+    </div>
   );
 }
 
