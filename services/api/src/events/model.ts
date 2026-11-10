@@ -320,6 +320,30 @@ export const EventCreate = EventBody.extend({
 });
 
 const money = z.number().int().min(0).max(100_000_000);
+
+/**
+ * A crew member or volunteer (rev 7): name, email and phone are all needed,
+ * and saving puts them in Contacts (found by email or phone, else added).
+ */
+export const CrewPerson = z.object({
+  contactId: z
+    .string()
+    .regex(/^[a-z0-9]{10,40}$/)
+    .optional(),
+  name: z.string().trim().min(1, 'Add their name').max(120),
+  email: z.email('Add an email like name@example.com').max(200),
+  phone: z
+    .string()
+    .trim()
+    .min(6, 'Add a phone number')
+    .max(40)
+    .refine((v) => v.replace(/\D/g, '').length >= 6, 'Check the phone number'),
+  type: z.enum(['crew', 'volunteer']).default('crew'),
+});
+export type CrewPerson = z.infer<typeof CrewPerson>;
+export const crewTag = (p: Pick<CrewPerson, 'type'>) =>
+  p.type === 'volunteer' ? 'Volunteer' : 'Crew';
+
 /** Each part of an event, validated on create; patches accept the same fields, all optional. */
 export const PART_SCHEMAS = {
   guests: z.object({
@@ -337,8 +361,12 @@ export const PART_SCHEMAS = {
   crew: z.object({
     role: z.string().trim().min(1).max(120),
     needed: z.number().int().min(0).max(100).default(1),
+    /** Counted from `people` when there are any; older rows typed it in. */
     filled: z.number().int().min(0).max(100).default(0),
+    /** Older rows kept names as text; new rows use `people`. */
     names: Text(300).default(''),
+    /** Who is on this role (rev 7). Each one is also in Contacts. */
+    people: z.array(CrewPerson).max(100).optional(),
   }),
   run: z.object({
     time: Time,
@@ -381,7 +409,7 @@ export function summarise(
   parts: {
     guests: { status: string }[];
     speakers: { status: string }[];
-    crew: { needed: number; filled: number }[];
+    crew: { needed: number; filled: number; people?: unknown[] }[];
     budget: { budgetCents: number; spentCents: number }[];
   },
 ): EventSummary {
@@ -398,7 +426,10 @@ export function summarise(
     ticketIncomeCents: e.ticketsSold * e.ticketPriceCents,
     takingsCents: e.takingsCents,
     profitCents: e.takingsCents - parts.budget.reduce((n, b) => n + b.spentCents, 0),
-    crewFilled: parts.crew.reduce((n, c) => n + Math.min(c.filled, c.needed), 0),
+    crewFilled: parts.crew.reduce(
+      (n, c) => n + Math.min(c.people?.length ?? c.filled, c.needed),
+      0,
+    ),
     crewNeeded: parts.crew.reduce((n, c) => n + c.needed, 0),
     speakersConfirmed: parts.speakers.filter((s) => s.status === 'confirmed').length,
     speakers: parts.speakers.length,

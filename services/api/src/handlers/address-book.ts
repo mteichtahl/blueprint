@@ -29,6 +29,7 @@ import {
   type VenueFilter,
   type VenuePatchInput,
 } from '../address-book/model.ts';
+import { allContacts, saveContact } from '../address-book/store.ts';
 import { newId } from '../workspace/model.ts';
 import {
   audit,
@@ -67,24 +68,6 @@ function ensure(principal: Principal, action: Action, createdBySub?: string) {
 function idParam(id: string): string {
   if (!ID.test(id)) throw new HttpError(404, 'Not found');
   return id;
-}
-
-async function allContacts(): Promise<Contact[]> {
-  const items: Contact[] = [];
-  let start: Record<string, unknown> | undefined;
-  do {
-    const res = await db.send(
-      new QueryCommand({
-        TableName: table(),
-        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :c)',
-        ExpressionAttributeValues: { ':pk': CONTACTS_PK, ':c': 'CONTACT#' },
-        ...(start ? { ExclusiveStartKey: start } : {}),
-      }),
-    );
-    items.push(...((res.Items ?? []) as Contact[]));
-    start = res.LastEvaluatedKey;
-  } while (start && items.length < 5000);
-  return items;
 }
 
 async function allVenues(): Promise<Venue[]> {
@@ -170,17 +153,6 @@ async function loadContact(id: string): Promise<Contact> {
   );
   if (!res.Item) throw new HttpError(404, 'No such contact');
   return res.Item as Contact;
-}
-
-async function saveContact(c: Contact, condition?: 'new' | 'exists') {
-  await db.send(
-    new PutCommand({
-      TableName: table(),
-      Item: { PK: CONTACTS_PK, SK: contactSk(c.contactId), type: 'contact', ...c },
-      ...(condition === 'new' ? { ConditionExpression: 'attribute_not_exists(PK)' } : {}),
-      ...(condition === 'exists' ? { ConditionExpression: 'attribute_exists(PK)' } : {}),
-    }),
-  );
 }
 
 /** A 409 that hands back the existing person, so the caller can pick them instead. */
