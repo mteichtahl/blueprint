@@ -605,6 +605,10 @@ export function ArtistFiles({
         initial={opened}
         onBack={() => setOpened(null)}
         onChanged={() => void load()}
+        onOpenFolder={(id) => {
+          setOpened(null);
+          setPlace(id);
+        }}
       />
     );
   }
@@ -756,6 +760,10 @@ export function Library({
         artists={artists}
         onBack={back}
         onChanged={() => void load()}
+        onOpenFolder={(id) => {
+          back();
+          setPlace(id);
+        }}
       />
     );
   }

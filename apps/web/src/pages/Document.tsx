@@ -61,6 +61,8 @@ export interface DocumentPageProps {
   onBack: () => void;
   /** Something changed: refresh the list (with the document as it is now, when known). */
   onChanged: (next?: FileItem) => void;
+  /** Leave the document and open a folder in the library (rev 10, after a move). */
+  onOpenFolder?: (folderId: string | null) => void;
 }
 
 function whoCanSee(f: FileItem, names: Record<string, string>): string {
@@ -204,6 +206,7 @@ function DocumentDetail({
   onBack,
   onEdit,
   onChanged,
+  onOpenFolder,
   uses,
 }: DocumentPageProps & {
   file: FileItem;
@@ -219,6 +222,7 @@ function DocumentDetail({
   const base = foldersBase(collection);
   const folders = useFolders(cfg, token, base);
   const [panel, setPanel] = useState<'access' | 'move' | null>(null);
+  const [moved, setMoved] = useState<{ to: string | null; name: string } | null>(null);
   const folder = f.folderId
     ? folders.list?.folders.find((x) => x.folderId === f.folderId)
     : undefined;
@@ -307,11 +311,26 @@ function DocumentDetail({
           rootLabel="Library"
           items={[{ kind: 'file', id: f.fileId }]}
           onClose={() => setPanel(null)}
-          onMoved={() => {
+          onMoved={(to, name) => {
+            setMoved({ to, name });
             onChanged();
             void folders.load();
           }}
         />
+      )}
+      {moved && (
+        <Notice tone="success">
+          Moved to “{moved.name}”.{' '}
+          {onOpenFolder && (
+            <button
+              type="button"
+              className="font-bold underline"
+              onClick={() => onOpenFolder(moved.to)}
+            >
+              Open {moved.to === null ? 'the library' : 'the folder'}
+            </button>
+          )}
+        </Notice>
       )}
       <dl className="flex flex-col">
         <Row label="Owner">
