@@ -12,9 +12,13 @@ import { isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   byTime,
+  checkTimes,
+  crewTag,
+  dealNoteFor,
   DEFAULT_CHECKLIST,
   EVENT_PARTS,
   EventBody,
+  EventCreate,
   EventPatch,
   eventPk,
   EVENTS_PK,
@@ -30,12 +34,24 @@ import {
   partSk,
   patchOf,
   summarise,
+  type CrewPerson,
   type EventPart,
   type Gig,
   type GigFilter,
 } from '../events/model.ts';
 import { artistPk, newId } from '../workspace/model.ts';
-import { authContext, db, env, handle, HttpError, json, parseBody, principalFor } from '../lib.ts';
+import { allContacts, upsertPerson } from '../address-book/store.ts';
+import {
+  audit,
+  authContext,
+  db,
+  env,
+  handle,
+  HttpError,
+  json,
+  parseBody,
+  principalFor,
+} from '../lib.ts';
 
 const table = () => env('MAIN_TABLE');
 const events = new EventBridgeClient({});
@@ -97,7 +113,13 @@ function strip(item: Record<string, unknown>): Record<string, unknown> {
   for (const k of ['PK', 'SK', 'GSI3PK', 'GSI3SK', 'type', 'createdBy']) delete rest[k];
   return rest;
 }
-const publicGig = (g: Gig) => strip(g as unknown as Record<string, unknown>);
+/** Older gigs kept one `time`; it's the start time. */
+function publicGig(g: Gig) {
+  const { time, ...rest } = g;
+  // Set duration was removed from gigs (rev 7); old values stay stored but hidden.
+  delete rest.setLength;
+  return strip({ ...rest, ...(rest.startTime || !time ? {} : { startTime: time }) });
+}
 
 async function loadGig(artistId: string, gigId: string): Promise<Gig> {
   const res = await db.send(
@@ -152,6 +174,35 @@ async function eventParts(eventId: string) {
   return parts as Record<EventPart, Record<string, unknown>[]>;
 }
 
+/**
+ * Crew and volunteers go into Contacts (rev 7): each person is found by email
+ * or phone, or added, and tagged Crew or Volunteer. Returns the people with
+ * their contact ids, and the role's filled count.
+ */
+async function linkCrew(
+  event: APIGatewayProxyEvent,
+  principal: Principal,
+  people: CrewPerson[],
+): Promise<CrewPerson[]> {
+  const known = await allContacts();
+  const out: CrewPerson[] = [];
+  for (const p of people) {
+    const { contact, created } = await upsertPerson(
+      { name: p.name, email: p.email, phone: p.phone, tag: crewTag(p) },
+      { sub: principal.sub, role: 'bmg' },
+      known,
+    );
+    if (created) {
+      await audit(event, 'contact.create', 'success', {
+        contactId: contact.contactId,
+        from: 'event-crew',
+      });
+    }
+    out.push({ ...p, contactId: contact.contactId });
+  }
+  return out;
+}
+
 function partParam(event: APIGatewayProxyEvent): EventPart {
   const p = event.pathParameters?.part as EventPart;
   if (!EVENT_PARTS.includes(p)) throw new HttpError(404, 'Not found');
@@ -195,19 +246,24 @@ export const handler = handle(async (event) => {
       const artistId = artistParam(event);
       ensureArtist(principal, 'write', artistId);
       const body = parseBody(event, GigCreate);
+      const timeError = checkTimes(body.startTime, body.endTime);
+      if (timeError) throw new HttpError(400, timeError);
       const isArtist = principal.role === 'artist';
       const gig: Gig = {
         gigId: newId(),
         artistId,
         title: body.title,
         date: body.date,
-        ...(body.time ? { time: body.time } : {}),
+        ...(body.startTime ? { startTime: body.startTime } : {}),
+        ...(body.endTime ? { endTime: body.endTime } : {}),
         ...(body.venue ? { venue: body.venue } : {}),
+        ...(body.venue && body.venueId ? { venueId: body.venueId } : {}),
         ...(body.notes ? { notes: body.notes } : {}),
         status: body.status,
         deal: body.deal,
-        ...(body.dealNote ? { dealNote: body.dealNote } : {}),
-        ...(body.setLength ? { setLength: body.setLength } : {}),
+        ...(dealNoteFor(body.deal, body.dealNote)
+          ? { dealNote: dealNoteFor(body.deal, body.dealNote)! }
+          : {}),
         ...(body.ticketUrl ? { ticketUrl: body.ticketUrl } : {}),
         checklist: DEFAULT_CHECKLIST.map((title, i) => ({ id: `c${i + 1}`, title, done: false })),
         plannedBy: isArtist ? 'artist' : 'bmg',
@@ -227,10 +283,22 @@ export const handler = handle(async (event) => {
       const patch = parseBody(event, GigPatch);
       const refused = gigPatchAllowed(principal.role, gig, patch);
       if (refused) throw new HttpError(403, refused);
-      const { askHelp, helpDone, time, ...fields } = patch;
+      const { askHelp, helpDone, startTime, endTime, venueId, ...fields } = patch;
       const next: Gig = { ...gig, ...fields, updatedAt: now };
-      if (time === null) delete next.time;
-      else if (time !== undefined) next.time = time;
+      if (venueId === null || (fields.venue !== undefined && !fields.venue)) delete next.venueId;
+      else if (venueId !== undefined) next.venueId = venueId;
+      // Move an older single `time` across as the start time.
+      if (next.time && !next.startTime) next.startTime = next.time;
+      delete next.time;
+      if (startTime === null) delete next.startTime;
+      else if (startTime !== undefined) next.startTime = startTime;
+      if (endTime === null) delete next.endTime;
+      else if (endTime !== undefined) next.endTime = endTime;
+      const timeError = checkTimes(next.startTime, next.endTime);
+      if (timeError) throw new HttpError(400, timeError);
+      const note = dealNoteFor(next.deal, next.dealNote);
+      if (note) next.dealNote = note;
+      else delete next.dealNote;
       if (askHelp) next.help = { ...askHelp, askedAt: now, status: 'open' };
       if (helpDone && next.help) next.help = { ...next.help, status: 'done', doneAt: now };
       if (askHelp) next.shared = true; // asking for help shares the gig
@@ -295,7 +363,7 @@ export const handler = handle(async (event) => {
 
     case 'POST /events': {
       ensureBmg(principal);
-      const body = parseBody(event, EventBody);
+      const body = parseBody(event, EventCreate);
       const eventId = newId();
       const item = { eventId, ...body, createdBy: principal.sub, createdAt: now };
       await db.send(
@@ -326,7 +394,19 @@ export const handler = handle(async (event) => {
       const current = await loadEvent(eventId);
       const patch = parseBody(event, EventPatch);
       const given = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-      const next = { ...current, ...given, updatedAt: now, updatedBy: principal.sub };
+      const next: Record<string, unknown> = {
+        ...current,
+        ...given,
+        updatedAt: now,
+        updatedBy: principal.sub,
+      };
+      // Older events can be saved without times, but once either is set both are needed.
+      if ('startTime' in given || 'endTime' in given) {
+        if (!next.startTime || !next.endTime)
+          throw new HttpError(400, 'Events need a start and an end time');
+        const timeError = checkTimes(String(next.startTime), String(next.endTime));
+        if (timeError) throw new HttpError(400, timeError);
+      }
       await db.send(new PutCommand({ TableName: table(), Item: next }));
       return json(200, { ok: true });
     }
@@ -336,7 +416,11 @@ export const handler = handle(async (event) => {
       const eventId = param(event, 'eventId');
       await loadEvent(eventId);
       const part = partParam(event);
-      const body = parseBody(event, PART_SCHEMAS[part]);
+      const body: Record<string, unknown> = parseBody(event, PART_SCHEMAS[part]);
+      if (part === 'crew' && Array.isArray(body.people)) {
+        body.people = await linkCrew(event, principal, body.people as CrewPerson[]);
+        body.filled = (body.people as CrewPerson[]).length;
+      }
       const itemId = randomUUID().replace(/-/g, '').slice(0, 20);
       const item = { itemId, part, ...body, createdAt: now };
       await db.send(
@@ -353,7 +437,11 @@ export const handler = handle(async (event) => {
       const eventId = param(event, 'eventId');
       const part = partParam(event);
       const itemId = param(event, 'itemId', /^[a-z0-9]{20}$/);
-      const patch = parseBody(event, patchOf(PART_SCHEMAS[part]));
+      const patch = parseBody(event, patchOf(PART_SCHEMAS[part])) as Record<string, unknown>;
+      if (part === 'crew' && Array.isArray(patch.people)) {
+        patch.people = await linkCrew(event, principal, patch.people as CrewPerson[]);
+        patch.filled = (patch.people as CrewPerson[]).length;
+      }
       const sets = Object.keys(patch).filter(
         (k) => (patch as Record<string, unknown>)[k] !== undefined,
       );

@@ -49,6 +49,15 @@ const bmgChat: Resource = {
   participantSubs: ['u-staff', 'u-a'],
 };
 const signup: Resource = { kind: 'public' };
+const privateSharedToB: Resource = {
+  kind: 'artist-data',
+  artistId: A,
+  visibility: 'private',
+  sharedWithArtistIds: [B],
+};
+const newEntry: Resource = { kind: 'address-book' };
+const entryByA: Resource = { kind: 'address-book', createdBySub: 'u-a' };
+const entryByBmg: Resource = { kind: 'address-book', createdBySub: 'u-staff' };
 
 type Row = [string, Principal | undefined, Action, Resource, boolean];
 
@@ -102,6 +111,29 @@ const matrix: Row[] = [
   ['artist reads a chat they are in', artistA, 'read', a2aChat, true],
   ['artist cannot open settings', artistA, 'read', settings, false],
   ['artist cannot do admin actions', artistA, 'admin', dataA(), false],
+
+  // Files sent in an artist-to-artist chat (rev 7): private, shared with the other artist.
+  ['artist reads a private file another artist sent them', artistB, 'read', privateSharedToB, true],
+  ['artist cannot change a private file sent to them', artistB, 'write', privateSharedToB, false],
+  ['admin cannot read a private file sent between artists', admin, 'read', privateSharedToB, false],
+  [
+    'staff cannot read a private file sent between artists',
+    staffA,
+    'read',
+    privateSharedToB,
+    false,
+  ],
+
+  // Contacts and venues (rev 7): one shared list; artists pick and add, BMG manages.
+  ['artist reads contacts and venues', artistA, 'read', entryByBmg, true],
+  ['artist adds a contact or venue', artistA, 'write', newEntry, true],
+  ['artist edits an entry they added', artistA, 'write', entryByA, true],
+  ['artist cannot edit an entry Blueprint added', artistA, 'write', entryByBmg, false],
+  ["artist cannot edit another artist's entry", artistB, 'write', entryByA, false],
+  ['artist cannot delete or merge entries', artistA, 'admin', entryByA, false],
+  ['staff edit any contact or venue', staffA, 'write', entryByA, true],
+  ['admin manages contacts and venues', admin, 'admin', entryByA, true],
+  ['anonymous cannot read contacts', undefined, 'read', entryByBmg, false],
 
   // Two-step verification and anonymous access.
   ['social sign-in without step-up is refused', federatedNoStepUp, 'read', dataA(), false],

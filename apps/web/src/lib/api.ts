@@ -4,6 +4,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The parsed response body, e.g. the existing contact on a 409. */
+    readonly data?: unknown,
   ) {
     super(message);
   }
@@ -28,7 +30,11 @@ export async function api<T>(
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok)
-    throw new ApiError(res.status, data.detail ?? data.title ?? data.message ?? 'Request failed');
+    throw new ApiError(
+      res.status,
+      data.detail ?? data.title ?? data.message ?? 'Request failed',
+      data,
+    );
   return data as T;
 }
 
@@ -36,6 +42,8 @@ export interface Me {
   sub: string;
   role: 'bmg-admin' | 'bmg-staff' | 'artist';
   artistId: string | null;
+  /** Always "Artist" for artists; Blueprint people set their own (rev 7). */
+  jobTitle?: string;
   mfaLevel: 'cognito' | 'federated';
   stepUpRequired: boolean;
   consent: { termsVersion: string; aiOptIn: boolean; decidedAt: string } | null;
@@ -57,6 +65,8 @@ export interface Milestone {
   title: string;
   done: boolean;
   measures: MeasureId[];
+  /** Due date for the timeline (rev 7). */
+  due?: string;
 }
 export interface Phase {
   id: string;
@@ -66,6 +76,9 @@ export interface Phase {
   milestones: Milestone[];
   /** Set when the stage came from a custom stage. */
   stageId?: string;
+  /** Stage dates for the timeline (rev 7). */
+  start?: string;
+  end?: string;
 }
 
 /** A custom stage from BMG's stage library. */
@@ -117,6 +130,8 @@ export interface Todo {
   done: boolean;
   source: 'bmg' | 'feedback' | 'artist';
   bmgOnly: boolean;
+  /** Comments in the to-do's thread (rev 7). */
+  commentCount?: number;
   createdAt: string;
   updatedAt: string | null;
 }

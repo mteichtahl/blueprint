@@ -191,3 +191,47 @@ describe('gig help', () => {
     expect(p?.draft.body).toBe('“Headline set”: help with the pitch email, the budget.');
   });
 });
+
+describe('to-do threads (rev 7)', () => {
+  const ev = (over: Record<string, unknown>) =>
+    ({
+      type: 'todo.commented',
+      artistId: A,
+      todoId: 't1',
+      title: 'Send the EPK',
+      authorSub: 'x',
+      authorName: 'Someone',
+      byRole: 'artist',
+      ...over,
+    }) as never;
+  const team = [
+    { sub: 'admin', role: 'bmg-admin' },
+    { sub: 'staffA', role: 'bmg-staff', assignedArtistIds: [A] },
+    { sub: 'staffB', role: 'bmg-staff', assignedArtistIds: [B] },
+    { sub: 'artA', role: 'artist', artistId: A },
+    { sub: 'artB', role: 'artist', artistId: B },
+  ] as never;
+
+  it('tells Blueprint (on this artist) when the artist comments', () => {
+    const p = plan(ev({ authorSub: 'artA', byRole: 'artist' }), team);
+    expect(subs(p)).toEqual(['admin', 'staffA']);
+    expect(p?.draft).toMatchObject({
+      kind: 'todo',
+      link: 'todos',
+      title: 'Someone commented on a to-do',
+    });
+  });
+
+  it('tells the artist and the rest of the team when Blueprint comments', () => {
+    expect(subs(plan(ev({ authorSub: 'staffA', byRole: 'bmg-staff' }), team))).toEqual([
+      'admin',
+      'artA',
+    ]);
+  });
+
+  it('keeps BMG-only to-do threads away from the artist', () => {
+    expect(
+      subs(plan(ev({ authorSub: 'admin', byRole: 'bmg-admin', bmgOnly: true }), team)),
+    ).toEqual(['staffA']);
+  });
+});

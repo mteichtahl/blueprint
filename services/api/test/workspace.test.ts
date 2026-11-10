@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   alignmentGaps,
   changedFields,
+  CommentCreate,
+  publicComment,
+  threadOf,
+  todoCommentPrefix,
+  type TodoComment,
   matchesFilter,
   newId,
   notifyOnEdit,
   phaseFromStage,
   PlanBody,
+  planSpan,
   reminderAt,
   reminderScheduleName,
   stageAppliesTo,
@@ -164,5 +170,92 @@ describe('custom plan stages', () => {
       ['Send', false],
     ]);
     expect(PlanBody.safeParse({ ...templatePlan(), phases: [phase] }).success).toBe(true);
+  });
+});
+
+describe('plan dates for the timeline (rev 7)', () => {
+  const phase = (over: Record<string, unknown> = {}) => ({
+    id: 'p1',
+    name: 'Foundations',
+    milestones: [{ id: 'm1', title: 'Shoot', due: '2026-11-20' }],
+    ...over,
+  });
+  const plan = (phases: unknown[]) => ({ outcome: '', measures: [], phases, version: 0 });
+
+  it('takes stage start and end and milestone due dates, all optional', () => {
+    expect(
+      PlanBody.safeParse(plan([phase({ start: '2026-11-01', end: '2026-11-30' })])).success,
+    ).toBe(true);
+    expect(PlanBody.safeParse(plan([{ id: 'p', name: 'X' }])).success).toBe(true);
+    expect(PlanBody.safeParse(plan([phase({ start: '1 Nov' })])).success).toBe(false);
+  });
+
+  it("won't let a stage end before it starts", () => {
+    const r = PlanBody.safeParse(plan([phase({ start: '2026-12-01', end: '2026-11-01' })]));
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0]?.message).toMatch(/end before it starts/);
+  });
+
+  it('spans the earliest to the latest date', () => {
+    expect(
+      planSpan([
+        { start: '2026-11-01', end: '2026-12-31', milestones: [{ due: '2027-01-15' }] },
+        { milestones: [{}] },
+      ]),
+    ).toEqual({ from: '2026-11-01', to: '2027-01-15' });
+    expect(planSpan([{ milestones: [] }])).toBeUndefined();
+  });
+});
+
+describe('to-do threads (rev 7)', () => {
+  const c = (
+    id: string,
+    at: string,
+    parentId?: string,
+    over: Partial<TodoComment> = {},
+  ): TodoComment => ({
+    commentId: id,
+    todoId: 't0000000001',
+    artistId: 'art_aaaaaaaaaaaa',
+    ...(parentId ? { parentId } : {}),
+    text: id,
+    authorSub: 'u',
+    authorRole: 'artist',
+    authorName: 'Chloe',
+    createdAt: at,
+    ...over,
+  });
+
+  it('keeps comments out of the to-do list prefix', () => {
+    expect(todoCommentPrefix('abc').startsWith('TODO#')).toBe(false);
+  });
+
+  it('nests replies one level deep, in time order', () => {
+    const thread = threadOf([
+      c('b0000000002', '2026-11-10T02:00:00Z'),
+      c('r0000000001', '2026-11-10T03:00:00Z', 'a0000000001'),
+      c('a0000000001', '2026-11-10T01:00:00Z'),
+      c('r0000000002', '2026-11-10T04:00:00Z', 'r0000000001'),
+      c('o0000000001', '2026-11-10T05:00:00Z', 'gone0000000'),
+    ]);
+    expect(thread.map((t) => t.commentId)).toEqual(['a0000000001', 'b0000000002', 'o0000000001']);
+    expect(thread[0]!.replies.map((r) => r.commentId)).toEqual(['r0000000001', 'r0000000002']);
+  });
+
+  it('hides the words of removed comments', () => {
+    const p = publicComment(
+      c('a0000000001', 'x', undefined, { deletedAt: 'y', authorSub: 'me' }),
+      'me',
+    );
+    expect(p).toMatchObject({ text: '', deleted: true, mine: true });
+  });
+
+  it('needs some words, not too many', () => {
+    expect(CommentCreate.safeParse({ text: '  ' }).success).toBe(false);
+    expect(CommentCreate.safeParse({ text: 'x'.repeat(2001) }).success).toBe(false);
+    expect(CommentCreate.parse({ text: ' On it 👍 ', parentId: 'a0000000001' })).toEqual({
+      text: 'On it 👍',
+      parentId: 'a0000000001',
+    });
   });
 });

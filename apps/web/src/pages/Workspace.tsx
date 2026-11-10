@@ -179,6 +179,7 @@ export function ArtistWorkspace({
           cfg={cfg}
           token={token}
           artistId={artist.artistId}
+          artistName={artist.displayName}
           canEdit
           autoStart={startPlan}
           onChanged={loadPlan}

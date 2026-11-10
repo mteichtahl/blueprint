@@ -13,25 +13,29 @@ import {
   Tag,
   TextArea,
 } from '../components/ui.tsx';
+import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
+import { VenuePicker } from './Venues.tsx';
 
 /** Gigs (screens: workspace Gigs tab, BMG Artist gigs, artist My gigs / Plan a gig). */
 
 export type GigStatus = 'idea' | 'pitching' | 'confirmed' | 'booked' | 'played' | 'cancelled';
-export type GigDeal = 'free' | 'fee' | 'door-split' | 'ticketed' | 'other';
+export type GigDeal = 'tbc' | 'free' | 'fee' | 'door-split' | 'ticketed' | 'other';
 export type HelpTopic = 'pitch' | 'budget' | 'promo' | 'setlist';
 export interface Gig {
   gigId: string;
   artistId: string;
   title: string;
   date: string;
-  time?: string;
+  startTime?: string;
+  endTime?: string;
   venue?: string;
+  venueId?: string;
   notes?: string;
   status: GigStatus;
   deal: GigDeal;
   dealNote?: string;
-  setLength?: string;
   ticketUrl?: string;
+  money?: MoneyFigures;
   checklist: { id: string; title: string; done: boolean }[];
   plannedBy: 'artist' | 'bmg';
   shared: boolean;
@@ -47,11 +51,12 @@ export const STATUS: Record<GigStatus, ['c' | 's' | 'n', string]> = {
   cancelled: ['s', 'Cancelled'],
 };
 const DEAL: Record<GigDeal, string> = {
+  tbc: 'Not set yet',
   free: 'Free',
   fee: 'Fixed fee',
   'door-split': 'Door split',
   ticketed: 'Ticketed',
-  other: '—',
+  other: 'Other',
 };
 export const HELP: Record<HelpTopic, string> = {
   pitch: 'Pitch email',
@@ -68,6 +73,23 @@ const longDate = (d: string) =>
     day: 'numeric',
     month: 'short',
   });
+/** "7:30 pm – 11:00 pm", with "(next day)" when it runs past midnight. */
+export function timeRange(start?: string, end?: string): string {
+  if (!start) return '';
+  const fmt = (t: string) =>
+    new Date(`2000-01-01T${t}:00`)
+      .toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })
+      .replace(':00', '');
+  if (!end) return fmt(start);
+  return `${fmt(start)} – ${fmt(end)}${end < start ? ' (next day)' : ''}`;
+}
+const when = (g: Gig) =>
+  [longDate(g.date), timeRange(g.startTime, g.endTime)].filter(Boolean).join(', ');
+
+/** "Other" shows what the user wrote. */
+const dealLabel = (g: Pick<Gig, 'deal' | 'dealNote'>) =>
+  g.deal === 'other' && g.dealNote ? g.dealNote : DEAL[g.deal];
+
 const done = (g: Gig) => `${g.checklist.filter((c) => c.done).length} / ${g.checklist.length}`;
 const helpLabel = (g: Gig) =>
   g.help?.topics.length ? g.help.topics.map((t) => HELP[t]).join(' · ') : 'Help';
@@ -125,7 +147,7 @@ const STATUS_OPTIONS = (Object.keys(STATUS) as GigStatus[]).map((s) => ({
 }));
 const DEAL_OPTIONS = (Object.keys(DEAL) as GigDeal[]).map((d) => ({
   value: d,
-  label: d === 'other' ? 'Other / not set' : DEAL[d],
+  label: DEAL[d],
 }));
 
 /** Add or edit a gig: the Plan a gig fields. Artists also choose sharing and help. */
@@ -149,28 +171,48 @@ function GigForm({
   const [f, setF] = useState({
     title: gig?.title ?? '',
     date: gig?.date ?? '',
-    venue: gig?.venue ?? '',
+    startTime: gig?.startTime ?? '',
+    endTime: gig?.endTime ?? '',
     status: gig?.status ?? ('idea' as GigStatus),
-    deal: gig?.deal ?? ('other' as GigDeal),
-    setLength: gig?.setLength ?? '',
+    deal: gig?.deal ?? ('tbc' as GigDeal),
+    dealNote: gig?.dealNote ?? '',
     ticketUrl: gig?.ticketUrl ?? '',
     notes: gig?.notes ?? '',
     shared: gig?.shared ?? true,
   });
+  const [venue, setVenue] = useState<{ venueId: string | null; name: string } | null>(
+    gig?.venue ? { venueId: gig.venueId ?? null, name: gig.venue } : null,
+  );
   const [topics, setTopics] = useState<HelpTopic[]>([]);
   const [helpText, setHelpText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
+  const timeError =
+    f.endTime && !f.startTime
+      ? 'Add a start time too'
+      : f.startTime && f.startTime === f.endTime
+        ? 'The end time must be after the start time'
+        : null;
 
   async function save() {
     const body = {
       title: f.title,
       date: f.date,
+      ...(gig
+        ? { startTime: f.startTime || null, endTime: f.endTime || null }
+        : {
+            ...(f.startTime ? { startTime: f.startTime } : {}),
+            ...(f.endTime ? { endTime: f.endTime } : {}),
+          }),
       status: f.status,
       deal: f.deal,
-      ...(f.venue ? { venue: f.venue } : {}),
-      ...(f.setLength ? { setLength: f.setLength } : {}),
+      ...(f.deal === 'other' ? { dealNote: f.dealNote.trim() } : {}),
+      ...(gig
+        ? { venue: venue?.name ?? '', venueId: venue?.venueId ?? null }
+        : venue
+          ? { venue: venue.name, ...(venue.venueId ? { venueId: venue.venueId } : {}) }
+          : {}),
       ...(f.ticketUrl ? { ticketUrl: f.ticketUrl } : {}),
       ...(f.notes ? { notes: f.notes } : {}),
       ...(isArtist ? { shared: f.shared } : {}),
@@ -197,14 +239,29 @@ function GigForm({
       <div className="grid grid-cols-2 gap-3">
         <Field label="Date" type="date" value={f.date} onChange={set('date')} />
         <Select label="Status" value={f.status} onChange={set('status')} options={STATUS_OPTIONS} />
-        <Field label="Venue" value={f.venue} onChange={set('venue')} />
+        <Field label="Start time" type="time" value={f.startTime} onChange={set('startTime')} />
         <Field
-          label="Set length"
-          value={f.setLength}
-          onChange={set('setLength')}
-          placeholder="45 min"
+          label="End time"
+          type="time"
+          value={f.endTime}
+          onChange={set('endTime')}
+          {...(timeError
+            ? { hint: timeError }
+            : f.startTime && f.endTime && f.endTime < f.startTime
+              ? { hint: 'Finishes after midnight' }
+              : {})}
         />
+        <VenuePicker cfg={cfg} token={token} isBmg={!isArtist} value={venue} onChange={setVenue} />
         <Select label="Deal" value={f.deal} onChange={set('deal')} options={DEAL_OPTIONS} />
+        {f.deal === 'other' && (
+          <Field
+            label="Describe the deal"
+            value={f.dealNote}
+            onChange={set('dealNote')}
+            maxLength={300}
+            placeholder="e.g. 70/30 door split after costs, plus rider"
+          />
+        )}
         <Field
           label="Tickets"
           type="url"
@@ -262,7 +319,11 @@ function GigForm({
         </div>
       )}
       <div className="flex gap-2">
-        <Button variant="cta" disabled={!f.title.trim() || !f.date} onClick={() => void save()}>
+        <Button
+          variant="cta"
+          disabled={!f.title.trim() || !f.date || !!timeError}
+          onClick={() => void save()}
+        >
           Save
         </Button>
         <Button variant="ghost" onClick={onCancel}>
@@ -394,6 +455,8 @@ export function GigsTab({
   const { gigs, error, load, patch } = useGigs(cfg, token, `/artists/${artist.artistId}/gigs`);
   const [filter, setFilter] = useState<Filter>('upcoming');
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Gig | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const first = artist.displayName.split(' ')[0];
   const all = gigs ?? [];
@@ -439,15 +502,23 @@ export function GigsTab({
           </>
         }
       >
-        {adding && (
+        {saved && <Notice tone="success">{saved}</Notice>}
+        {(adding || editing) && (
           <GigForm
+            key={editing?.gigId ?? 'new'}
             cfg={cfg}
             token={token}
             artistId={artist.artistId}
+            {...(editing ? { gig: editing } : {})}
             isArtist={false}
-            onCancel={() => setAdding(false)}
-            onSaved={() => {
+            onCancel={() => {
               setAdding(false);
+              setEditing(null);
+            }}
+            onSaved={() => {
+              setSaved(editing ? `Saved ${editing.title}. ${first} can see the change.` : null);
+              setAdding(false);
+              setEditing(null);
               void load();
             }}
           />
@@ -460,6 +531,11 @@ export function GigsTab({
             artistName={first}
             selected={open?.gigId}
             onOpen={setOpenId}
+            onEdit={(g) => {
+              setAdding(false);
+              setSaved(null);
+              setEditing(g);
+            }}
             empty={`No ${filter === 'help' ? 'help requests' : `${filter} gigs`} for ${first} yet.`}
           />
         )}
@@ -477,12 +553,31 @@ export function GigsTab({
                 onDone={() => void patch(open, { helpDone: true })}
               />
             ) : (
-              <Card title={open.title}>
+              <Card
+                title={open.title}
+                action={
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setAdding(false);
+                      setSaved(null);
+                      setEditing(open);
+                    }}
+                  >
+                    Edit gig
+                  </Button>
+                }
+              >
                 <p className="src">
-                  {longDate(open.date)}
+                  {when(open)}
                   {open.venue ? ` · ${open.venue}` : ''}
-                  {open.setLength ? ` · ${open.setLength}` : ''}
                 </p>
+                {open.deal !== 'tbc' && (
+                  <p className="m-0">
+                    <b>Deal:</b> {dealLabel(open)}
+                  </p>
+                )}
                 {open.notes && <p>{open.notes}</p>}
                 {open.ticketUrl && (
                   <a className="font-bold" href={open.ticketUrl} target="_blank" rel="noreferrer">
@@ -498,6 +593,18 @@ export function GigsTab({
             </span>
             <Checklist gig={open} onPatch={(b) => void patch(open, b)} />
           </Card>
+          <Card className="flex-[1_1_100%]" title="Tickets, takings and profit">
+            <MoneyEditor
+              key={open.gigId}
+              value={open.money}
+              onSave={async (money) => {
+                await api(cfg, token, 'PATCH', `/artists/${open.artistId}/gigs/${open.gigId}`, {
+                  money,
+                });
+                await load();
+              }}
+            />
+          </Card>
         </div>
       )}
     </div>
@@ -510,6 +617,7 @@ function GigTable({
   names,
   selected,
   onOpen,
+  onEdit,
   empty,
 }: {
   gigs: Gig[];
@@ -517,6 +625,8 @@ function GigTable({
   names?: Record<string, string>;
   selected?: string;
   onOpen: (gigId: string, artistId: string) => void;
+  /** BMG desktop: an Edit button on each row. */
+  onEdit?: (gig: Gig) => void;
   empty: string;
 }) {
   if (gigs.length === 0) return <p className="src">{empty}</p>;
@@ -532,6 +642,11 @@ function GigTable({
           <th scope="col">Checklist</th>
           <th scope="col">Planned by</th>
           <th scope="col">Help</th>
+          {onEdit && (
+            <th scope="col">
+              <span className="sr-only">Edit</span>
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -546,25 +661,41 @@ function GigTable({
               aria-selected={selected === g.gigId}
               onClick={() => onOpen(g.gigId, g.artistId)}
             >
-              <td>{longDate(g.date)}</td>
+              <td>
+                {longDate(g.date)}
+                {g.startTime && (
+                  <span className="src block">{timeRange(g.startTime, g.endTime)}</span>
+                )}
+              </td>
               {names && <td>{who}</td>}
               <td>
                 <button type="button" className="text-left font-bold">
                   {g.title}
                 </button>
-                {(g.venue || g.setLength) && (
-                  <span className="src block">
-                    {[g.venue, g.setLength].filter(Boolean).join(' · ')}
-                  </span>
-                )}
+                {g.venue && <span className="src block">{g.venue}</span>}
               </td>
               <td>
                 <Tag tone={tone}>{label}</Tag>
               </td>
-              <td>{DEAL[g.deal]}</td>
+              <td>{dealLabel(g)}</td>
               <td>{done(g)}</td>
               <td>{g.plannedBy === 'bmg' ? 'Blueprint' : who.split(' ')[0]}</td>
               <td>{helpOpen ? <Tag tone="k">{helpLabel(g)}</Tag> : '—'}</td>
+              {onEdit && (
+                <td>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Edit ${g.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(g);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                </td>
+              )}
             </tr>
           );
         })}
@@ -586,7 +717,9 @@ export function AllGigs({
   onOpenArtist: (artistId: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>('help');
-  const { gigs, error } = useGigs(cfg, token, `/gigs?filter=${filter}`);
+  const { gigs, error, load } = useGigs(cfg, token, `/gigs?filter=${filter}`);
+  const [editing, setEditing] = useState<Gig | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
   return (
     <Card
@@ -594,6 +727,23 @@ export function AllGigs({
       action={<Chips label="Filter gigs" value={filter} onChange={setFilter} options={FILTERS} />}
     >
       {error && <Notice tone="error">{error}</Notice>}
+      {saved && <Notice tone="success">{saved}</Notice>}
+      {editing && (
+        <GigForm
+          key={editing.gigId}
+          cfg={cfg}
+          token={token}
+          artistId={editing.artistId}
+          gig={editing}
+          isArtist={false}
+          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setSaved(`Saved ${editing.title}.`);
+            setEditing(null);
+            void load();
+          }}
+        />
+      )}
       {gigs === null ? (
         <p className="src">Loading…</p>
       ) : (
@@ -601,6 +751,10 @@ export function AllGigs({
           gigs={gigs}
           names={names}
           onOpen={(_, artistId) => onOpenArtist(artistId)}
+          onEdit={(g) => {
+            setSaved(null);
+            setEditing(g);
+          }}
           empty={
             filter === 'help'
               ? 'No artist is asking for help right now.'
@@ -649,6 +803,22 @@ export function ArtistGigs({
             void load();
           }}
         />
+        {gig && (
+          <div className="card !gap-2 !p-3">
+            <b className="text-[15px]">Tickets, takings and profit</b>
+            <MoneyEditor
+              key={gig.gigId}
+              value={gig.money}
+              onSave={async (money) => {
+                await api(cfg, token, 'PATCH', `/artists/${artistId}/gigs/${gig.gigId}`, {
+                  money,
+                });
+                setEditing({ ...gig, money });
+                await load();
+              }}
+            />
+          </div>
+        )}
         {gig && gig.checklist.length > 0 && (
           <div className="card !gap-0.5 !p-3">
             <b className="text-[15px]">Checklist</b>
@@ -739,9 +909,13 @@ function GigCard({ gig, onOpen }: { gig: Gig; onOpen: () => void }) {
           <b className="flex-1">{gig.title}</b>
           <Tag tone={tone}>{label}</Tag>
         </span>
-        {(gig.venue || gig.setLength) && (
+        {(gig.startTime || gig.venue) && (
           <span className="src">
-            {[gig.venue, gig.setLength, gig.deal !== 'other' ? DEAL[gig.deal] : '']
+            {[
+              timeRange(gig.startTime, gig.endTime),
+              gig.venue,
+              gig.deal !== 'tbc' ? dealLabel(gig) : '',
+            ]
               .filter(Boolean)
               .join(' · ')}
           </span>

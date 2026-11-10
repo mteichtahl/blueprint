@@ -57,6 +57,12 @@ export type Resource =
       type: 'bmg-artist' | 'group' | 'broadcast' | 'artist-to-artist';
       participantSubs: readonly string[];
     }
+  /**
+   * The shared contacts and venues list (rev 7). Everyone signed in can read
+   * it and add to it; artists can change only the entries they added.
+   * `createdBySub` is absent when the entry is being created.
+   */
+  | { kind: 'address-book'; createdBySub?: string }
   /** The public newsletter sign-up. */
   | { kind: 'public' };
 
@@ -125,6 +131,17 @@ export function authorize(
       return deny('not in this conversation');
     }
 
+    case 'address-book':
+      if (principal.role === 'bmg-admin' || principal.role === 'bmg-staff') {
+        return allow('BMG manages contacts and venues');
+      }
+      if (action === 'read') return allow('artists can pick from contacts and venues');
+      if (action === 'admin') return deny('only Blueprint manages contacts and venues');
+      if (resource.createdBySub === undefined) return allow('artists can add contacts and venues');
+      return resource.createdBySub === principal.sub
+        ? allow('artist added this entry')
+        : deny('artists can only change entries they added');
+
     case 'artist-data':
       return artistData(principal, action, resource);
   }
@@ -143,7 +160,10 @@ function artistData(
     }
     const sharedToMe =
       !!principal.artistId && (resource.sharedWithArtistIds ?? []).includes(principal.artistId);
-    if (sharedToMe && action === 'read' && resource.visibility === 'normal') {
+    // Another artist can read what was shared with them, including a private
+    // file sent in an artist-to-artist chat (rev 7). BMG-only stays hidden,
+    // and Blueprint still never reads private items (below, and KMS).
+    if (sharedToMe && action === 'read' && resource.visibility !== 'bmg-only') {
       return allow('shared with this artist');
     }
     return deny("another artist's workspace");
