@@ -88,6 +88,8 @@ export const PRESET_COSTS = [
   'Support band',
   'Backing band',
 ] as const;
+/** Gigs also start with a Merchandise cost (stock, printing), set against merch sales. */
+export const GIG_PRESET_COSTS = [...PRESET_COSTS, 'Merchandise'] as const;
 
 const cents = z.number().int().min(0).max(100_000_000);
 export const CostRow = z.object({
@@ -98,7 +100,10 @@ export const CostRow = z.object({
 export const Money = z
   .object({
     ticketsSold: z.number().int().min(0).max(1_000_000).default(0),
+    /** Ticket and door takings. */
     takingsCents: cents.default(0),
+    /** Merchandise sold at the gig. */
+    merchTakingsCents: cents.default(0),
     costs: z.array(CostRow).max(40).default([]),
   })
   .strict()
@@ -112,16 +117,28 @@ export type Money = z.infer<typeof Money>;
 export const defaultMoney = (): Money => ({
   ticketsSold: 0,
   takingsCents: 0,
-  costs: PRESET_COSTS.map((label, i) => ({ id: `p${i + 1}`, label, amountCents: 0 })),
+  merchTakingsCents: 0,
+  costs: GIG_PRESET_COSTS.map((label, i) => ({ id: `p${i + 1}`, label, amountCents: 0 })),
 });
 
-/** Profit = total takings − total costs (negative is a loss). */
-export function moneySummary(m: Pick<Money, 'ticketsSold' | 'takingsCents' | 'costs'>) {
+/**
+ * Takings = ticket and door takings + merchandise sales; profit = takings −
+ * all costs (negative is a loss). Per-ticket takings count tickets only.
+ */
+export function moneySummary(
+  m: Pick<Money, 'ticketsSold' | 'takingsCents' | 'costs'> & { merchTakingsCents?: number },
+) {
+  const merch = m.merchTakingsCents ?? 0;
   const costsCents = m.costs.reduce((n, c) => n + c.amountCents, 0);
-  const profitCents = m.takingsCents - costsCents;
+  const totalTakingsCents = m.takingsCents + merch;
+  const merchCostCents = m.costs
+    .filter((c) => c.label.toLowerCase() === 'merchandise')
+    .reduce((n, c) => n + c.amountCents, 0);
   return {
     costsCents,
-    profitCents,
+    totalTakingsCents,
+    profitCents: totalTakingsCents - costsCents,
+    merchProfitCents: merch - merchCostCents,
     perTicketCents: m.ticketsSold > 0 ? Math.round(m.takingsCents / m.ticketsSold) : null,
   };
 }

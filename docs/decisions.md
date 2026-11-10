@@ -314,3 +314,8 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - Off is a grey track with an outline; on is coral with the knob to the right. Both are at least 5:1 against the dark cards.
   - Tick boxes use coral.
   - Progress bars are light on dark cards. The old rule matched the inline colour as text, which never matched because React writes it as `rgb()`.
+
+## Notes: Merchandise in gig figures (10 Nov 2026)
+
+- **Takings have two parts:** tickets and door (`takingsCents`, as before) and merchandise sales (`merchTakingsCents`, new, defaults to 0). Total takings is their sum, and profit is total takings minus all costs. "Takings per ticket" counts ticket takings only.
+- **Costs gain a Merchandise preset** (stock, printing) for gigs only; events keep their own presets. Figures saved before this get a $0 Merchandise row when opened. When there's merch, the summary also shows merchandise profit (sales minus the Merchandise cost).
