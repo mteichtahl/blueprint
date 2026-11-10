@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countVenueBookings,
   applyContactPatch,
   cleanTags,
   ContactBody,
@@ -168,5 +169,25 @@ describe('venues', () => {
 
   it('keeps Blueprint notes away from artist edits', () => {
     expect(applyVenuePatch(venue({ bmgNotes: 'k' }), { bmgNotes: 'x' }, false).bmgNotes).toBe('k');
+  });
+});
+
+describe('venue booking counts', () => {
+  it('counts booked, confirmed and played gigs plus events, by venue', () => {
+    const counts = countVenueBookings(
+      [
+        { venueId: 'v1', status: 'played' },
+        { venueId: 'v1', status: 'booked' },
+        { venueId: 'v1', status: 'idea' },
+        { venueId: 'v1', status: 'cancelled' },
+        { venueId: 'v2', status: 'confirmed' },
+        { status: 'played' },
+      ],
+      [{ venueId: 'v1' }, { venueId: 'v3' }, {}],
+    );
+    expect(counts.get('v1')).toBe(3);
+    expect(counts.get('v2')).toBe(1);
+    expect(counts.get('v3')).toBe(1);
+    expect(counts.has('v4')).toBe(false);
   });
 });

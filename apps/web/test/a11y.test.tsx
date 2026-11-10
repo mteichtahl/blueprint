@@ -127,6 +127,30 @@ function answer(method: string, path: string): [number, unknown] {
     [/^\/conversations$/, { conversations: [] }],
     [/^\/events$/, { events: [] }],
     [
+      /^\/venues$/,
+      {
+        venues: [
+          {
+            venueId: 'ven000000001',
+            name: 'The Toff in Town',
+            capacity: 200,
+            backline: true,
+            website: '',
+            address: '252 Swanston St',
+            suburb: 'Melbourne',
+            manager: null,
+            booker: null,
+            autoLogo: false,
+            logo: null,
+            archived: false,
+            addedByArtist: false,
+            canEdit: true,
+            bookings: 3,
+          },
+        ],
+      },
+    ],
+    [
       /^\/access\/settings$/,
       {
         artistDirectChats: true,
@@ -204,6 +228,8 @@ async function violations(): Promise<string[]> {
   const res = await axe.run(document.body, {
     runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
     rules: { 'color-contrast': { enabled: false } },
+    // jsdom can't run axe inside frames (the venue map is a Google iframe).
+    iframes: false,
   });
   return res.violations.flatMap((v) =>
     v.nodes.map(
@@ -385,6 +411,17 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /^Events/ })[0]!);
     await settle();
     await click(/^New event/);
+    expect(await violations()).toEqual([]);
+  });
+
+  it('BMG: venue detail with booking count and map', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Venues/ })[0]!);
+    await settle();
+    await click('The Toff in Town');
+    expect(screen.getByText('Booked 3 times')).toBeTruthy();
+    expect(screen.getByTitle('Map of The Toff in Town')).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 

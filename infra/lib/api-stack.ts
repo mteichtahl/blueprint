@@ -676,6 +676,8 @@ export class ApiStack extends BmgStack {
       ],
       [main],
     );
+    // Booking counts on venue cards read the shared-gigs index.
+    allow(addressBook, 'VenueBookings', ['dynamodb:Query'], [`${main}/index/GSI3`]);
     putEvents(addressBook);
     putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
