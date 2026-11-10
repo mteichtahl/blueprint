@@ -196,6 +196,7 @@ export function BmgShell({
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
+      <SkipLink />
       <div className="sticky top-0 hidden h-screen w-[264px] flex-none overflow-y-auto lg:block">
         {sidebar}
       </div>
@@ -248,7 +249,13 @@ export function BmgShell({
             </button>
           </div>
         </header>
-        <main className="flex flex-col gap-5 px-8 pt-6 pb-11 max-sm:px-4">{children}</main>
+        <main
+          id="main"
+          tabIndex={-1}
+          className="flex flex-col gap-5 px-8 pt-6 pb-11 outline-none max-sm:px-4"
+        >
+          {children}
+        </main>
       </div>
     </div>
   );
@@ -280,8 +287,15 @@ export function ArtistShell({
 }) {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-background text-foreground shadow-md">
+      <SkipLink />
       <header className="bp flex flex-col gap-2 px-5 pt-[22px] pb-[18px]">{header}</header>
-      <main className="flex flex-1 flex-col gap-3 px-4 py-3 pb-24">{children}</main>
+      <main
+        id="main"
+        tabIndex={-1}
+        className="flex flex-1 flex-col gap-3 px-4 py-3 pb-24 outline-none"
+      >
+        {children}
+      </main>
       <nav
         aria-label="Tabs"
         className="fixed bottom-0 left-1/2 flex w-full max-w-[480px] -translate-x-1/2 border-t border-input bg-card pb-2"
@@ -371,5 +385,17 @@ export function AuthFrame({
         <div className="flex w-full max-w-[460px] flex-col gap-3">{children}</div>
       </main>
     </div>
+  );
+}
+
+/** WCAG 2.4.1: the first Tab stop jumps past the sidebar or header to the content. */
+function SkipLink() {
+  return (
+    <a
+      href="#main"
+      className="sr-only z-50 rounded-lg bg-card px-4 py-3 font-bold text-foreground shadow-md focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+    >
+      Skip to main content
+    </a>
   );
 }
