@@ -132,10 +132,11 @@ async function pdfThumb(file: File): Promise<Blob | null> {
   const pdfjs = await import('pdfjs-dist');
   const worker = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
   pdfjs.GlobalWorkerOptions.workerSrc = worker;
-  const doc = await pdfjs.getDocument({
+  const task = pdfjs.getDocument({
     data: new Uint8Array(await file.arrayBuffer()),
     disableFontFace: true,
-  }).promise;
+  });
+  const doc = await task.promise;
   try {
     const page = await doc.getPage(1);
     const base = page.getViewport({ scale: 1 });
@@ -151,7 +152,7 @@ async function pdfThumb(file: File): Promise<Blob | null> {
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     return encode(canvas, canvas.width, canvas.height);
   } finally {
-    void doc.destroy();
+    void task.destroy();
   }
 }
 
