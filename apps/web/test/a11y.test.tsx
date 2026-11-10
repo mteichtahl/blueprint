@@ -134,10 +134,112 @@ const plan = {
 };
 
 /** API answers by path; anything else is a 404, which every screen must handle. */
+const meeting = {
+  meetingId: 'mtg0000000001',
+  space: ARTIST,
+  artistId: ARTIST,
+  title: 'Meeting with Chloe Poli',
+  source: 'recording',
+  createdAt: now,
+  startedAt: now,
+  durationSec: 1834,
+  attendees: [
+    { kind: 'staff', id: 'u1', name: 'Kyra Teichtahl' },
+    { kind: 'artist', id: ARTIST, name: 'Chloe Poli' },
+  ],
+  shared: false,
+  status: 'ready',
+  statusReason: null,
+  folderId: 'fold000000001',
+  audioFileId: 'file000000009',
+  noteFileId: 'file000000010',
+  contentVersion: 3,
+  aiJob: null,
+  undoUntil: null,
+  suggestionsWaiting: 2,
+  consent: {
+    at: now,
+    wording: 'Everyone in this meeting knows it’s being recorded and has agreed.',
+  },
+  recordedByMe: true,
+  canDelete: true,
+  updatedAt: now,
+};
+const meetingContent = {
+  notes: 'Push the EP to January',
+  markers: [{ at: 61, note: 'budget agreed' }],
+  speakers: { spk_0: 'Kyra Teichtahl' },
+  segments: [
+    {
+      id: 0,
+      speaker: 'spk_0',
+      start: 3,
+      end: 9,
+      text: 'Let’s move the EP release to late January.',
+    },
+    { id: 1, speaker: 'spk_1', start: 10, end: 14, text: 'Agreed. The mastering is done.' },
+  ],
+  summaries: [
+    {
+      id: 's1',
+      kind: 'full',
+      createdAt: now,
+      sections: [
+        { heading: 'Decisions', points: [{ text: 'The EP moves to late January.', refs: [0] }] },
+      ],
+      actions: [{ text: 'Tell the distributor', owner: 'Kyra', refs: [0] }],
+    },
+  ],
+  answers: [
+    { id: 'a1', question: 'When is the EP?', answer: 'Late January.', refs: [0], createdAt: now },
+  ],
+  suggestions: {
+    setId: 'set1',
+    createdAt: now,
+    basePlanVersion: 3,
+    suggestions: [
+      {
+        id: 'c1',
+        change: {
+          kind: 'stage.dates',
+          phaseId: 'p3',
+          end: '2027-01-30',
+          reason: 'Agreed to move the EP',
+          refs: [0],
+        },
+        where: 'Album release',
+        before: '1 Nov 2026 – 12 Dec 2026',
+        after: '1 Nov 2026 – 30 Jan 2027',
+        checkThis: true,
+        status: 'waiting',
+      },
+      {
+        id: 'c2',
+        change: {
+          kind: 'milestone.done',
+          phaseId: 'p3',
+          milestoneId: 'm1',
+          done: true,
+          reason: 'Mastering is done',
+          refs: [1],
+        },
+        where: 'Album release › Master the EP',
+        before: 'Not done',
+        after: 'Done',
+        checkThis: false,
+        status: 'accepted',
+      },
+    ],
+  },
+};
+
 function answer(method: string, path: string): [number, unknown] {
   const p = path.replace(/^\/v1/, '').split('?')[0]!;
   if (method !== 'GET') return [200, {}];
   const routes: [RegExp, unknown][] = [
+    // Meeting notes (rev 11).
+    [/^\/meetings\/items$/, { meetings: [meeting] }],
+    [/^\/meetings\/[^/]+\/[^/]+$/, { meeting, content: meetingContent }],
     [/^\/artists$/, { artists: [artist] }],
     [/^\/avatars$/, { artists: { [ARTIST]: CHLOE_PIC }, users: {} }],
     [/^\/artists\/[^/]+$/, artist],
@@ -740,8 +842,10 @@ describe('profile pictures', () => {
 });
 
 describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
-  const desktop = window.matchMedia;
+  // Read in beforeAll: the file's own beforeAll sets matchMedia after this block is defined.
+  let desktop: typeof window.matchMedia;
   beforeAll(() => {
+    desktop = window.matchMedia;
     // A 375px phone: phone-width queries match, wider ones don't.
     window.matchMedia = ((q: string) => ({
       matches: /max-width:\s*(639|899)px/.test(q),
@@ -842,5 +946,52 @@ describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await settle();
     expect(screen.queryByRole('dialog', { name: 'Edit to-do' })).toBeNull();
+  });
+});
+
+describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
+  async function openMeetings() {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Meetings/ })[0]!);
+    await settle();
+  }
+
+  it('BMG: the meetings list', async () => {
+    await openMeetings();
+    expect(screen.getByText('Meeting with Chloe Poli')).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('BMG: a new meeting asks for everyone’s agreement before recording', async () => {
+    await openMeetings();
+    fireEvent.click(screen.getByRole('button', { name: /New meeting/ }));
+    await settle();
+    const start = screen.getByRole('button', { name: 'Start recording' }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    expect(await violations()).toEqual([]);
+  });
+
+  it.each(['Summary', 'Transcript', 'Plan update', 'Details'])(
+    'BMG: a meeting’s %s',
+    async (section) => {
+      await openMeetings();
+      fireEvent.click(screen.getAllByRole('button', { name: 'Meeting with Chloe Poli' })[0]!);
+      await settle();
+      fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${section}`) }));
+      await settle();
+      expect(await violations()).toEqual([]);
+    },
+  );
+
+  it('BMG: the workspace offers Record meeting and the plan review', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    expect(screen.getAllByRole('button', { name: /Record meeting/ }).length).toBeGreaterThan(0);
+    await openWorkspace('Plan');
+    expect(screen.getByText(/suggested changes? from/)).toBeTruthy();
+    expect(await violations()).toEqual([]);
   });
 });

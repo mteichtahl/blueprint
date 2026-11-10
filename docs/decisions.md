@@ -408,3 +408,15 @@ Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project. These are the 
 - **The artist is told** (`plan.updated`: bell, email, push) with up to five plan changes in plain words, never the transcript or Blueprint's reasons. There's no free-text message to the artist: notifications never carry free text; use Chat.
 - **Linking a meeting to an artist afterwards isn't built.** It would mean moving the recording and note from Blueprint's library into the artist's Library, and rev 10 doesn't move files between spaces (different keys). Meetings are linked when they're started.
 - **Plan saves are shared:** the plan editor and meeting updates both save through `workspace/plan-store.ts`.
+
+## Meeting notes: screens (rev 11, 11 Nov 2026)
+
+- **Where:** Meetings sits under BMG ONLY in the sidebar. An artist workspace has **Record meeting** in its header, a **Latest meeting** card on Overview → Summary, and a banner plus a coral count on Plan when suggestions are waiting. Notifications open the meeting (`meeting:<space>/<id>`); artists' plan-update notifications open My plan.
+- **One recorder for the whole app:** it keeps running while staff move around, with a "Recording 12:41" bar on every other screen. The page must stay open. Each 10 seconds of audio is saved on the device (IndexedDB); Meetings offers **Finish and transcribe** or **Discard** for a recording left unfinished. The screen is kept awake (Wake Lock) where the browser allows, and leaving the page asks first.
+- **Departures from the spec's screens:**
+  - The player is the browser's own audio control, with Back/Forward 15 s, 1× / 1.5× / 2× and the marked moments as buttons. There's no waveform. Download links last 5 minutes, so the player renews its link in place when one runs out.
+  - **Who's speaking?** has a "Play <speaker>" button per voice and a name box that suggests the attendees.
+  - Attendees are the Blueprint team, the artist, and names typed in. Picking from Contacts isn't built.
+  - **Create to-dos** from action items uses the normal to-dos API (artist meetings only), not the assistant's checklist. Each to-do notes the meeting it came from.
+  - Staff use the same screens on a phone (responsive); there's no separate phone layout.
+- **Saving names or transcript fixes refiles the meeting note** as its next version.
