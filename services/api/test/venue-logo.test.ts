@@ -221,3 +221,15 @@ describe('connect-time DNS guard', () => {
       expect((await run(ips)).err).toBeInstanceOf(Refused);
   });
 });
+
+describe('SVG sniffing edge cases', () => {
+  it('skips a leading prolog, comments and doctype, but nothing after the first element', () => {
+    const svg = (s: string) => sniffImage(Buffer.from(s));
+    expect(svg('﻿<?xml version="1.0"?><!DOCTYPE svg><!-- a --> <!-- b --><svg/>')).toBe(
+      'image/svg+xml',
+    );
+    expect(svg('<!-- unterminated <svg>')).toBeNull();
+    expect(svg('<html><!-- x --><svg></svg></html>')).toBeNull();
+    expect(svg('<!--<!-- nested -->--><svg/>')).toBeNull();
+  });
+});

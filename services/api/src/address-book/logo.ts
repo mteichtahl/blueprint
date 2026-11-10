@@ -66,14 +66,24 @@ export function sniffImage(b: Uint8Array): SniffedType | null {
     return 'image/webp';
   if (b.length >= 6 && at(0, 0x00, 0x00, 0x01, 0x00) && b[4]! > 0) return 'image/x-icon';
   // SVG: text whose first real element is <svg (after a BOM, <?xml ?>, comments or a doctype).
-  const head = new TextDecoder('utf-8', { fatal: false })
+  // Skips only what comes *before* the first element, one item at a time, by
+  // position (this is a type check, not sanitising: the text is never shown).
+  let head = new TextDecoder('utf-8', { fatal: false })
     .decode(b.subarray(0, 2048))
-    .replace(/^\uFEFF/, '')
-    .replace(/<\?xml[\s\S]*?\?>/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<!DOCTYPE[^>]*>/gi, '')
-    .trimStart();
-  if (/^<svg[\s>]/i.test(head)) return 'image/svg+xml';
+    .replace(/^\uFEFF/, '');
+  for (let i = 0; i < 20; i++) {
+    head = head.trimStart();
+    const end = head.startsWith('<?')
+      ? head.indexOf('?>') + 2
+      : head.startsWith('<!--')
+        ? head.indexOf('-->', 4) + 3
+        : /^<!doctype/i.test(head)
+          ? head.indexOf('>') + 1
+          : 0;
+    if (end <= 2) break; // nothing to skip, or an unterminated item
+    head = head.slice(end);
+  }
+  if (/^<svg[\s>/]/i.test(head)) return 'image/svg+xml';
   return null;
 }
 
