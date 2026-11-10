@@ -53,7 +53,7 @@ export function Bell({
         )}
       </button>
       {open && (
-        <div className="card absolute right-0 z-30 mt-2 w-[min(360px,90vw)] gap-2 p-3 text-foreground shadow-md">
+        <div className="card absolute right-0 z-30 mt-2 max-h-[70vh] w-[min(360px,90vw)] gap-2 overflow-y-auto overscroll-contain p-3 text-foreground shadow-md max-sm:fixed max-sm:inset-x-3 max-sm:top-[72px] max-sm:mt-0 max-sm:w-auto">
           <div className="card-hd px-1">
             <b className="t text-[17px]">Notifications</b>
             {unread > 0 && (

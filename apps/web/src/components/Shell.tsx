@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Avatar, Icon, Logo, type IconName } from './ui.tsx';
 
 // ── Appearance (Light / Dark / System), from the sidebar or Profile ──────────
@@ -118,6 +118,40 @@ export function BmgShell({
     onNavigate(id);
     setOpen(false);
   };
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const drawer = useRef<HTMLDivElement>(null);
+  // The phone menu behaves like a dialog: the page behind doesn't scroll, Escape
+  // closes it, focus moves into it and goes back to the menu button after.
+  useEffect(() => {
+    if (!open) return;
+    const { overflow } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    drawer.current?.querySelector<HTMLElement>('[aria-current="page"], button')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Tab' || !drawer.current) return;
+      const items = [...drawer.current.querySelectorAll<HTMLElement>('button:not([disabled])')];
+      const first = items[0];
+      const last = items.at(-1);
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
+    };
+    const toDesktop = () => window.innerWidth >= 1024 && setOpen(false);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', toDesktop);
+    const button = menuButton.current;
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', toDesktop);
+      button?.focus();
+    };
+  }, [open]);
 
   const sidebar = (
     <nav aria-label="Main" className="bp flex h-full flex-col gap-0.5 px-3.5 pt-[22px] pb-3.5">
@@ -136,7 +170,9 @@ export function BmgShell({
       >
         <Icon name="sparkle" />
         Ask Blueprint AI
-        <span className="kbd ml-auto border-white/20 bg-white/10 text-[#D3D8DE]">⌘K</span>
+        <span className="kbd ml-auto border-white/20 bg-white/10 text-[#D3D8DE] max-lg:hidden">
+          ⌘K
+        </span>
       </button>
       {sections.map((section, i) => (
         <div key={section.label ?? i} className="flex flex-col gap-0.5">
@@ -195,18 +231,46 @@ export function BmgShell({
   );
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-dvh bg-background text-foreground">
       <SkipLink />
-      <div className="sticky top-0 hidden h-screen w-[264px] flex-none overflow-y-auto lg:block">
+      <div className="sticky top-0 hidden h-dvh w-[264px] flex-none overflow-y-auto lg:block">
         {sidebar}
       </div>
       {open && (
-        <div className="fixed inset-0 z-20 flex lg:hidden" role="dialog" aria-label="Menu">
-          <div className="h-full w-[264px] overflow-y-auto">{sidebar}</div>
+        <div
+          ref={drawer}
+          className="fixed inset-0 z-40 flex lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menu"
+        >
+          <div className="drawer relative h-full w-[min(288px,85vw)] overflow-y-auto overscroll-contain bg-[#011935] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-md">
+            <button
+              type="button"
+              className="absolute top-[max(16px,env(safe-area-inset-top))] right-2.5 z-10 flex size-10 items-center justify-center rounded-lg text-[#D3D8DE] hover:bg-white/10 hover:text-white"
+              aria-label="Close menu"
+              onClick={() => setOpen(false)}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+            {sidebar}
+          </div>
           <button
             type="button"
-            className="flex-1 bg-[#011935]/40"
-            aria-label="Close menu"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="drawer-scrim flex-1 bg-[#011935]/45"
             onClick={() => setOpen(false)}
           />
         </div>
@@ -214,9 +278,11 @@ export function BmgShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="topbar flex-wrap max-sm:px-4">
           <button
+            ref={menuButton}
             type="button"
             className="ibtn lg:hidden"
             aria-label="Open menu"
+            aria-expanded={open}
             onClick={() => setOpen(true)}
           >
             <svg
@@ -233,7 +299,7 @@ export function BmgShell({
             </svg>
           </button>
           <label
-            className="search max-w-[380px] flex-1 opacity-70"
+            className="search max-w-[380px] flex-1 opacity-70 max-sm:hidden"
             title="Search arrives with the assistant"
           >
             <Icon name="search" size={16} className="text-muted-foreground" />
@@ -285,22 +351,30 @@ export function ArtistShell({
   onAsk?: () => void;
   children: ReactNode;
 }) {
+  const main = useRef<HTMLElement>(null);
+  // Each tab starts at the top (the content area scrolls, not the window).
+  useEffect(() => {
+    if (main.current) main.current.scrollTop = 0;
+  }, [current]);
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-background text-foreground shadow-md">
+    <div className="app-frame mx-auto flex w-full max-w-[480px] flex-col overflow-hidden bg-background text-foreground shadow-md">
       <SkipLink />
-      <header className="bp flex flex-col gap-2 px-5 pt-[22px] pb-[18px]">{header}</header>
+      <header className="bp flex flex-none flex-col gap-1.5 px-5 pt-[calc(14px+env(safe-area-inset-top))] pr-[max(20px,env(safe-area-inset-right))] pb-3.5 pl-[max(20px,env(safe-area-inset-left))]">
+        {header}
+      </header>
       <main
+        ref={main}
         id="main"
         tabIndex={-1}
-        className="flex flex-1 flex-col gap-3 px-4 py-3 pb-24 outline-none"
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-4 pt-3 pb-24 outline-none"
       >
         {children}
       </main>
       <nav
         aria-label="Tabs"
-        className="fixed bottom-0 left-1/2 flex w-full max-w-[480px] -translate-x-1/2 border-t border-input bg-card pb-2"
+        className="tabbar relative flex flex-none border-t border-input bg-card pb-[max(6px,env(safe-area-inset-bottom))]"
       >
-        {onAsk && (
+        {onAsk && current !== 'chat' && (
           <button
             type="button"
             aria-label="Ask Blueprint AI"
@@ -347,7 +421,7 @@ export function PhoneHeader({
         <span className="eyebrow flex-1 !text-[#E8726E]">{eyebrow}</span>
         {right}
       </div>
-      <h1 className="t m-0 text-[28px] text-white">{title}</h1>
+      <h1 className="t m-0 truncate text-[24px] leading-tight text-white">{title}</h1>
       {children}
     </>
   );
@@ -369,8 +443,8 @@ export function AuthFrame({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground md:flex-row">
-      <aside className="bp flex flex-col gap-3 px-6 pt-7 pb-6 md:w-[44%] md:justify-between md:p-12">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row">
+      <aside className="bp flex flex-col gap-3 px-6 pt-[calc(28px+env(safe-area-inset-top))] pb-6 md:w-[44%] md:justify-between md:p-12">
         <Logo />
         <div className="flex flex-col gap-2 md:mb-16">
           <span className="eyebrow !text-[#E8726E]">{eyebrow}</span>
@@ -381,7 +455,7 @@ export function AuthFrame({
           Build · Connect · Grow — Blueprint Music Group, Melbourne
         </p>
       </aside>
-      <main className="flex flex-1 items-start justify-center p-4 md:items-center md:p-10">
+      <main className="flex flex-1 items-start justify-center p-4 pb-[calc(16px+env(safe-area-inset-bottom))] md:items-center md:p-10">
         <div className="flex w-full max-w-[460px] flex-col gap-3">{children}</div>
       </main>
     </div>

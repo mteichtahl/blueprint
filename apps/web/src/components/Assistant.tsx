@@ -204,8 +204,10 @@ export function Assistant({
             </button>
           </div>
           <div className="flex flex-wrap gap-1.5 text-sm">
-            <span className="tag !bg-white/15 !text-[#F1F4F7]">Looking at: {lookingAt}</span>
-            <span className="tag !bg-white/15 !text-[#F1F4F7]">
+            <span className="tag block max-w-full truncate !bg-white/15 !text-[#F1F4F7]">
+              Looking at: {lookingAt}
+            </span>
+            <span className="tag block max-w-full truncate !bg-white/15 !text-[#F1F4F7]">
               Signed in as {userName} · {roleLabel}
             </span>
           </div>

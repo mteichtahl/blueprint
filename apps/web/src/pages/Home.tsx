@@ -502,7 +502,9 @@ function StudioHq({
           ? 'Open library'
           : v === 'todos'
             ? 'Tasks & to-dos'
-            : 'Artists & applications'}
+            : v === 'messages'
+              ? 'Open chat'
+              : 'Artists & applications'}
     </button>
   );
 
@@ -611,8 +613,10 @@ function StudioHq({
           <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[15px]">
             {todos.slice(0, 3).map((t) => (
               <li key={t.todoId} className="flex items-center gap-3">
-                <span className="flex-1 truncate">{t.title}</span>
-                <span className="src">{names[t.artistId] ?? ''}</span>
+                <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                <span className="src max-w-[40%] truncate max-sm:hidden">
+                  {names[t.artistId] ?? ''}
+                </span>
                 {t.due && <Tag tone={t.due < today ? 'c' : 's'}>{shortDate(t.due)}</Tag>}
               </li>
             ))}

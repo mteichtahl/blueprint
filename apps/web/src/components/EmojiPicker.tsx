@@ -158,7 +158,7 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
       </div>
       {!q.trim() && (
         <div
-          className="flex gap-0.5 overflow-x-auto px-2.5 pt-1.5"
+          className="relative flex gap-0.5 overflow-x-auto px-2.5 pt-1.5"
           role="tablist"
           aria-label="Emoji groups"
         >
