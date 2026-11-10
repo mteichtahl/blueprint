@@ -1164,6 +1164,7 @@ function ArtistHome({
               type="button"
               className="ml-auto text-sm font-bold underline"
               onClick={() => onNavigate('plan')}
+              aria-label="Open my plan"
             >
               Open
             </button>
