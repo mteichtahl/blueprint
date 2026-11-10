@@ -39,7 +39,7 @@ type TabId = (typeof TABS)[number]['id'];
 const STATUS_TAG = { done: ['n', 'Done'], now: ['c', 'Now'], next: ['s', 'Next'] } as const;
 const STATUS_COLOR = { done: '#011935', now: '#D9534F', next: '#5C6775' } as const;
 
-/** The plan strip in the workspace header: outcome plus the artist's own phases. */
+/** The plan outcome card on the workspace Overview tab: outcome plus the artist's own phases. */
 export function PlanStrip({
   plan,
   onOpenPlan,
@@ -94,7 +94,7 @@ export function PlanStrip({
   );
 }
 
-/** Artist workspace (BMG view): header, plan strip and tabs. */
+/** Artist workspace (BMG view): header and tabs; the plan outcome card sits on Overview. */
 export function ArtistWorkspace({
   cfg,
   token,
@@ -139,14 +139,6 @@ export function ArtistWorkspace({
           </p>
         </div>
       </header>
-      <PlanStrip
-        plan={plan}
-        onOpenPlan={() => setTab('plan')}
-        onStartPlan={() => {
-          setStartPlan(true);
-          setTab('plan');
-        }}
-      />
       <nav aria-label="Workspace" role="tablist" className="flex flex-wrap border-b border-input">
         {TABS.map((t) => (
           <button
@@ -162,7 +154,17 @@ export function ArtistWorkspace({
         ))}
       </nav>
       {tab === 'overview' && (
-        <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
+        <>
+          <PlanStrip
+            plan={plan}
+            onOpenPlan={() => setTab('plan')}
+            onStartPlan={() => {
+              setStartPlan(true);
+              setTab('plan');
+            }}
+          />
+          <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
+        </>
       )}
       {tab === 'chat' && (
         <ArtistChatTab
