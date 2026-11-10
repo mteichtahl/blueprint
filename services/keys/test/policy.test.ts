@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { attempt, failed } from '../src/gate.ts';
-import { artistKeyPolicy, DATA_ACTIONS } from '../src/policy.ts';
+import { artistKeyPolicy, DATA_ACTIONS, needsRefresh } from '../src/policy.ts';
 
 const input = {
   accountId: '111111111111',
@@ -35,6 +35,29 @@ describe('artist key policy', () => {
     }
     const admin = statements.find((s) => s.Sid === 'KeyAdminRole')!;
     for (const a of DATA_ACTIONS) expect(actionsOf(admin)).not.toContain(a);
+  });
+
+  it('never lets the key admin rewrite the policy or change grants (finding K1)', () => {
+    const admin = statements.find((s) => s.Sid === 'KeyAdminRole')!;
+    for (const a of ['kms:PutKeyPolicy', 'kms:CreateGrant', 'kms:RevokeGrant', 'kms:RetireGrant'])
+      expect(actionsOf(admin)).not.toContain(a);
+    // The only statements naming the key admin are allows of setup/read actions.
+    const naming = statements.filter((s) => JSON.stringify(s.Principal).includes('key-admin'));
+    expect(naming.map((s) => s.Sid)).toEqual(['KeyAdminRole']);
+    // Not orphaned: the account root keeps policy administration.
+    const root = statements.find((s) => s.Sid === 'AccountAdministrationOnly')!;
+    expect(actionsOf(root)).toContain('kms:PutKeyPolicy');
+  });
+
+  it('spots keys created with the old policy and leaves refreshed ones alone', () => {
+    const old = {
+      ...policy,
+      Statement: statements.map((s) =>
+        s.Sid === 'KeyAdminRole' ? { ...s, Action: [...actionsOf(s), 'kms:PutKeyPolicy'] } : s,
+      ),
+    };
+    expect(needsRefresh(JSON.stringify(old), input.keyAdminRoleArn)).toBe(true);
+    expect(needsRefresh(JSON.stringify(policy), input.keyAdminRoleArn)).toBe(false);
   });
 
   it('refuses private items to every session that is not the artist', () => {

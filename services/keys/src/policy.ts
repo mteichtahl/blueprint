@@ -28,6 +28,22 @@ const ADMIN_ACTIONS = [
 ];
 
 /** The only actions that touch data. No statement grants them except to the data-access role. */
+/**
+ * What the onboarding task (key-admin role) may do to an artist key: set it
+ * up and read it back. Never PutKeyPolicy or grant changes, so a compromised
+ * onboarding function can't rewrite a key policy to give itself Decrypt
+ * (Phase 6 review, finding K1). Policy changes go through account admins.
+ */
+export const KEY_ADMIN_ACTIONS = [
+  'kms:DescribeKey',
+  'kms:GetKeyPolicy',
+  'kms:GetKeyRotationStatus',
+  'kms:ListResourceTags',
+  'kms:EnableKeyRotation',
+  'kms:TagResource',
+  'kms:CreateAlias',
+];
+
 export const DATA_ACTIONS = [
   'kms:Encrypt',
   'kms:Decrypt',
@@ -53,7 +69,7 @@ export function artistKeyPolicy(input: ArtistKeyPolicyInput) {
         Sid: 'KeyAdminRole',
         Effect: 'Allow',
         Principal: { AWS: input.keyAdminRoleArn },
-        Action: [...ADMIN_ACTIONS, 'kms:CreateAlias'],
+        Action: KEY_ADMIN_ACTIONS,
         Resource: '*',
       },
       {
@@ -100,4 +116,17 @@ export function artistKeyPolicy(input: ArtistKeyPolicyInput) {
       },
     ],
   };
+}
+
+/** True if a key's current policy still lets the key-admin role rewrite it. */
+export function needsRefresh(currentPolicy: string, keyAdminRoleArn: string): boolean {
+  const doc = JSON.parse(currentPolicy) as { Statement?: Record<string, unknown>[] };
+  const list = (v: unknown) => (Array.isArray(v) ? v : [v]);
+  return (doc.Statement ?? []).some((st) => {
+    if (st.Effect !== 'Allow') return false;
+    const principals = list((st.Principal as { AWS?: unknown } | undefined)?.AWS);
+    if (!principals.includes(keyAdminRoleArn)) return false;
+    const actions = list(st.Action);
+    return actions.some((a) => KEY_ADMIN_ACTIONS.indexOf(a as string) === -1);
+  });
 }

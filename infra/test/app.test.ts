@@ -292,7 +292,7 @@ describe('environment identity (Cognito)', () => {
 describe('environment keys (per-artist KMS)', () => {
   const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.keys));
 
-  it('only lets tagged sessions from the gate and API roles assume the data-access role', () => {
+  it('only lets tagged sessions from the named data roles assume the data-access role', () => {
     prod!.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'bmg-prod-data-access',
       AssumeRolePolicyDocument: {
@@ -300,12 +300,10 @@ describe('environment keys (per-artist KMS)', () => {
           Match.objectLike({
             Action: ['sts:AssumeRole', 'sts:TagSession'],
             Condition: Match.objectLike({
-              ArnLike: {
-                'aws:PrincipalArn': [
-                  `arn:aws:iam::${cfg.account.id}:role/bmg-prod-isolation-gate`,
-                  `arn:aws:iam::${cfg.account.id}:role/bmg-prod-files-gate`,
-                  `arn:aws:iam::${cfg.account.id}:role/bmg-prod-api-*`,
-                ],
+              ArnEquals: {
+                'aws:PrincipalArn': Match.arrayWith([
+                  `arn:aws:iam::${cfg.account.id}:role/bmg-prod-api-files`,
+                ]),
               },
               Null: { 'aws:RequestTag/artistId': 'false', 'aws:RequestTag/role': 'false' },
               'ForAllValues:StringEquals': { 'aws:TagKeys': ['artistId', 'role'] },
@@ -752,5 +750,75 @@ describe('connectors', () => {
     const apps = statements.filter((s) => s.Sid === 'ReadConnectorApps');
     expect(apps).toHaveLength(2);
     expect(JSON.stringify(apps[0]!.Resource)).toContain(':secret:bmg/prod/connectors/*');
+  });
+});
+
+describe('Phase 6 policy review', () => {
+  const policiesOf = (t: Template) =>
+    Object.values(t.findResources('AWS::IAM::Policy')) as {
+      Properties: { PolicyDocument: { Statement: Record<string, unknown>[] }; Roles: unknown[] };
+    }[];
+  const roleNames = (t: Template) =>
+    Object.fromEntries(
+      Object.entries(t.findResources('AWS::IAM::Role')).map(([id, r]) => [
+        id,
+        r.Properties.RoleName,
+      ]),
+    );
+
+  it.each(['staging', 'prod'] as const)(
+    'lets exactly the roles that open artist data assume data-access (%s, finding I1)',
+    (envName) => {
+      const env = stacks.environments[envName === 'staging' ? 0 : 1]!;
+      const p = `bmg-${envName}`;
+      const callers = new Set<string>();
+      for (const stack of Object.values(env)) {
+        const t = Template.fromStack(stack);
+        const names = roleNames(t);
+        for (const pol of policiesOf(t)) {
+          const assumes = pol.Properties.PolicyDocument.Statement.some(
+            (st) =>
+              JSON.stringify(st.Action).includes('sts:AssumeRole') &&
+              /role\/bmg-\w+-data-access|"DataAccess[0-9A-F]+"/.test(JSON.stringify(st.Resource)),
+          );
+          if (!assumes) continue;
+          for (const r of pol.Properties.Roles) {
+            callers.add(String(names[(r as { Ref: string }).Ref]));
+          }
+        }
+      }
+      const role = Object.values(
+        Template.fromStack(env.keys).findResources('AWS::IAM::Role', {
+          Properties: { RoleName: `${p}-data-access` },
+        }),
+      )[0]!;
+      const trusted = role.Properties.AssumeRolePolicyDocument.Statement[0].Condition.ArnEquals[
+        'aws:PrincipalArn'
+      ].map((a: string) => a.split(':role/')[1]);
+      expect(new Set(trusted)).toEqual(callers);
+      expect(trusted.join()).not.toContain('*');
+    },
+  );
+
+  it('refreshes existing artist key policies on every environment (finding K1)', () => {
+    for (const env of stacks.environments) {
+      Template.fromStack(env.keys).resourceCountIs('Custom::BmgKeyPolicyRefresh', 1);
+    }
+  });
+});
+
+describe('Phase 6 web headers', () => {
+  it('sends Permissions-Policy and COOP from CloudFront (finding W2)', () => {
+    const web = Template.fromStack(stacks.environments[1]!.web);
+    web.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
+      ResponseHeadersPolicyConfig: Match.objectLike({
+        CustomHeadersConfig: {
+          Items: Match.arrayWith([
+            Match.objectLike({ Header: 'Permissions-Policy' }),
+            Match.objectLike({ Header: 'Cross-Origin-Opener-Policy', Value: 'same-origin' }),
+          ]),
+        },
+      }),
+    });
   });
 });

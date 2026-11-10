@@ -4,12 +4,16 @@ import {
   CreateKeyCommand,
   DescribeKeyCommand,
   EnableKeyRotationCommand,
+  GetKeyPolicyCommand,
   KMSClient,
+  ListAliasesCommand,
   NotFoundException,
+  PutKeyPolicyCommand,
 } from '@aws-sdk/client-kms';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { artistKeyAlias, assertArtistId } from '@bmg/crypto';
-import { artistKeyPolicy } from './policy.ts';
+import { respond, type CfnEvent } from './gate.ts';
+import { artistKeyPolicy, needsRefresh } from './policy.ts';
 
 const kms = new KMSClient({});
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -64,6 +68,10 @@ export async function ensureArtistKey(rawArtistId: string): Promise<OnboardResul
       KeyUsage: 'ENCRYPT_DECRYPT',
       KeySpec: 'SYMMETRIC_DEFAULT',
       Policy: JSON.stringify(policy),
+      // The policy deliberately stops this role from changing it later
+      // (finding K1), which KMS's lockout check would refuse. The key is not
+      // orphaned: the account root keeps policy administration.
+      BypassPolicyLockoutSafetyCheck: true,
       Tags: [
         { TagKey: 'artistId', TagValue: artistId },
         { TagKey: 'bmg:env', TagValue: bmgEnv },
@@ -103,8 +111,72 @@ async function recordArtist(result: OnboardResult): Promise<void> {
   }
 }
 
+/**
+ * Brings keys made before the Phase 6 review up to the current policy, which
+ * no longer lets this role rewrite key policies (finding K1). Runs on every
+ * deploy and only touches keys that still have the old policy, so after the
+ * first run it changes nothing (and couldn't: the permission is gone).
+ */
+export async function refreshKeyPolicies(): Promise<{ checked: number; refreshed: number }> {
+  const prefix = `alias/${env('PROJECT')}/${env('BMG_ENV')}/artist/`;
+  const keyAdminRoleArn = env('KEY_ADMIN_ROLE_ARN');
+  let checked = 0;
+  let refreshed = 0;
+  let Marker: string | undefined;
+  do {
+    const page = await kms.send(new ListAliasesCommand({ Marker, Limit: 100 }));
+    for (const a of page.Aliases ?? []) {
+      if (!a.AliasName?.startsWith(prefix) || !a.TargetKeyId) continue;
+      const artistId = assertArtistId(a.AliasName.slice(prefix.length));
+      checked++;
+      const current = await kms.send(
+        new GetKeyPolicyCommand({ KeyId: a.TargetKeyId, PolicyName: 'default' }),
+      );
+      if (!current.Policy || !needsRefresh(current.Policy, keyAdminRoleArn)) continue;
+      const policy = artistKeyPolicy({
+        accountId: env('ACCOUNT_ID'),
+        artistId,
+        keyAdminRoleArn,
+        dataAccessRoleArn: env('DATA_ACCESS_ROLE_ARN'),
+      });
+      await kms.send(
+        new PutKeyPolicyCommand({
+          KeyId: a.TargetKeyId,
+          PolicyName: 'default',
+          Policy: JSON.stringify(policy),
+          // As in CreateKey: this role gives up PutKeyPolicy; the root keeps it.
+          BypassPolicyLockoutSafetyCheck: true,
+        }),
+      );
+      refreshed++;
+    }
+    Marker = page.Truncated ? page.NextMarker : undefined;
+  } while (Marker);
+  console.log(
+    JSON.stringify({ level: 'info', event: 'keys.policiesRefreshed', checked, refreshed }),
+  );
+  return { checked, refreshed };
+}
+
 /** Step Functions task: `{ artistId }` → `{ artistId, keyArn, created }`. */
-export const handler = async (event: OnboardInput): Promise<OnboardResult> => {
+export const handler = async (
+  event: OnboardInput | Partial<CfnEvent>,
+): Promise<OnboardResult | void> => {
+  // CloudFormation custom resource: refresh existing key policies on deploy.
+  if ('RequestType' in event && event.RequestType && event.ResponseURL) {
+    const cfn = event as CfnEvent;
+    if (cfn.RequestType === 'Delete') return respond(cfn, 'SUCCESS', 'nothing to clean up');
+    try {
+      const r = await refreshKeyPolicies();
+      return respond(cfn, 'SUCCESS', `checked ${r.checked}, refreshed ${r.refreshed}`);
+    } catch (err) {
+      return respond(cfn, 'FAILED', `key policy refresh failed: ${(err as Error).message}`);
+    }
+  }
+  return onboard(event as OnboardInput);
+};
+
+async function onboard(event: OnboardInput): Promise<OnboardResult> {
   const result = await ensureArtistKey(event.artistId);
   if (event.recordWorkspace !== false) await recordArtist(result);
   console.log(
@@ -116,4 +188,4 @@ export const handler = async (event: OnboardInput): Promise<OnboardResult> => {
     }),
   );
   return result;
-};
+}
