@@ -1976,6 +1976,49 @@ nav,
   border-radius: 0;
 }
 
+/* Blueprint's Chat page and the Workspace → Chat tab on a phone: the same
+   full-screen chat. The page is exactly the screen's height and never scrolls;
+   the heading, sub text and workspace tabs give way so the chat fills the space
+   under the top bar, edge to edge, with the composer pinned to the bottom.
+   Only the messages (and the chat list) scroll. */
+@media (max-width: 899px) {
+  .bmg-frame:has(.wa-phone) {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .bmg-frame:has(.wa-phone) .bmg-col {
+    min-height: 0;
+  }
+  .bmg-frame main:has(.wa-phone) {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+  .bmg-frame main:has(.wa-phone) > .page-head {
+    display: none;
+  }
+  .bmg-frame main:has(.wa-phone) > :has(> .wa-phone) {
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 0;
+  }
+  .bmg-frame .wa-phone {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    flex: 1 1 auto;
+    border: 0;
+    border-radius: 0;
+  }
+  .bmg-frame .wa-phone .wa-compose {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
+
 /* Blueprint on a phone: the top bar is navy like the artist header, so the
    status bar's white text sits on it, and it stays put while the page scrolls. */
 @media (max-width: 1023px) {

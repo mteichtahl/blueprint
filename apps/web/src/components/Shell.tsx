@@ -335,7 +335,7 @@ export function BmgShell({
   );
 
   return (
-    <div className="flex min-h-dvh bg-background text-foreground">
+    <div className="bmg-frame flex min-h-dvh bg-background text-foreground">
       <SkipLink />
       <div className="sticky top-0 hidden h-dvh w-[264px] flex-none overflow-y-auto lg:block">
         {sidebar}
@@ -379,7 +379,7 @@ export function BmgShell({
           />
         </div>
       )}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="bmg-col flex min-w-0 flex-1 flex-col">
         <header className="topbar flex-wrap max-sm:px-4">
           <button
             ref={menuButton}

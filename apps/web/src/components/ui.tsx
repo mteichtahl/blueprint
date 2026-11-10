@@ -224,7 +224,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-3">
+    <div className="page-head flex flex-wrap items-end gap-3">
       <div className="flex min-w-[min(280px,100%)] flex-1 flex-col gap-1.5">
         <span className="eyebrow">{eyebrow}</span>
         <h1 className="t m-0 text-[34px] leading-tight">{title}</h1>
