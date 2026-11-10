@@ -14,6 +14,7 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { authorize, type Action, type Principal, type Visibility } from '@bmg/authz';
@@ -60,6 +61,15 @@ import {
   type TodoComment,
 } from '../workspace/model.ts';
 import {
+  changedBy,
+  PLAN_LOG_PREFIX,
+  planChanges,
+  planLogSk,
+  publicChange,
+  type PlanChange,
+  type PlanChangeKind,
+} from '../workspace/plan-history.ts';
+import {
   audit,
   authContext,
   db,
@@ -75,6 +85,42 @@ const table = () => env('MAIN_TABLE');
 const today = () => new Date().toISOString().slice(0, 10);
 const events = new EventBridgeClient({});
 const scheduler = new SchedulerClient({});
+
+/** A plan save lost the race (the plan's version check failed inside the transaction). */
+function planConflict(err: unknown): boolean {
+  const e = err as { name?: string; CancellationReasons?: { Code?: string }[] };
+  return (
+    e.name === 'ConditionalCheckFailedException' ||
+    (e.name === 'TransactionCanceledException' &&
+      (e.CancellationReasons ?? []).some((r) => r.Code === 'ConditionalCheckFailed'))
+  );
+}
+
+/** One plan history entry, ready to write next to the plan. */
+async function changeEntry(
+  principal: Principal,
+  artistId: string,
+  c: { version: number; at: string; kind: PlanChangeKind; changes: string[] },
+) {
+  const profile = await db.send(
+    // The person's profile (USER#<sub>, see me.ts) holds their job title.
+    new GetCommand({ TableName: table(), Key: { PK: `USER#${principal.sub}`, SK: 'PROFILE' } }),
+  );
+  const entry: PlanChange = {
+    changeId: newId(),
+    artistId,
+    ...c,
+    bySub: principal.sub,
+    byRole: principal.role,
+    byName: changedBy(profile.Item?.jobTitle),
+  };
+  return {
+    PK: artistPk(artistId),
+    SK: planLogSk(c.at, entry.changeId),
+    type: 'planChange',
+    ...entry,
+  };
+}
 
 /** Domain events for notifications (design 7.3); ids only, no content. */
 async function domainEvent(type: string, detail: Record<string, unknown>) {
@@ -298,6 +344,33 @@ async function roster(principal: Principal) {
   return res.Responses?.[table()] ?? [];
 }
 
+/** `ARTIST#id / AI`: latest AI choice and the terms it was made with (BMG roster). */
+async function consentSummaries(artistIds: string[]) {
+  const out: Record<
+    string,
+    { termsVersion: string | null; termsAcceptedAt: string | null; aiOptIn: boolean | null }
+  > = {};
+  for (let i = 0; i < artistIds.length; i += 100) {
+    const res = await db.send(
+      new BatchGetCommand({
+        RequestItems: {
+          [table()]: {
+            Keys: artistIds.slice(i, i + 100).map((id) => ({ PK: artistPk(id), SK: 'AI' })),
+          },
+        },
+      }),
+    );
+    for (const it of res.Responses?.[table()] ?? []) {
+      out[String(it.artistId ?? String(it.PK).slice('ARTIST#'.length))] = {
+        termsVersion: typeof it.termsVersion === 'string' ? it.termsVersion : null,
+        termsAcceptedAt: typeof it.termsAcceptedAt === 'string' ? it.termsAcceptedAt : null,
+        aiOptIn: typeof it.aiOptIn === 'boolean' ? it.aiOptIn : null,
+      };
+    }
+  }
+  return out;
+}
+
 const publicProfile = (p: Record<string, unknown>) => ({
   artistId: p.artistId,
   displayName: p.displayName,
@@ -337,7 +410,19 @@ export const handler = handle(async (event) => {
   switch (route) {
     case 'GET /artists': {
       const items = await roster(principal);
-      return json(200, { artists: items.map(publicProfile) });
+      if (principal.role === 'artist') return json(200, { artists: items.map(publicProfile) });
+      // Artists & access: each artist's terms acceptance and AI status.
+      const consent = await consentSummaries(items.map((i) => String(i.artistId)));
+      return json(200, {
+        artists: items.map((i) => ({
+          ...publicProfile(i),
+          ...(consent[String(i.artistId)] ?? {
+            termsVersion: null,
+            termsAcceptedAt: null,
+            aiOptIn: null,
+          }),
+        })),
+      });
     }
 
     case 'GET /artists/{artistId}': {
@@ -460,30 +545,73 @@ export const handler = handle(async (event) => {
       // Plans are run by BMG; artists see them and tick off their to-dos.
       if (principal.role === 'artist') throw new HttpError(403, 'Plans are edited by Blueprint');
       const body = parseBody(event, PlanBody);
-      const next = { ...body, version: body.version + 1, updatedAt: new Date().toISOString() };
+      const key = { PK: artistPk(artistId), SK: PLAN_SK };
+      const current = (await db.send(new GetCommand({ TableName: table(), Key: key }))).Item as
+        Plan | undefined;
+      if ((current?.version ?? 0) !== body.version) {
+        throw new HttpError(409, 'Someone else changed this plan. Reload and try again.');
+      }
+      const at = new Date().toISOString();
+      const next = { ...body, version: body.version + 1, updatedAt: at };
+      const changes = planChanges(current, next);
+      const log = changes.length
+        ? await changeEntry(principal, artistId, {
+            version: next.version,
+            at,
+            kind: current ? 'edited' : 'created',
+            changes,
+          })
+        : undefined;
       try {
         await db.send(
-          new PutCommand({
-            TableName: table(),
-            Item: {
-              PK: artistPk(artistId),
-              SK: PLAN_SK,
-              type: 'plan',
-              artistId,
-              ...next,
-              updatedBy: principal.sub,
-            },
-            ConditionExpression: body.version === 0 ? 'attribute_not_exists(PK)' : 'version = :v',
-            ...(body.version === 0 ? {} : { ExpressionAttributeValues: { ':v': body.version } }),
+          new TransactWriteCommand({
+            TransactItems: [
+              {
+                Put: {
+                  TableName: table(),
+                  Item: {
+                    ...key,
+                    type: 'plan',
+                    artistId,
+                    ...next,
+                    updatedBy: principal.sub,
+                  },
+                  ConditionExpression:
+                    body.version === 0 ? 'attribute_not_exists(PK)' : 'version = :v',
+                  ...(body.version === 0
+                    ? {}
+                    : { ExpressionAttributeValues: { ':v': body.version } }),
+                },
+              },
+              ...(log ? [{ Put: { TableName: table(), Item: log } }] : []),
+            ],
           }),
         );
       } catch (err) {
-        if ((err as Error).name === 'ConditionalCheckFailedException') {
+        if (planConflict(err)) {
           throw new HttpError(409, 'Someone else changed this plan. Reload and try again.');
         }
         throw err;
       }
       return json(200, { version: next.version, gaps: alignmentGaps(next) });
+    }
+
+    case 'GET /artists/{artistId}/plan/history': {
+      // Everyone who can see the plan can see how it changed.
+      const artistId = artistIdParam(event);
+      ensure(principal, 'read', artistId);
+      const res = await db.send(
+        new QueryCommand({
+          TableName: table(),
+          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :log)',
+          ExpressionAttributeValues: { ':pk': artistPk(artistId), ':log': PLAN_LOG_PREFIX },
+          ScanIndexForward: false,
+          Limit: 500,
+        }),
+      );
+      return json(200, {
+        changes: ((res.Items ?? []) as PlanChange[]).map(publicChange),
+      });
     }
 
     // ── Custom plan stages (BMG) ──
@@ -580,25 +708,39 @@ export const handler = handle(async (event) => {
         }
         if (plan.phases.length >= 12) throw new HttpError(409, 'A plan can have up to 12 stages');
         const phase = phaseFromStage({ ...stage, stageId }, () => newId().slice(-12));
+        const at = new Date().toISOString();
+        const log = await changeEntry(principal, artistId, {
+          version: plan.version + 1,
+          at,
+          kind: 'stage-added',
+          changes: planChanges(plan, { ...plan, phases: [...plan.phases, phase] }),
+        });
         try {
           await db.send(
-            new UpdateCommand({
-              TableName: table(),
-              Key: key,
-              UpdateExpression:
-                'SET phases = list_append(phases, :p), version = :next, updatedAt = :at, updatedBy = :by',
-              ConditionExpression: 'version = :v',
-              ExpressionAttributeValues: {
-                ':p': [phase],
-                ':v': plan.version,
-                ':next': plan.version + 1,
-                ':at': new Date().toISOString(),
-                ':by': principal.sub,
-              },
+            new TransactWriteCommand({
+              TransactItems: [
+                {
+                  Update: {
+                    TableName: table(),
+                    Key: key,
+                    UpdateExpression:
+                      'SET phases = list_append(phases, :p), version = :next, updatedAt = :at, updatedBy = :by',
+                    ConditionExpression: 'version = :v',
+                    ExpressionAttributeValues: {
+                      ':p': [phase],
+                      ':v': plan.version,
+                      ':next': plan.version + 1,
+                      ':at': at,
+                      ':by': principal.sub,
+                    },
+                  },
+                },
+                { Put: { TableName: table(), Item: log } },
+              ],
             }),
           );
         } catch (err) {
-          if ((err as Error).name === 'ConditionalCheckFailedException') {
+          if (planConflict(err)) {
             throw new HttpError(409, 'A plan changed while the stage was being added. Try again.');
           }
           throw err;

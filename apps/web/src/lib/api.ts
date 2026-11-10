@@ -57,6 +57,10 @@ export interface ArtistSummary {
   displayName: string;
   status: string;
   createdAt: string;
+  /** Blueprint only (Artists & access): terms accepted and the current AI choice. */
+  termsVersion?: string | null;
+  termsAcceptedAt?: string | null;
+  aiOptIn?: boolean | null;
 }
 
 export type MeasureId = 'M1' | 'M2' | 'M3' | 'M4';
@@ -108,6 +112,18 @@ export interface PlanResponse {
   /** Custom stages that apply to this artist (BMG only; empty for artists). */
   stages: CustomStage[];
   exists: boolean;
+}
+
+/** One saved change to a plan (rev 8): who, when and what, newest first. */
+export interface PlanChange {
+  changeId: string;
+  /** The plan version this change produced. */
+  version: number;
+  at: string;
+  kind: 'created' | 'edited' | 'stage-added';
+  /** "Blueprint", or "Blueprint · <job title>". */
+  byName: string;
+  changes: string[];
 }
 
 /** Same limits as the API (services/api/src/workspace/model.ts). */

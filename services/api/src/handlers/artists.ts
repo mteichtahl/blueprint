@@ -13,6 +13,7 @@ import { authorize } from '@bmg/authz';
 import { isArtistId, newArtistId } from '@bmg/crypto';
 import { appOrigin, inviteEmail, sendMail } from '@bmg/email';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { accessRoutes } from './access.ts';
 import { z } from 'zod';
 import {
   audit,
@@ -92,6 +93,7 @@ async function requireAdmin(event: APIGatewayProxyEvent, action: string) {
  * sends the invitation again, while the artist hasn't signed in yet.
  */
 export const handler = handle(async (event) => {
+  if (event.resource === '/access/{proxy+}') return accessRoutes(event, temporaryPassword);
   if (event.resource === '/artists/{artistId}/invite/resend') return resend(event);
 
   const ctx = authContext(event);

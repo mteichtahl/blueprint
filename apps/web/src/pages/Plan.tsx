@@ -8,6 +8,7 @@ import {
   type MeasureId,
   type Phase,
   type Plan,
+  type PlanChange,
   type PlanResponse,
 } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -58,6 +59,7 @@ type Section =
   | { kind: 'phase'; id: string }
   | { kind: 'timeline' }
   | { kind: 'gaps' }
+  | { kind: 'history' }
   | { kind: 'add' };
 const sameSection = (a: Section, b: Section) =>
   a.kind === b.kind && (a.kind !== 'phase' || (b.kind === 'phase' && a.id === b.id));
@@ -203,6 +205,9 @@ export function PlanTab({
           },
         ]
       : []),
+    ...(data.exists
+      ? [{ section: { kind: 'history' as const }, key: 'history', label: 'History' }]
+      : []),
     ...(editing && plan.phases.length < MAX_STAGES
       ? [{ section: { kind: 'add' as const }, key: 'add', label: '+ Add stage' }]
       : []),
@@ -293,6 +298,10 @@ export function PlanTab({
         </Card>
       )}
 
+      {current.kind === 'history' && (
+        <PlanHistory cfg={cfg} token={token} artistId={artistId} version={data.plan.version} />
+      )}
+
       {current.kind === 'add' && editing && (
         <AddStage
           library={data.phaseLibrary}
@@ -315,16 +324,22 @@ export function PlanTab({
               setExporting(true);
               setError(null);
               void import('../lib/planPdf.ts')
-                .then(({ exportPlanPdf }) =>
-                  exportPlanPdf({ artistName, plan: data.plan, gaps: data.gaps }),
-                )
+                .then(async ({ exportPlanPdf }) => {
+                  const { changes } = await api<{ changes: PlanChange[] }>(
+                    cfg,
+                    token,
+                    'GET',
+                    `/artists/${artistId}/plan/history`,
+                  );
+                  await exportPlanPdf({ artistName, plan: data.plan, gaps: data.gaps, changes });
+                })
                 .catch((e) => setError(`Couldn't make the PDF: ${(e as Error).message}`))
                 .finally(() => setExporting(false));
             }}
           >
             {exporting ? 'Making the PDF…' : 'Export to PDF'}
           </Button>
-          <span className="src">The whole plan, with the timeline.</span>
+          <span className="src">The whole plan, with the timeline and its history of changes.</span>
         </div>
       )}
       {canEdit && (
@@ -346,6 +361,84 @@ export function PlanTab({
       {saved && <Notice tone="success">Plan saved.</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
     </div>
+  );
+}
+
+const fmtWhen = (iso: string) =>
+  new Date(iso).toLocaleString('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+/** Every saved change to the plan, newest first (rev 8). Artists and Blueprint both see it. */
+function PlanHistory({
+  cfg,
+  token,
+  artistId,
+  version,
+}: {
+  cfg: AppConfig;
+  token: string;
+  artistId: string;
+  /** Reloads after each save. */
+  version: number;
+}) {
+  const [changes, setChanges] = useState<PlanChange[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<{ changes: PlanChange[] }>(cfg, token, 'GET', `/artists/${artistId}/plan/history`)
+      .then((r) => live && setChanges(r.changes))
+      .catch((e) => live && setError((e as Error).message));
+    return () => {
+      live = false;
+    };
+  }, [cfg, token, artistId, version]);
+
+  return (
+    <Card title={<span className="eyebrow">History</span>}>
+      {error && <Notice tone="error">{error}</Notice>}
+      {!changes && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {changes?.length === 0 && (
+        <p className="src m-0">
+          No changes recorded yet. Changes are recorded from now on, each time the plan is saved.
+        </p>
+      )}
+      {changes && changes.length > 0 && (
+        <ol className="m-0 flex list-none flex-col p-0">
+          {changes.map((c, i) => (
+            <li key={c.changeId} className="relative flex gap-3 pb-5 last:pb-0">
+              {/* The timeline line and dot. */}
+              {i < changes.length - 1 && (
+                <span aria-hidden className="absolute left-[5px] top-4 bottom-0 w-px bg-input" />
+              )}
+              <span
+                aria-hidden
+                className="relative mt-1.5 size-[11px] shrink-0 rounded-full border-2 border-[#011935]"
+                style={{ background: i === 0 ? '#D9534F' : '#F1F4F7' }}
+              />
+              <div className="flex min-w-0 flex-col gap-1">
+                <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                  <time dateTime={c.at} className="font-bold">
+                    {fmtWhen(c.at)}
+                  </time>
+                  <span className="text-muted-foreground">{c.byName}</span>
+                  <Tag tone="s">v{c.version}</Tag>
+                </div>
+                <ul className="m-0 flex flex-col gap-0.5 pl-[18px] text-[15px]">
+                  {c.changes.map((line, j) => (
+                    <li key={j}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Card>
   );
 }
 
