@@ -3,6 +3,7 @@ import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { Bar, Button, Card, DataTable, Field, Notice, PageHeader, Tag } from '../components/ui.tsx';
 import { aud, PRESET_COSTS } from '../components/Money.tsx';
+import { VenuePicker, type Venue } from './Venues.tsx';
 
 /** BMG-only events (screen: Events · Industry Mixer Night). */
 
@@ -11,6 +12,7 @@ interface EventInfo {
   name: string;
   date: string;
   venue: string;
+  venueId?: string;
   capacity: number;
   ticketTarget: number;
   ticketPriceCents: number;
@@ -176,21 +178,34 @@ function NewEvent({
   const [f, setF] = useState({
     name: '',
     date: '',
-    venue: '',
     capacity: '',
     ticketTarget: '',
     ticketPrice: '',
     compsTarget: '',
   });
+  const [venue, setVenue] = useState<{ venueId: string | null; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
+  /** Picking a venue from the list fills in its capacity if none is set. */
+  async function pickVenue(v: { venueId: string | null; name: string } | null) {
+    setVenue(v);
+    if (!v?.venueId || f.capacity) return;
+    try {
+      const full = await api<Venue>(cfg, token, 'GET', `/venues/${v.venueId}`);
+      if (full.capacity)
+        setF((cur) => ({ ...cur, capacity: cur.capacity || String(full.capacity) }));
+    } catch {
+      // Capacity is only a convenience.
+    }
+  }
   async function create() {
     try {
       const e = await api<EventInfo>(cfg, token, 'POST', '/events', {
         name: f.name,
         date: f.date,
-        venue: f.venue,
+        venue: venue?.name ?? '',
+        ...(venue?.venueId ? { venueId: venue.venueId } : {}),
         capacity: Number(f.capacity) || 0,
         ticketTarget: Number(f.ticketTarget) || 0,
         ticketPriceCents: Math.round((Number(f.ticketPrice) || 0) * 100),
@@ -212,7 +227,13 @@ function NewEvent({
           placeholder="Industry Mixer Night"
         />
         <Field label="Date" type="date" value={f.date} onChange={set('date')} />
-        <Field label="Venue" value={f.venue} onChange={set('venue')} />
+        <VenuePicker
+          cfg={cfg}
+          token={token}
+          isBmg
+          value={venue}
+          onChange={(v) => void pickVenue(v)}
+        />
         <Field
           label="Capacity"
           type="number"
