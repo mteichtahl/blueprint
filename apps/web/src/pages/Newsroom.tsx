@@ -7,10 +7,11 @@ import {
   DataTable,
   Field,
   Notice,
+  RowCard,
   Select,
+  shortDate,
   Tag,
   TextArea,
-  shortDate,
 } from '../components/ui.tsx';
 
 /** Newsroom (BMG only): the weekly draft, approval, what goes in and the industry sites. */
@@ -600,7 +601,57 @@ function Sites({
               No sites yet. Add the music press, industry bodies and funding pages you follow.
             </p>
           ) : (
-            <DataTable>
+            <DataTable
+              label="Industry sites"
+              cards={sites.map((s) => (
+                <RowCard
+                  key={s.siteId}
+                  muted={!s.enabled}
+                  lead={
+                    <input
+                      className="chk"
+                      type="checkbox"
+                      aria-label={`Use ${s.name}`}
+                      checked={s.enabled}
+                      disabled={!isAdmin}
+                      onChange={() =>
+                        void run(
+                          () =>
+                            api(cfg, token, 'PATCH', `/newsroom/sites/${s.siteId}`, {
+                              enabled: !s.enabled,
+                            }),
+                          s.enabled ? `${s.name} paused.` : `${s.name} back on.`,
+                        )
+                      }
+                    />
+                  }
+                  title={s.name}
+                  sub={[
+                    s.kind,
+                    s.lastCheckedAt
+                      ? `${s.lastFound ?? 0} found ${shortDate(s.lastCheckedAt)}`
+                      : 'Not checked yet',
+                  ].join(' · ')}
+                  actions={
+                    isAdmin ? (
+                      <button
+                        type="button"
+                        className="src px-2 py-2 font-bold"
+                        aria-label={`Remove ${s.name}`}
+                        onClick={() =>
+                          void run(
+                            () => api(cfg, token, 'DELETE', `/newsroom/sites/${s.siteId}`),
+                            `${s.name} removed.`,
+                          )
+                        }
+                      >
+                        Remove
+                      </button>
+                    ) : undefined
+                  }
+                />
+              ))}
+            >
               <thead>
                 <tr>
                   <th scope="col">Site</th>

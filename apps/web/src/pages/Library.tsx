@@ -2,7 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { download, formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
-import { Button, Card, Chips, DataTable, Icon, Notice, shortDate, Tag } from '../components/ui.tsx';
+import {
+  Button,
+  Card,
+  Chips,
+  DataTable,
+  Icon,
+  Notice,
+  shortDate,
+  Tag,
+  usePhone,
+} from '../components/ui.tsx';
 
 const VISIBILITY_LABEL: Record<NonNullable<FileItem['visibility']>, string> = {
   normal: 'Shared',
@@ -203,9 +213,11 @@ function FileTable({
   /** Phone layout: a list of rows instead of a table. */
   compact?: boolean;
 }) {
+  // The phone list is used for the artist app and on any phone-width screen.
+  const phone = usePhone();
   if (!files) return <p className="src">Loading…</p>;
   if (files.length === 0) return <p className="src pb-5">{empty}</p>;
-  if (compact) {
+  if (compact || phone) {
     return (
       <div className="flex flex-col gap-1.5">
         {files.map((f) => (
@@ -223,7 +235,7 @@ function FileTable({
                 <Icon name="file" size={14} strokeWidth={2.4} />
               </span>
               <span className="min-w-0 flex-1">
-                <b className="block truncate">{f.name}</b>
+                <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.name}</b>
                 <span className="src">
                   {formatSize(f.size)} · {date(f.createdAt)}
                   {columns.map((c) => (

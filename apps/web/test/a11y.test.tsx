@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import axe from 'axe-core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Me } from '../src/lib/api.ts';
 import type { AppConfig } from '../src/lib/config.ts';
 import { Home } from '../src/pages/Home.tsx';
@@ -396,6 +396,50 @@ describe('WCAG 2.2 AA (axe-core): Access & permissions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add team member' }));
     await settle();
     expect(screen.getByRole('form', { name: 'Add team member' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+});
+
+describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
+  const desktop = window.matchMedia;
+  beforeAll(() => {
+    // A 375px phone: phone-width queries match, wider ones don't.
+    window.matchMedia = ((q: string) => ({
+      matches: /max-width:\s*(639|899)px/.test(q),
+      media: q,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+  afterAll(() => {
+    window.matchMedia = desktop;
+  });
+
+  it.each(['Tasks & to-dos', 'Artists & applications', 'Review queue', 'Document library'])(
+    'BMG phone: %s',
+    async (label) => {
+      render(<Home {...props('bmg-admin')} />);
+      await settle();
+      const nav = screen.queryAllByRole('button', { name: new RegExp(`^${label}`) })[0];
+      if (nav) fireEvent.click(nav);
+      await settle();
+      expect(document.querySelector('table.dt:not(.dt-fit)')).toBeNull();
+      expect(await violations()).toEqual([]);
+    },
+  );
+
+  it('BMG phone: workspace To-do tab', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'To-do' }));
+    await settle();
+    expect(screen.getAllByRole('list', { name: 'To-dos' }).length).toBeGreaterThan(0);
     expect(await violations()).toEqual([]);
   });
 });

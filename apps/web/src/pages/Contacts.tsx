@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { Button, Card, Chips, DataTable, Field, Notice, Tag, TextArea } from '../components/ui.tsx';
+import {
+  Button,
+  Card,
+  Chips,
+  DataTable,
+  Field,
+  Notice,
+  QuickLink,
+  RowCard,
+  Tag,
+  TextArea,
+} from '../components/ui.tsx';
 
 /**
  * Contacts (rev 7): one shared list. Blueprint manages it (BMG desktop
@@ -460,24 +471,11 @@ export function Contacts({
           {q || tag ? 'No contacts match.' : 'No contacts yet. Add the first one.'}
         </p>
       ) : compact ? (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {contacts.map((c) => (
-            <li key={c.contactId}>
-              <button
-                type="button"
-                className="flex w-full flex-col items-start rounded-lg border border-input bg-card p-3 text-left"
-                onClick={() => setOpen(c)}
-              >
-                <b>{c.name}</b>
-                <span className="src">
-                  {[c.jobTitle, c.organisation].filter(Boolean).join(' · ') || c.email || c.phone}
-                </span>
-              </button>
-            </li>
-          ))}
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Contacts">
+          {contactCards(contacts, setOpen)}
         </ul>
       ) : (
-        <DataTable>
+        <DataTable label="Contacts" cards={contactCards(contacts, setOpen)}>
           <thead>
             <tr>
               <th scope="col">Name</th>
@@ -519,6 +517,42 @@ export function Contacts({
       </p>
     </Card>
   );
+}
+
+/** Contacts as phone cards: name and role, tags, and one-tap call and email. */
+function contactCards(contacts: Contact[], open: (c: Contact) => void) {
+  return contacts.map((c) => (
+    <RowCard
+      key={c.contactId}
+      title={c.name}
+      status={c.archived ? <Tag>Archived</Tag> : undefined}
+      sub={[c.jobTitle, c.organisation].filter(Boolean).join(' · ') || c.email || c.phone}
+      tags={
+        c.tags.length > 0 ? (
+          <>
+            {c.tags.map((t) => (
+              <Tag key={t}>{t}</Tag>
+            ))}
+          </>
+        ) : undefined
+      }
+      actions={
+        <>
+          {c.phone && (
+            <QuickLink
+              href={`tel:${c.phone.replace(/[^\d+]/g, '')}`}
+              label={`Call ${c.name}`}
+              icon="phone"
+            />
+          )}
+          {c.email && (
+            <QuickLink href={`mailto:${c.email}`} label={`Email ${c.name}`} icon="mail" />
+          )}
+        </>
+      }
+      onOpen={() => open(c)}
+    />
+  ));
 }
 
 /**

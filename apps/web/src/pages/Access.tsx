@@ -8,6 +8,7 @@ import {
   DataTable,
   Field,
   Notice,
+  RowCard,
   Select,
   shortDate,
   Tag,
@@ -284,7 +285,42 @@ export function AccessPage({
             }}
           />
         )}
-        <DataTable>
+        <DataTable
+          label="Team"
+          cards={team.map((m) => (
+            <RowCard
+              key={m.sub}
+              lead={<Avatar name={m.displayName} size={36} />}
+              title={`${m.displayName}${m.sub === me.sub ? ' (you)' : ''}`}
+              status={
+                !m.enabled ? (
+                  <Tag tone="k">Turned off</Tag>
+                ) : m.status === 'FORCE_CHANGE_PASSWORD' ? (
+                  <Tag tone="c">Invited</Tag>
+                ) : (
+                  <Tag tone="n">Active</Tag>
+                )
+              }
+              sub={[
+                ROLE_LABEL[m.role],
+                m.role === 'bmg-admin'
+                  ? 'All artists'
+                  : m.artistIds.length === 0
+                    ? 'No artists yet'
+                    : `${m.artistIds.length} artist${m.artistIds.length === 1 ? '' : 's'}`,
+                m.jobTitle,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              {...(isAdmin
+                ? {
+                    onOpen: () => setEditing(editing === m.sub ? null : m.sub),
+                    openLabel: `Edit ${m.displayName}`,
+                  }
+                : {})}
+            />
+          ))}
+        >
           <thead>
             <tr>
               <th scope="col">Name</th>
