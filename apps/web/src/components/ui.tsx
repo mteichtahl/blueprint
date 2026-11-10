@@ -503,8 +503,10 @@ export function RowCard({
           type="button"
           className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
           onClick={onOpen}
-          aria-label={openLabel}
         >
+          {/* Extra words for screen readers go before the visible text, not instead
+              of it, so voice control users can still say what they see (WCAG 2.5.3). */}
+          {openLabel && <span className="sr-only">{openLabel}: </span>}
           {body}
         </button>
       ) : (
