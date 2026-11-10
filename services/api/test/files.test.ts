@@ -28,12 +28,28 @@ describe('S3 keys', () => {
   it('round-trips quarantine keys and keeps artists apart', () => {
     const k = quarantineKey('artist', fileId, A);
     expect(k).toBe(`artists/${A}/${fileId}`);
-    expect(parseQuarantineKey(k)).toEqual({ scope: 'artist', artistId: A, fileId });
+    expect(parseQuarantineKey(k)).toEqual({ scope: 'artist', artistId: A, fileId, part: 'file' });
     expect(parseQuarantineKey(quarantineKey('library', fileId))).toEqual({
       scope: 'library',
       fileId,
+      part: 'file',
     });
     expect(storedKey('artist', fileId, A)).toBe(`artists/${A}/files/${fileId}`);
+  });
+
+  it('keeps a preview next to its file, under the same prefix', () => {
+    const k = quarantineKey('artist', fileId, A, 'thumb');
+    expect(k).toBe(`artists/${A}/${fileId}.thumb`);
+    expect(parseQuarantineKey(k)).toEqual({ scope: 'artist', artistId: A, fileId, part: 'thumb' });
+    expect(parseQuarantineKey(`library/${fileId}.thumb`)).toEqual({
+      scope: 'library',
+      fileId,
+      part: 'thumb',
+    });
+    expect(storedKey('artist', fileId, A, 'thumb')).toBe(`artists/${A}/files/${fileId}.thumb`);
+    expect(storedKey('library', fileId, undefined, 'thumb')).toBe(`library/${fileId}.thumb`);
+    expect(parseQuarantineKey(`library/${fileId}.thumb.thumb`)).toBeUndefined();
+    expect(parseQuarantineKey(`library/${fileId}.png`)).toBeUndefined();
   });
 
   it('ignores anything that is not an app upload', () => {
