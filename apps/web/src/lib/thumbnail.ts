@@ -63,6 +63,20 @@ async function encode(src: Drawable, w: number, h: number): Promise<Blob | null>
   return null;
 }
 
+/**
+ * A local URL for a picked file. Only a browser-made `blob:` URL is ever put
+ * in an element's src here, so file contents or names can't become markup or a
+ * `javascript:` URL.
+ */
+function localUrl(file: Blob): string {
+  const made = URL.createObjectURL(file);
+  if (!/^blob:/.test(made)) {
+    URL.revokeObjectURL(made);
+    throw new Error('Not a local file URL');
+  }
+  return made;
+}
+
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -74,7 +88,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 async function imageThumb(file: File): Promise<Blob | null> {
-  const url = URL.createObjectURL(file);
+  const url = localUrl(file);
   try {
     const img = await loadImage(url);
     // SVGs without a size report 0; give them one.
@@ -85,12 +99,13 @@ async function imageThumb(file: File): Promise<Blob | null> {
 }
 
 async function videoThumb(file: File): Promise<Blob | null> {
-  const url = URL.createObjectURL(file);
+  const url = localUrl(file);
   const v = document.createElement('video');
   v.muted = true;
   v.playsInline = true;
   v.preload = 'auto';
   try {
+    if (!url.startsWith('blob:')) throw new Error('Not a local file URL');
     v.src = url;
     await new Promise<void>((resolve, reject) => {
       v.onloadeddata = () => resolve();
