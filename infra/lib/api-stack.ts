@@ -1179,13 +1179,25 @@ export class ApiStack extends BmgStack {
     route('GET', '/push/key', notifications);
     route('POST', '/push/subscriptions', notifications);
     route('POST', '/push/unsubscribe', notifications);
-    route('GET', '/library/files', files);
-    route('POST', '/library/files', files);
-    route('GET', '/library/files/{fileId}', files);
-    route('PATCH', '/library/files/{fileId}', files);
-    route('POST', '/library/files/{fileId}/versions', files);
-    route('POST', '/library/files/{fileId}/download', files);
-    route('DELETE', '/library/files/{fileId}', files);
+    // Blueprint's document library and its folders (rev 10): one proxy on the
+    // files function, which routes inside. Seven separate file routes plus
+    // folders would take the stack past its 460-resource guardrail.
+    const library = this.api.root.addResource('library');
+    library
+      .addResource('{proxy+}')
+      .addMethod('ANY', integrationFor(files), { authorizer, requestValidator: validator });
+    // An artist's folders (rev 10): one proxy route on the files function.
+    const artistFolders = this.api.root
+      .getResource('artists')!
+      .getResource('{artistId}')!
+      .addResource('folders');
+    artistFolders.addMethod('ANY', integrationFor(files), {
+      authorizer,
+      requestValidator: validator,
+    });
+    artistFolders
+      .addResource('{proxy+}')
+      .addMethod('ANY', integrationFor(files), { authorizer, requestValidator: validator });
 
     acknowledge(
       this.api,

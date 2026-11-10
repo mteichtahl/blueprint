@@ -13,6 +13,7 @@
  * no threats is it moved to its real home and marked available.
  */
 import { z } from 'zod';
+import type { Grants } from './folders.ts';
 import { guessFileType, type FileTypeInfo } from './type.ts';
 
 export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
@@ -77,6 +78,13 @@ export interface FileRecord {
   versions?: VersionMeta[];
   /** A new version on its way: uploaded to quarantine, waiting for the scan. */
   pendingVersion?: PendingVersion;
+  // ── Folders (rev 10) ──
+  /** The folder it's in; absent at the top of its library. */
+  folderId?: string;
+  /** Its own access settings (see files/folders.ts). */
+  grants?: Grants;
+  /** false: "Don't inherit access from parent folders". */
+  inherit?: boolean;
 }
 
 /** An earlier version of a document (rev 8). */
@@ -326,6 +334,8 @@ export const ArtistUpload = z.object({
   editorIds: EditorIds.default([]),
   /** Upload straight into the asset library. */
   asset: AssetMetaSchema.optional(),
+  /** Upload into this folder (rev 10); it takes the folder's access. */
+  folderId: z.string().regex(FILE_ID_PATTERN, 'No such folder').optional(),
   /**
    * Other artists who can open it: the artists in the chat it was sent to
    * (rev 7). Set by the uploader at upload time.
@@ -349,6 +359,8 @@ export const LibraryUpload = z.object({
   /** Who else can edit it (rev 8). Library documents default to the whole Blueprint team. */
   editAccess: z.enum(EDIT_ACCESS).optional(),
   editorIds: EditorIds.default([]),
+  /** Upload into this folder (rev 10); it takes the folder's access. */
+  folderId: z.string().regex(FILE_ID_PATTERN, 'No such folder').optional(),
 });
 
 /** A new version of a document (rev 8): the file, its preview and a note. */
@@ -716,5 +728,9 @@ export function publicFile(f: FileRecord & { uploadedBy: string }, viewer: Viewe
     createdAt: f.createdAt,
     availableAt: f.availableAt ?? null,
     asset: f.asset ?? null,
+    // ── Folders (rev 10) ──
+    folderId: f.folderId ?? null,
+    /** It has an access setting of its own (the "custom access" icon). */
+    customAccess: !!f.grants || f.inherit === false,
   };
 }
