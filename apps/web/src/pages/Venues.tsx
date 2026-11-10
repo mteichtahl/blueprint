@@ -3,6 +3,14 @@ import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { Button, Card, Chips, DataTable, Field, Notice, Tag, TextArea } from '../components/ui.tsx';
 import { ContactPicker, type Contact } from './Contacts.tsx';
+import {
+  LogoTile,
+  lookupableUrl,
+  primeLogo,
+  toLogoDataUrl,
+  VenueLogo,
+  type VenueLogoRef,
+} from '../components/VenueLogo.tsx';
 
 /**
  * Venues (rev 7): name, capacity, backline (yes/no), website, address, and the
@@ -28,6 +36,9 @@ export interface Venue {
   suburb: string;
   manager: VenuePerson | null;
   booker: VenuePerson | null;
+  /** "Automatically get logo" from the website when none is uploaded (default on). */
+  autoLogo: boolean;
+  logo: VenueLogoRef | null;
   archived: boolean;
   addedByArtist: boolean;
   canEdit: boolean;
@@ -97,7 +108,7 @@ export function VenueForm({
   venue?: Venue;
   isBmg: boolean;
   initialName?: string;
-  onSaved: (v: Venue) => void;
+  onSaved: (v: Venue, warning?: string) => void;
   onCancel: () => void;
   onUseExisting?: (v: Venue) => void;
 }) {
@@ -118,10 +129,162 @@ export function VenueForm({
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
 
+  // ── Logo ──
+  // 'saved': the venue's current logo, unchanged. 'new': a logo to save (uploaded
+  // or found on the website), already shrunk. 'none': no logo.
+  type LogoState =
+    | { kind: 'saved' }
+    | { kind: 'none' }
+    | { kind: 'new'; dataUrl: string; source: 'upload' | 'website'; sourceUrl?: string };
+  const [logo, setLogo] = useState<LogoState>(venue?.logo ? { kind: 'saved' } : { kind: 'none' });
+  const [autoLogo, setAutoLogo] = useState(venue?.autoLogo ?? true);
+  const [looking, setLooking] = useState(false);
+  const [lookupNote, setLookupNote] = useState<string | null>(null);
+  const lookedUpFor = useRef<string | null>(null);
+  const lookupRun = useRef(0);
+  const lookupPromise = useRef<Promise<void> | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const logoSource =
+    logo.kind === 'new' ? logo.source : logo.kind === 'saved' ? venue?.logo?.source : undefined;
+  const uploaded = logoSource === 'upload';
+  const initialSite = lookupableUrl(venue?.website ?? '');
+
+  function lookup(url: string) {
+    const run = ++lookupRun.current;
+    lookedUpFor.current = url;
+    setLooking(true);
+    setLookupNote(null);
+    const p = (async () => {
+      try {
+        const res = await api<{ found: boolean; dataUrl?: string; sourceUrl?: string }>(
+          cfg,
+          token,
+          'POST',
+          '/venues/logo-lookup',
+          { url },
+        );
+        const small = res.found && res.dataUrl ? await toLogoDataUrl(res.dataUrl) : null;
+        if (run !== lookupRun.current) return;
+        if (small) {
+          setLogo({
+            kind: 'new',
+            dataUrl: small,
+            source: 'website',
+            ...(res.sourceUrl ? { sourceUrl: res.sourceUrl } : {}),
+          });
+        } else {
+          // A logo from the old website no longer fits.
+          setLogo((l) =>
+            (l.kind === 'new' && l.source === 'website') ||
+            (l.kind === 'saved' && venue?.logo?.source === 'website')
+              ? { kind: 'none' }
+              : l,
+          );
+          setLookupNote("We couldn't find a logo on that website. You can upload one.");
+        }
+      } catch {
+        if (run === lookupRun.current)
+          setLookupNote("We couldn't get a logo from that website. You can upload one.");
+      } finally {
+        if (run === lookupRun.current) {
+          setLooking(false);
+          lookupPromise.current = null;
+        }
+      }
+    })();
+    lookupPromise.current = p;
+    return p;
+  }
+
+  /** Should we look at the website now? Only when auto is on and nothing was uploaded. */
+  function wantLookup(): string | null {
+    if (!autoLogo || uploaded) return null;
+    const url = lookupableUrl(f.website);
+    if (!url || url === lookedUpFor.current) return null;
+    // Editing: the saved website logo still matches the saved website.
+    if (logo.kind === 'saved' && url === initialSite) return null;
+    return url;
+  }
+
+  // Look a moment after they stop typing the website (or when auto is switched on).
+  useEffect(() => {
+    const url = wantLookup();
+    if (!url) return;
+    const t = setTimeout(() => void lookup(url), 900);
+    return () => clearTimeout(t);
+  }, [f.website, autoLogo, uploaded]);
+
+  function lookNow() {
+    const url = wantLookup();
+    if (url) void lookup(url);
+  }
+
+  async function pickFile(file: File | undefined) {
+    if (!file) return;
+    lookupRun.current++; // an upload wins over any lookup still running
+    setLooking(false);
+    setLookupNote(null);
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      setLogo({ kind: 'new', dataUrl: await toLogoDataUrl(objectUrl), source: 'upload' });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
+
+  function removeLogo() {
+    lookupRun.current++;
+    setLooking(false);
+    // Don't go straight back to the website for the logo they just removed.
+    lookedUpFor.current = lookupableUrl(f.website);
+    setLogo({ kind: 'none' });
+    setLookupNote(null);
+  }
+
+  function toggleAuto(on: boolean) {
+    setAutoLogo(on);
+    setLookupNote(null);
+    if (!on) {
+      lookupRun.current++;
+      setLooking(false);
+      lookedUpFor.current = null;
+      if (logoSource === 'website') setLogo({ kind: 'none' });
+    }
+  }
+
+  async function saveLogo(saved: Venue): Promise<{ venue: Venue; warning?: string }> {
+    try {
+      if (logo.kind === 'new') {
+        const v = await api<Venue>(cfg, token, 'PUT', `/venues/${saved.venueId}/logo`, {
+          dataUrl: logo.dataUrl,
+          source: logo.source,
+          ...(logo.sourceUrl ? { sourceUrl: logo.sourceUrl } : {}),
+        });
+        if (v.logo) primeLogo(v.venueId, v.logo.version, logo.dataUrl);
+        return { venue: v };
+      }
+      if (logo.kind === 'none' && saved.logo)
+        return { venue: await api<Venue>(cfg, token, 'DELETE', `/venues/${saved.venueId}/logo`) };
+    } catch (e) {
+      return {
+        venue: saved,
+        warning: `The venue was saved, but not its logo: ${(e as Error).message}`,
+      };
+    }
+    return { venue: saved };
+  }
+
   async function save() {
     setBusy(true);
     setError(null);
     setExisting(null);
+    // If they save straight after typing the website, finish looking first.
+    const url = wantLookup();
+    if (url) await lookup(url);
+    else if (lookupPromise.current) await lookupPromise.current;
     const body = {
       name: f.name,
       capacity: f.capacity ? Number(f.capacity) : 0,
@@ -131,13 +294,15 @@ export function VenueForm({
       suburb: f.suburb,
       managerContactId: manager?.contactId ?? null,
       bookerContactId: booker?.contactId ?? null,
+      autoLogo,
       ...(isBmg ? { bmgNotes: f.bmgNotes } : {}),
     };
     try {
       const saved = venue
         ? await api<Venue>(cfg, token, 'PATCH', `/venues/${venue.venueId}`, body)
         : await api<Venue>(cfg, token, 'POST', '/venues', body);
-      onSaved(saved);
+      const done = await saveLogo(saved);
+      onSaved(done.venue, done.warning);
     } catch (e) {
       const dup = existingVenue(e);
       if (dup) setExisting(dup);
@@ -156,6 +321,65 @@ export function VenueForm({
           Use {existing.name} instead
         </Button>
       )}
+      <div className="flex flex-col gap-2">
+        <span className="text-[15px] font-bold">Logo</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {logo.kind === 'saved' && venue && !looking ? (
+            <VenueLogo cfg={cfg} token={token} venue={venue} size={72} />
+          ) : (
+            <LogoTile
+              src={logo.kind === 'new' ? logo.dataUrl : null}
+              name={f.name || 'Venue'}
+              size={72}
+              loading={looking}
+              loadingLabel="Looking for a logo on the venue's website"
+            />
+          )}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="ghost" onClick={() => fileInput.current?.click()}>
+                {logo.kind === 'none' ? 'Upload logo' : 'Replace logo'}
+              </Button>
+              {logo.kind !== 'none' && (
+                <Button size="sm" variant="ghost" onClick={removeLogo}>
+                  Remove
+                </Button>
+              )}
+            </div>
+            <span className="src" aria-live="polite">
+              {looking
+                ? "Looking for a logo on the venue's website…"
+                : logoSource === 'website'
+                  ? "Found on the venue's website. Not right? Upload one instead."
+                  : (lookupNote ?? (uploaded ? 'Uploaded' : 'PNG, JPEG, WebP or SVG'))}
+            </span>
+          </div>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+            className="hidden"
+            aria-label="Upload logo"
+            onChange={(e) => void pickFile(e.target.files?.[0])}
+          />
+        </div>
+        <label className="flex items-center gap-3">
+          <input
+            className="switch"
+            type="checkbox"
+            checked={autoLogo}
+            onChange={(e) => toggleAuto(e.target.checked)}
+          />
+          <span className="flex-1">
+            <b className="block">Automatically get logo</b>
+            <span className="src">
+              {uploaded
+                ? 'Off while you use your own upload'
+                : "If you don't upload one, we'll look on the venue's website"}
+            </span>
+          </span>
+        </label>
+      </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Venue name" value={f.name} onChange={set('name')} />
         <Field
@@ -173,6 +397,7 @@ export function VenueForm({
           type="url"
           value={f.website}
           onChange={set('website')}
+          onBlur={lookNow}
           placeholder="https://"
         />
         <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
@@ -228,7 +453,7 @@ export function VenueForm({
           disabled={busy || !f.name.trim() || !capOk}
           onClick={() => void save()}
         >
-          {venue ? 'Save' : 'Add venue'}
+          {busy ? 'Saving…' : venue ? 'Save' : 'Add venue'}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
           Cancel
@@ -335,6 +560,7 @@ export function Venues({
         {actionError && <Notice tone="error">{actionError}</Notice>}
         {v && !editing ? (
           <div className="flex flex-col gap-3">
+            {v.logo && <VenueLogo cfg={cfg} token={token} venue={v} size={88} />}
             <div className="flex flex-wrap gap-1.5">
               <Tag tone="n">{v.capacity ? `Capacity ${v.capacity}` : 'Capacity not set'}</Tag>
               <Tag tone={v.backline ? 'c' : 's'}>Backline: {v.backline ? 'Yes' : 'No'}</Tag>
@@ -392,9 +618,10 @@ export function Venues({
             token={token}
             {...(v ? { venue: v } : {})}
             isBmg={isBmg}
-            onSaved={(saved) => {
+            onSaved={(saved, warning) => {
               setEditing(false);
               setOpen(saved);
+              setActionError(warning ?? null);
               setNote(v ? 'Saved.' : `${saved.name} added to venues.`);
               void reload();
             }}
@@ -476,14 +703,21 @@ export function Venues({
             <li key={v.venueId}>
               <button
                 type="button"
-                className="flex w-full flex-col items-start rounded-lg border border-input bg-card p-3 text-left"
+                className="flex w-full items-center gap-3 rounded-lg border border-input bg-card p-3 text-left"
                 onClick={() => setOpen(v)}
               >
-                <b>{v.name}</b>
-                <span className="src">
-                  {[v.suburb, v.capacity ? `cap. ${v.capacity}` : '', v.backline ? 'backline' : '']
-                    .filter(Boolean)
-                    .join(' · ')}
+                <VenueLogo cfg={cfg} token={token} venue={v} size={40} />
+                <span className="flex min-w-0 flex-col items-start">
+                  <b>{v.name}</b>
+                  <span className="src">
+                    {[
+                      v.suburb,
+                      v.capacity ? `cap. ${v.capacity}` : '',
+                      v.backline ? 'backline' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
                 </span>
               </button>
             </li>
@@ -505,9 +739,16 @@ export function Venues({
             {venues.map((v) => (
               <tr key={v.venueId} className={v.archived ? 'opacity-60' : ''}>
                 <td>
-                  <button type="button" className="font-bold underline" onClick={() => setOpen(v)}>
-                    {v.name}
-                  </button>
+                  <span className="flex items-center gap-2.5">
+                    <VenueLogo cfg={cfg} token={token} venue={v} size={32} />
+                    <button
+                      type="button"
+                      className="font-bold underline"
+                      onClick={() => setOpen(v)}
+                    >
+                      {v.name}
+                    </button>
+                  </span>
                 </td>
                 <td>{v.suburb || '—'}</td>
                 <td>{v.capacity || '—'}</td>

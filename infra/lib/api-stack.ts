@@ -117,6 +117,7 @@ export class ApiStack extends BmgStack {
       description: string,
       extra: Record<string, string> = {},
       bundleAwsSdk = false,
+      timeout?: Duration,
     ) =>
       new BmgFunction(this, name, {
         entry: `services/api/src/handlers/${entry}.ts`,
@@ -124,6 +125,7 @@ export class ApiStack extends BmgStack {
         roleName: `${p}-api-${entry}`,
         prod,
         bundleAwsSdk,
+        ...(timeout ? { timeout } : {}),
         environment: { ...common, ...extra },
       });
 
@@ -303,7 +305,15 @@ export class ApiStack extends BmgStack {
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
     });
     const gigsEvents = fn('Events', 'events', 'artist gigs and Blueprint events');
-    const addressBook = fn('AddressBook', 'address-book', 'shared contacts and venues');
+    // 20 s: "Automatically get logo" fetches the venue's website (8 s budget).
+    const addressBook = fn(
+      'AddressBook',
+      'address-book',
+      'shared contacts and venues',
+      {},
+      false,
+      Duration.seconds(20),
+    );
     const prompts = fn('Prompts', 'prompts', 'Settings - AI prompts: drafts, versions, publish');
     // ── Assistant (design 10, F4) ──
     const aiChat = new BmgFunction(this, 'AiChat', {

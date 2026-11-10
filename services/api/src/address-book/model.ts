@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { patchOf } from '../events/model.ts';
+import type { VenueLogoMeta } from './logo.ts';
 
 /**
  * Contacts and venues (rev 7 change plan, WP1): one shared list for Blueprint
@@ -189,6 +190,11 @@ export const VenueBody = z
     /** The venue manager and booker are people in Contacts. */
     managerContactId: ContactRef.nullable().default(null),
     bookerContactId: ContactRef.nullable().default(null),
+    /**
+     * "Automatically get logo": when no logo was uploaded, look for one on the
+     * venue's website. On by default.
+     */
+    autoLogo: z.boolean().default(true),
     bmgNotes: Text(2000).default(''),
   })
   .strict();
@@ -204,6 +210,8 @@ export interface Venue extends VenueInput {
   updatedAt?: string;
   updatedBy?: string;
   archived?: boolean;
+  /** The logo itself is a separate item (`VENUELOGO#<id>`); this says which version. */
+  logo?: VenueLogoMeta;
 }
 
 /** The person shown on a venue: just enough to call or email them. */
@@ -233,6 +241,15 @@ export function venueFor(
     website: v.website,
     address: v.address,
     suburb: v.suburb,
+    // Venues saved before logos existed have no flag: treat them as on.
+    autoLogo: v.autoLogo ?? true,
+    logo: v.logo
+      ? {
+          version: v.logo.version,
+          source: v.logo.source,
+          ...(v.logo.sourceUrl ? { sourceUrl: v.logo.sourceUrl } : {}),
+        }
+      : null,
     manager: contactCard(v.managerContactId ? contacts.get(v.managerContactId) : undefined),
     booker: contactCard(v.bookerContactId ? contacts.get(v.bookerContactId) : undefined),
     archived: !!v.archived,
