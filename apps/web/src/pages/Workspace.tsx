@@ -216,22 +216,27 @@ export function ArtistWorkspace({
         <Avatar name={artist.displayName} size={64} />
         <div className="flex min-w-[min(300px,100%)] flex-1 flex-col gap-1">
           <span className="eyebrow">Artist workspace</span>
-          <h1 className="t m-0 text-[38px] leading-tight">{artist.displayName}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="t m-0 min-w-0 flex-1 text-[38px] leading-tight">{artist.displayName}</h1>
+            {/* Chat toggle: an icon on the far right of the name line. */}
+            <Button
+              size="sm"
+              variant={chatOpen ? 'navy' : 'default'}
+              className="w-[38px] shrink-0 !px-0"
+              aria-label={chatOpen ? 'Close chat' : `Chat with ${artist.displayName}`}
+              title={chatOpen ? 'Close chat' : 'Chat'}
+              aria-expanded={chatOpen}
+              aria-controls="ws-chat"
+              onClick={() => setChatOpen((v) => !v)}
+            >
+              <Icon name="chat" size={18} />
+            </Button>
+          </div>
           <p className="m-0 text-[17px] text-muted-foreground">
             Joined {shortDate(artist.createdAt)}
             {artist.status ? ` · ${artist.status}` : ''}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant={chatOpen ? 'navy' : 'default'}
-          aria-expanded={chatOpen}
-          aria-controls="ws-chat"
-          onClick={() => setChatOpen((v) => !v)}
-        >
-          <Icon name="chat" size={16} />
-          {chatOpen ? 'Close chat' : 'Chat'}
-        </Button>
       </header>
       <nav
         aria-label="Workspace"
