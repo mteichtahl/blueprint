@@ -710,6 +710,38 @@ describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
     expect(await violations()).toEqual([]);
   });
 
+  it('BMG phone: adding a gig is its own page, not a form above the list', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    await openWorkspace('Gigs');
+    expect(screen.getByRole('heading', { name: 'All gigs' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Add a gig for/ }));
+    await settle();
+    // The list and its filters are gone; the page has its own way back.
+    expect(screen.queryByRole('heading', { name: 'All gigs' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Filter gigs' })).toBeNull();
+    expect(screen.getByRole('button', { name: '← Gigs' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: '← Gigs' }));
+    await settle();
+    expect(screen.getByRole('heading', { name: 'All gigs' })).toBeTruthy();
+  });
+
+  it('artist phone: Plan a gig is its own page with a way back', async () => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    const tabs = screen.getAllByRole('button', { name: /^Gigs/ });
+    fireEvent.click(tabs[tabs.length - 1]!);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Plan a gig' }));
+    await settle();
+    expect(screen.queryByRole('group', { name: 'Show gigs' })).toBeNull();
+    expect(screen.getByRole('button', { name: '← My gigs' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
   it('artist phone: to-dos are cards and edit opens in a panel', async () => {
     render(<Home {...props('artist')} />);
     await settle();

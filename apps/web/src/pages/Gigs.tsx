@@ -14,6 +14,7 @@ import {
   Select,
   Tag,
   TextArea,
+  usePhone,
   WaveLoader,
 } from '../components/ui.tsx';
 import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
@@ -479,6 +480,83 @@ export function GigsTab({
     setSaved(null);
     setEditingId(g.gigId);
   };
+  // On a phone, adding or editing a gig is its own page, not a form above the list.
+  const phone = usePhone();
+  const formOpen = adding || !!editing;
+  useEffect(() => {
+    if (phone && formOpen) window.scrollTo?.({ top: 0 });
+  }, [phone, formOpen, editingId]);
+
+  const form = formOpen && (
+    <div
+      className={
+        phone ? 'flex flex-col gap-4' : 'flex flex-col gap-4 rounded-lg border border-input p-4'
+      }
+    >
+      <GigForm
+        key={editing?.gigId ?? 'new'}
+        cfg={cfg}
+        token={token}
+        artistId={artist.artistId}
+        {...(editing ? { gig: editing } : {})}
+        isArtist={false}
+        onCancel={close}
+        onSaved={() => {
+          setSaved(editing ? `Saved ${editing.title}. ${first} can see the change.` : null);
+          close();
+          void load();
+        }}
+      />
+      {editing?.help?.status === 'open' && (
+        <HelpCard
+          cfg={cfg}
+          token={token}
+          gig={editing}
+          artistName={artist.displayName}
+          onDone={() => void patch(editing, { helpDone: true })}
+        />
+      )}
+      {editing && editing.checklist.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="eyebrow">
+            Gig checklist ({editing.plannedBy === 'artist' ? `${first}'s` : 'Blueprint'})
+          </span>
+          <Checklist gig={editing} onPatch={(b) => void patch(editing, b)} />
+        </div>
+      )}
+      {editing && (
+        <div className="flex flex-col gap-2">
+          <b className="text-[15px]">Tickets, takings and profit</b>
+          <MoneyEditor
+            key={editing.gigId}
+            value={editing.money}
+            onSave={async (money) => {
+              await api(cfg, token, 'PATCH', `/artists/${editing.artistId}/gigs/${editing.gigId}`, {
+                money,
+              });
+              await load();
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  if (phone && formOpen) {
+    return (
+      <Card
+        title={editing ? `Edit ${editing.title}` : `Add a gig for ${first}`}
+        action={
+          <Button size="sm" variant="ghost" onClick={close}>
+            ← Gigs
+          </Button>
+        }
+      >
+        {error && <Notice tone="error">{error}</Notice>}
+        {form}
+      </Card>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -525,60 +603,7 @@ export function GigsTab({
         }
       >
         {saved && <Notice tone="success">{saved}</Notice>}
-        {(adding || editing) && (
-          <div className="flex flex-col gap-4 rounded-lg border border-input p-4">
-            <GigForm
-              key={editing?.gigId ?? 'new'}
-              cfg={cfg}
-              token={token}
-              artistId={artist.artistId}
-              {...(editing ? { gig: editing } : {})}
-              isArtist={false}
-              onCancel={close}
-              onSaved={() => {
-                setSaved(editing ? `Saved ${editing.title}. ${first} can see the change.` : null);
-                close();
-                void load();
-              }}
-            />
-            {editing?.help?.status === 'open' && (
-              <HelpCard
-                cfg={cfg}
-                token={token}
-                gig={editing}
-                artistName={artist.displayName}
-                onDone={() => void patch(editing, { helpDone: true })}
-              />
-            )}
-            {editing && editing.checklist.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="eyebrow">
-                  Gig checklist ({editing.plannedBy === 'artist' ? `${first}'s` : 'Blueprint'})
-                </span>
-                <Checklist gig={editing} onPatch={(b) => void patch(editing, b)} />
-              </div>
-            )}
-            {editing && (
-              <div className="flex flex-col gap-2">
-                <b className="text-[15px]">Tickets, takings and profit</b>
-                <MoneyEditor
-                  key={editing.gigId}
-                  value={editing.money}
-                  onSave={async (money) => {
-                    await api(
-                      cfg,
-                      token,
-                      'PATCH',
-                      `/artists/${editing.artistId}/gigs/${editing.gigId}`,
-                      { money },
-                    );
-                    await load();
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        )}
+        {form}
         {gigs === null ? (
           <WaveLoader />
         ) : (
@@ -736,6 +761,41 @@ export function AllGigs({
   const [editing, setEditing] = useState<Gig | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
+  const phone = usePhone();
+  useEffect(() => {
+    if (phone && editing) window.scrollTo?.({ top: 0 });
+  }, [phone, editing]);
+  const form = editing && (
+    <GigForm
+      key={editing.gigId}
+      cfg={cfg}
+      token={token}
+      artistId={editing.artistId}
+      gig={editing}
+      isArtist={false}
+      onCancel={() => setEditing(null)}
+      onSaved={() => {
+        setSaved(`Saved ${editing.title}.`);
+        setEditing(null);
+        void load();
+      }}
+    />
+  );
+  // On a phone, editing a gig is its own page, not a form above the list.
+  if (phone && editing) {
+    return (
+      <Card
+        title={`Edit ${editing.title}`}
+        action={
+          <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+            ← Artist gigs
+          </Button>
+        }
+      >
+        {form}
+      </Card>
+    );
+  }
   return (
     <Card
       title="Artist gigs"
@@ -743,22 +803,7 @@ export function AllGigs({
     >
       {error && <Notice tone="error">{error}</Notice>}
       {saved && <Notice tone="success">{saved}</Notice>}
-      {editing && (
-        <GigForm
-          key={editing.gigId}
-          cfg={cfg}
-          token={token}
-          artistId={editing.artistId}
-          gig={editing}
-          isArtist={false}
-          onCancel={() => setEditing(null)}
-          onSaved={() => {
-            setSaved(`Saved ${editing.title}.`);
-            setEditing(null);
-            void load();
-          }}
-        />
-      )}
+      {form}
       {gigs === null ? (
         <WaveLoader />
       ) : (
@@ -805,6 +850,11 @@ export function ArtistGigs({
     const gig = editing === 'new' ? undefined : editing;
     return (
       <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+            ← My gigs
+          </Button>
+        </div>
         <h2 className="t text-[22px]">{gig ? gig.title : 'Plan a gig'}</h2>
         <GigForm
           cfg={cfg}
