@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type ArtistSummary, type Me, type Todo } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
+import { EmojiPicker } from '../components/EmojiPicker.tsx';
 import { formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
 import { inboxChannels, subscribeInbox } from '../lib/realtime.ts';
 import { Avatar, Icon } from '../components/ui.tsx';
@@ -161,13 +162,6 @@ const nameColour = (s: string) =>
 
 const isGroupish = (t: ChatType) => t === 'group' || t === 'announcement';
 const firstName = (s: string) => s.split(' ')[0];
-
-const EMOJI = [
-  '😀', '😂', '🥹', '😍', '😎', '🤩', '🥳', '😅', '😉', '🙏',
-  '👍', '👏', '🙌', '💪', '🔥', '✨', '🎉', '❤️', '💯', '👀',
-  '🤔', '😮', '😢', '😤', '🤘', '🎸', '🎤', '🎧', '🎹', '🥁',
-  '🎶', '🎵', '📅', '📍', '✅', '⏰', '📝', '💡', '🚀', '☕',
-]; // prettier-ignore
 
 /** Where an attachment card opens: a view id Home.tsx understands. */
 export function attachmentView(a: ChatAttachment, isBmg: boolean): string {
@@ -1851,21 +1845,20 @@ function Conversation({
             </div>
           )}
           {emoji && (
-            <div className="wa-emoji" role="dialog" aria-label="Emoji">
-              {EMOJI.map((e) => (
-                <button
-                  key={e}
-                  type="button"
-                  aria-label={e}
-                  onClick={() => {
-                    setText((t) => t + e);
-                    inputRef.current?.focus();
-                  }}
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
+            <EmojiPicker
+              onPick={(e) => {
+                // Insert at the cursor, not just at the end.
+                const el = inputRef.current;
+                const at = el?.selectionStart ?? null;
+                setText((t) =>
+                  at === null ? t + e : t.slice(0, at) + e + t.slice(el!.selectionEnd ?? at),
+                );
+                requestAnimationFrame(() => {
+                  if (el && at !== null) el.setSelectionRange(at + e.length, at + e.length);
+                  el?.focus();
+                });
+              }}
+            />
           )}
           {share && (
             <SharePanel
