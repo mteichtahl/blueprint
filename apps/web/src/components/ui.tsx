@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -188,7 +189,10 @@ export function Avatar({
 export function Bar({ pct, color = '#011935' }: { pct: number; color?: string }) {
   return (
     <div className="bar" role="presentation">
-      <div style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }} />
+      <div
+        data-ink={color === '#011935' || undefined}
+        style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }}
+      />
     </div>
   );
 }
@@ -267,6 +271,8 @@ const ICONS = {
   chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   calendar: 'M4 5h16v15H4zM4 10h16M9 3v4M15 3v4',
   mail: 'M4 5h16v14H4zM4 7l8 6 8-6',
+  phone:
+    'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
   plug: 'M9 2v6M15 2v6M6 8h12v4a6 6 0 01-12 0zM12 18v4',
   lock: 'M5 11h14v10H5zM8 11V7a4 4 0 018 0v4',
   users:
@@ -319,8 +325,54 @@ export function Icon({
   );
 }
 
-/** Data table wrapper: sits flush inside a card, as in the canvas (.dt). */
-export function DataTable({ children }: { children: ReactNode }) {
+/** True below the phone breakpoint (640px). Tables become row cards there. */
+export function usePhone(query = '(max-width: 639px)') {
+  const get = () => typeof window !== 'undefined' && window.matchMedia?.(query).matches === true;
+  const [phone, setPhone] = useState(get);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return;
+    const on = () => setPhone(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [query]);
+  return phone;
+}
+
+/**
+ * Data table wrapper: sits flush inside a card, as in the canvas (.dt).
+ * On phones, pass `cards` (one <RowCard> per row) and they replace the table,
+ * so nobody scrolls sideways to read a row.
+ */
+export function DataTable({
+  children,
+  cards,
+  label,
+  fit = false,
+}: {
+  children: ReactNode;
+  /** The same rows as <RowCard>s, shown instead of the table on phones. */
+  cards?: ReactNode;
+  /** What the list is, for screen readers ("To-dos"). */
+  label?: string;
+  /** Two-column tables (label and number): on phones they keep their shape,
+      fitted to the screen width, with long labels wrapping. */
+  fit?: boolean;
+}) {
+  const phone = usePhone();
+  if (phone && cards !== undefined)
+    return (
+      <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label={label}>
+        {cards}
+      </ul>
+    );
+  if (phone && fit)
+    return (
+      <div className="-mx-5">
+        <table className="dt dt-fit">{children}</table>
+      </div>
+    );
   return (
     // A wide table scrolls in its own box instead of widening the page: w-0 +
     // min-width keep its width out of its parents' size, and `relative` keeps
@@ -328,6 +380,107 @@ export function DataTable({ children }: { children: ReactNode }) {
     <div className="relative -mx-5 w-0 min-w-[calc(100%+2.5rem)] overflow-x-auto">
       <table className="dt">{children}</table>
     </div>
+  );
+}
+
+/**
+ * One table row as a phone card: up to three lines (title with a status on the
+ * right, the key context, then a few tags). Tapping the card opens the row;
+ * controls that act straight away (a tick box, call, a switch) sit outside
+ * that tap area so they never open it by mistake.
+ */
+export function RowCard({
+  title,
+  sub,
+  status,
+  tags,
+  lead,
+  actions,
+  onOpen,
+  openLabel,
+  accent = false,
+  muted = false,
+}: {
+  title: ReactNode;
+  sub?: ReactNode;
+  /** A tag on the right of the title line. */
+  status?: ReactNode;
+  /** Small tags on the third line. */
+  tags?: ReactNode;
+  /** Left of the card: a tick box, date block, avatar or file type. */
+  lead?: ReactNode;
+  /** Right of the card: buttons that act at once (call, email, a switch, a menu). */
+  actions?: ReactNode;
+  onOpen?: () => void;
+  /** Screen-reader name for the open action, when the title alone is unclear. */
+  openLabel?: string;
+  /** Coral left edge (overdue, needs help). */
+  accent?: boolean;
+  /** Done or inactive: the title is struck through and greyed. */
+  muted?: boolean;
+}) {
+  const body = (
+    <>
+      <span className="flex items-start gap-2">
+        <b
+          className={`min-w-0 flex-1 text-[15px] leading-snug ${muted ? 'text-muted-foreground line-through' : ''}`}
+        >
+          {title}
+        </b>
+        {status && <span className="flex flex-none items-center">{status}</span>}
+      </span>
+      {sub && <span className="src block">{sub}</span>}
+      {tags && <span className="mt-1 flex flex-wrap items-center gap-1.5">{tags}</span>}
+    </>
+  );
+  return (
+    <li
+      className={`flex min-h-[52px] items-start gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs ${accent ? 'border-l-[3px] border-l-accent' : ''}`}
+    >
+      {lead && <span className="flex flex-none items-center self-start pt-0.5">{lead}</span>}
+      {onOpen ? (
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
+          onClick={onOpen}
+          aria-label={openLabel}
+        >
+          {body}
+        </button>
+      ) : (
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">{body}</span>
+      )}
+      {actions && (
+        <span className="flex flex-none items-center gap-1.5 self-center">{actions}</span>
+      )}
+    </li>
+  );
+}
+
+/** A small square block for a date on a phone card ("DEC / 05"). */
+export function DateBlock({ date }: { date: string }) {
+  const d = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return (
+    <span className="flex w-10 flex-none flex-col items-center rounded-md bg-secondary py-1 leading-none">
+      <span className="text-[11px] font-bold tracking-wide text-muted-foreground uppercase">
+        {d.toLocaleDateString('en-AU', { month: 'short' })}
+      </span>
+      <span className="t text-[17px]">{d.getDate()}</span>
+    </span>
+  );
+}
+
+/** A 40px round icon link for a card's quick actions (call, email). */
+export function QuickLink({ href, label, icon }: { href: string; label: string; icon: IconName }) {
+  return (
+    <a
+      href={href}
+      aria-label={label}
+      className="flex size-10 items-center justify-center rounded-lg border border-input bg-card text-foreground hover:bg-secondary"
+    >
+      <Icon name={icon} size={18} />
+    </a>
   );
 }
 

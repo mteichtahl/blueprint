@@ -9,7 +9,7 @@ import {
   type ConnectorApp,
   type ConnectorCard,
 } from '../lib/connectors.ts';
-import { Button, Card, DataTable, Field, Notice, Select, Tag } from '../components/ui.tsx';
+import { Button, Card, DataTable, Field, Notice, RowCard, Select, Tag } from '../components/ui.tsx';
 
 /** Screens: X-Connectors (Blueprint) and P-Connectors (artist "My connectors"). */
 
@@ -288,6 +288,14 @@ const CELL: Record<CellState, [tone: 'n' | 's' | 'k' | 'c', label: string]> = {
   error: ['c', 'Sync problem'],
 };
 
+const PLATFORM = {
+  instagram: 'Instagram',
+  facebook: 'Facebook',
+  tiktok: 'TikTok',
+  spotify: 'Spotify',
+  gcal: 'Calendar',
+} as const;
+
 export function BmgConnectors({
   cfg,
   token,
@@ -464,7 +472,47 @@ export function BmgConnectors({
         {artists.length === 0 ? (
           <p className="src">No artists yet.</p>
         ) : (
-          <DataTable>
+          <DataTable
+            label="Artists' connectors"
+            cards={artists.map((a) => {
+              const keys = ['instagram', 'facebook', 'tiktok', 'spotify', 'gcal'] as const;
+              const on = keys.filter((k) => a.cells[k] === 'on').length;
+              return (
+                <RowCard
+                  key={a.artistId}
+                  title={a.displayName}
+                  status={<span className="src">{on}/5 on</span>}
+                  tags={keys.map((k) => (
+                    <Tag key={k} tone={CELL[a.cells[k]][0]}>
+                      {PLATFORM[k]}
+                      {a.cells[k] === 'on' || a.cells[k] === 'off'
+                        ? ''
+                        : `: ${CELL[a.cells[k]][1]}`}
+                      <span className="sr-only"> {CELL[a.cells[k]][1]}</span>
+                    </Tag>
+                  ))}
+                  actions={
+                    on < 5 ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`Send ${a.displayName} a reminder`}
+                        onClick={() =>
+                          void act(
+                            () =>
+                              api(cfg, token, 'POST', `/artists/${a.artistId}/connectors/remind`),
+                            `Reminder sent to ${a.displayName}`,
+                          )
+                        }
+                      >
+                        Remind
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              );
+            })}
+          >
             <thead>
               <tr>
                 <th scope="col">Artist</th>

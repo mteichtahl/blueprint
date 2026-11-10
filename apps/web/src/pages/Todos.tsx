@@ -19,6 +19,7 @@ import {
   Field,
   Icon,
   Notice,
+  RowCard,
   Select,
   shortDate,
   Tag,
@@ -66,7 +67,7 @@ const REMINDER_SHORT: Record<Reminder, string> = {
   '7d': '7 days before',
 };
 
-function DueTag({ t }: { t: Todo }) {
+function DueTag({ t, className = '' }: { t: Todo; className?: string }) {
   if (!t.due)
     return (
       <span className="inline-flex items-center gap-1.5">
@@ -75,7 +76,7 @@ function DueTag({ t }: { t: Todo }) {
       </span>
     );
   return (
-    <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-1.5 whitespace-nowrap">
+    <span className={`inline-flex flex-wrap items-center gap-1.5 whitespace-nowrap ${className}`}>
       <Tag tone={!t.done && t.due < today() ? 'c' : 's'}>
         {shortDate(t.due)}
         {t.dueTime ? ` · ${t.dueTime}` : ''}
@@ -452,8 +453,34 @@ function TodoRows({
   onEdit: (t: Todo) => void;
   artistName?: (id: string) => string;
 }) {
+  const overdue = (t: Todo) => !t.done && !!t.due && t.due < today();
   return (
-    <DataTable>
+    <DataTable
+      label="To-dos"
+      cards={todos.map((t) => (
+        <RowCard
+          key={t.todoId}
+          accent={overdue(t)}
+          muted={t.done}
+          lead={
+            <input
+              className="chk"
+              type="checkbox"
+              checked={t.done}
+              onChange={() => onToggle(t)}
+              aria-label={`Mark "${t.title}" done`}
+            />
+          }
+          title={t.title}
+          sub={[artistName?.(t.artistId), SOURCE_LABEL[t.source], t.bmgOnly ? 'BMG only' : '']
+            .filter(Boolean)
+            .join(' · ')}
+          tags={t.due ? <DueTag t={t} /> : undefined}
+          onOpen={() => onEdit(t)}
+          openLabel={`Edit "${t.title}"`}
+        />
+      ))}
+    >
       <thead>
         <tr>
           <th scope="col" className="w-7">
@@ -674,7 +701,7 @@ function PhoneTodos({
             {t.notes ? `${t.source !== 'artist' ? ' · ' : ''}${t.notes}` : ''}
           </span>
         </button>
-        {t.due && <DueTag t={t} />}
+        {t.due && <DueTag t={t} className="ml-auto justify-end" />}
       </div>
     );
   return (
@@ -725,9 +752,13 @@ export function AllTodos({
         </summary>
         <div className="mt-3.5 flex flex-wrap items-center gap-3">
           <Chips label="Quick filters" value={filter} onChange={setFilter} options={TODO_FILTERS} />
-          <label className="ml-auto">
+          <label className="ml-auto max-sm:ml-0 max-sm:w-full">
             <span className="sr-only">Artist</span>
-            <select className="dd" value={artistId} onChange={(e) => setArtistId(e.target.value)}>
+            <select
+              className="dd max-sm:w-full"
+              value={artistId}
+              onChange={(e) => setArtistId(e.target.value)}
+            >
               <option value="">All artists</option>
               {artists.map((a) => (
                 <option key={a.artistId} value={a.artistId}>
