@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   changesOldestFirst,
@@ -50,5 +51,12 @@ describe('plan PDF', () => {
     ];
     expect(changesOldestFirst(newestFirst).map((x) => x.version)).toEqual([1, 2, 3]);
     expect(newestFirst[0]!.version).toBe(3);
+  });
+
+  it('ships the official logo where the PDF and emails look for it', () => {
+    const png = readFileSync(new URL(`../public${LOGO_PATH}`, import.meta.url));
+    expect(png.subarray(1, 4).toString()).toBe('PNG');
+    // The official file is 2000×2000 (width and height sit in the IHDR chunk).
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([2000, 2000]);
   });
 });
