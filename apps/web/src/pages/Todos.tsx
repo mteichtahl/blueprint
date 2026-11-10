@@ -24,6 +24,7 @@ import {
   shortDate,
   Tag,
   TextArea,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 const SOURCE_LABEL: Record<Todo['source'], string> = {
@@ -322,7 +323,7 @@ function TodoThread({
       </div>
       {error && <Notice tone="error">{error}</Notice>}
       {thread === null ? (
-        <p className="src">Loading…</p>
+        <WaveLoader />
       ) : thread.length === 0 ? (
         <p className="src">No comments yet. Ask a question or give an update.</p>
       ) : (
@@ -617,7 +618,7 @@ export function ArtistTodos({
       {error && <Notice tone="error">{error}</Notice>}
       {ed.saved && <Notice tone="success">{ed.saved}</Notice>}
       {!todos ? (
-        <p className="src">Loading…</p>
+        <WaveLoader />
       ) : todos.length === 0 ? (
         <p className="src">Nothing here.</p>
       ) : (
@@ -672,7 +673,7 @@ function PhoneTodos({
   saved: string | null;
   add: React.ReactNode;
 }) {
-  if (!todos) return <p className="src">Loading…</p>;
+  if (!todos) return <WaveLoader />;
   const fromBmg = todos.filter((t) => t.source !== 'artist');
   const own = todos.filter((t) => t.source === 'artist');
   const item = (t: Todo, coral: boolean) =>
@@ -771,7 +772,7 @@ export function AllTodos({
         {error && <Notice tone="error">{error}</Notice>}
         <div className="mt-3.5">
           {!todos ? (
-            <p className="src">Loading…</p>
+            <WaveLoader />
           ) : todos.length === 0 ? (
             <p className="src">Nothing here.</p>
           ) : (

@@ -12,6 +12,7 @@ import {
   shortDate,
   Tag,
   usePhone,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 const VISIBILITY_LABEL: Record<NonNullable<FileItem['visibility']>, string> = {
@@ -215,7 +216,7 @@ function FileTable({
 }) {
   // The phone list is used for the artist app and on any phone-width screen.
   const phone = usePhone();
-  if (!files) return <p className="src">Loading…</p>;
+  if (!files) return <WaveLoader />;
   if (files.length === 0) return <p className="src pb-5">{empty}</p>;
   if (compact || phone) {
     return (

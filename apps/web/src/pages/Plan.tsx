@@ -14,7 +14,7 @@ import {
 import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
 import { MarkdownEditor, MarkdownView } from '../components/Markdown.tsx';
-import { Bar, Button, Card, Field, Notice, Tag, TextArea } from '../components/ui.tsx';
+import { Bar, Button, Card, Field, Notice, Tag, TextArea, WaveLoader } from '../components/ui.tsx';
 import { PlanTimeline } from '../components/PlanTimeline.tsx';
 
 const MEASURES: MeasureId[] = ['M1', 'M2', 'M3', 'M4'];
@@ -136,12 +136,7 @@ export function PlanTab({
     }
   }
 
-  if (!data)
-    return error ? (
-      <Notice tone="error">{error}</Notice>
-    ) : (
-      <p className="text-sm text-muted-foreground">Loading…</p>
-    );
+  if (!data) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
 
   const editing = draft !== null;
   // No plan yet: nothing but the button (BMG), or a line saying so (artist).
@@ -401,7 +396,7 @@ function PlanHistory({
   return (
     <Card title={<span className="eyebrow">History</span>}>
       {error && <Notice tone="error">{error}</Notice>}
-      {!changes && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {!changes && !error && <WaveLoader />}
       {changes?.length === 0 && (
         <p className="src m-0">
           No changes recorded yet. Changes are recorded from now on, each time the plan is saved.
@@ -943,7 +938,7 @@ export function PlanStages({
     }
   }
 
-  if (!data) return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!data) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
 
   return (
     <div className="flex flex-wrap items-start gap-5">

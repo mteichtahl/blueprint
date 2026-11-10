@@ -1,3 +1,4 @@
+import { WaveLoader } from './ui.tsx';
 import { useEffect, useMemo, useState } from 'react';
 
 /**
@@ -191,7 +192,7 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
       )}
       <div className="wa-emoji">
         {error && <p className="src col-span-full">Emoji didn&apos;t load. Try again.</p>}
-        {!all && !error && <p className="src col-span-full">Loading emoji…</p>}
+        {!all && !error && <WaveLoader label="Loading emoji" className="col-span-full" />}
         {all && !q.trim() && group === 'recent' && recent.length === 0 && (
           <p className="src col-span-full">Emoji you use show up here.</p>
         )}

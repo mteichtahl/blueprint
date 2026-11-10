@@ -11,6 +11,7 @@ import {
   PageHeader,
   RowCard,
   Tag,
+  WaveLoader,
 } from '../components/ui.tsx';
 import { aud, PRESET_COSTS } from '../components/Money.tsx';
 import { VenuePicker, type Venue } from './Venues.tsx';
@@ -160,7 +161,7 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
           )}
         </Card>
       )}
-      {events === null && <p className="src">Loading…</p>}
+      {events === null && <WaveLoader />}
       {events?.length === 0 && !creating && (
         <>
           <PageHeader eyebrow="BMG only · Events" title="Events" actions={actions} />
@@ -394,7 +395,7 @@ function EventDetail({
       setAdding(null);
     });
 
-  if (!d) return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!d) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   const { event: e, summary: s } = d;
   const days = daysTo(e.date);
 

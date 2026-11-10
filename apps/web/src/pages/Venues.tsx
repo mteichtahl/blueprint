@@ -11,6 +11,7 @@ import {
   RowCard,
   Tag,
   TextArea,
+  WaveLoader,
 } from '../components/ui.tsx';
 import { ContactPicker, type Contact } from './Contacts.tsx';
 import {
@@ -702,7 +703,7 @@ export function Venues({
         )}
       </div>
       {venues === null ? (
-        <p className="src">Loading…</p>
+        <WaveLoader />
       ) : venues.length === 0 ? (
         <p className="src">
           {q || backline || minCapacity ? 'No venues match.' : 'No venues yet. Add the first one.'}

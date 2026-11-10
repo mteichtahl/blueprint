@@ -22,6 +22,7 @@ import {
   RowCard,
   shortDate,
   Tag,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 const PRIORITY_LABEL: Record<Priority, string> = { high: 'High', medium: 'Medium', low: 'Low' };
@@ -348,7 +349,7 @@ function SubmissionTable({
   onOpen: (s: SubmissionSummary) => void;
   empty: string;
 }) {
-  if (!subs) return <p className="src">Loading…</p>;
+  if (!subs) return <WaveLoader />;
   if (subs.length === 0) return <p className="src pb-5">{empty}</p>;
   return (
     <>
@@ -470,8 +471,7 @@ function SubmissionView({
     }
   }
 
-  if (!sub)
-    return error ? <Notice tone="error">{error}</Notice> : <p className="text-sm">Loading…</p>;
+  if (!sub) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   const open = sub.status === 'open';
   const fileName = (id: string) => files.find((f) => f.fileId === id)?.name ?? 'File';
   const phase = phases.find((p) => p.id === sub.phaseId)?.name;

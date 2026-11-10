@@ -4,7 +4,7 @@ import type { AppConfig } from '../lib/config.ts';
 import type { Preferences } from '../lib/notifications.ts';
 import { disablePush, enablePush, pushSupported } from '../lib/push.ts';
 import type { Theme } from '../components/Shell.tsx';
-import { Button, Card, Field, Notice } from '../components/ui.tsx';
+import { Button, Card, Field, Notice, WaveLoader } from '../components/ui.tsx';
 
 /**
  * Profile & preferences (screens doc): notifications (in app, push, email),
@@ -56,7 +56,7 @@ export function Profile({
       <AboutYou cfg={cfg} token={token} me={me} userName={userName} onJobTitle={onJobTitle} />
       <Card className="flex-[1_1_320px] self-stretch" title="Notifications">
         {!prefs ? (
-          <p className="src">Loading…</p>
+          <WaveLoader />
         ) : (
           <div className="flex flex-col">
             <label className={row}>
