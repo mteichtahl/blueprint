@@ -96,6 +96,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
   const [gigHelp, setGigHelp] = useState(0);
   const [asking, setAsking] = useState(false);
+  // A document opened from a Studio HQ card shows its page in the library (rev 8).
+  const [libraryFile, setLibraryFile] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [roster, queue, help] = await Promise.all([
@@ -241,6 +243,10 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           openReviews={openReviews}
           conversations={inbox.conversations ?? []}
           onNavigate={setView}
+          onOpenFile={(id) => {
+            setLibraryFile(id);
+            setView('library');
+          }}
         />
       )}
       {view === 'artists' && (
@@ -431,6 +437,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             isBmg
             isAdmin={me.role === 'bmg-admin'}
             artists={artists}
+            openFileId={libraryFile}
+            onClosed={() => setLibraryFile(null)}
           />
         </>
       )}
@@ -461,6 +469,7 @@ function StudioHq({
   openReviews,
   conversations,
   onNavigate,
+  onOpenFile,
 }: {
   cfg: AppConfig;
   token: string;
@@ -469,6 +478,8 @@ function StudioHq({
   openReviews: SubmissionSummary[];
   conversations: ConversationSummary[];
   onNavigate: (v: string) => void;
+  /** Open a document's detail page (rev 8). */
+  onOpenFile: (fileId: string) => void;
 }) {
   const [plans, setPlans] = useState<Record<string, PlanResponse>>({});
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -709,7 +720,12 @@ function StudioHq({
         >
           {files.length === 0 && <p className="src">The library is empty.</p>}
           {files.slice(0, 4).map((f) => (
-            <div key={f.fileId} className="li">
+            <button
+              key={f.fileId}
+              type="button"
+              className="li w-full text-left hover:bg-[#F6F8FA] dark:hover:bg-secondary"
+              onClick={() => onOpenFile(f.fileId)}
+            >
               <FileThumb
                 src={f.thumbnailUrl}
                 kind={f.fileType.kind}
@@ -725,7 +741,7 @@ function StudioHq({
                     ? `${f.sharedWithArtistIds.length} artist${f.sharedWithArtistIds.length === 1 ? '' : 's'}`
                     : 'BMG only'}
               </span>
-            </div>
+            </button>
           ))}
         </Card>
       </div>
@@ -959,6 +975,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const [avatar, setAvatar] = useState(me.avatar ?? null);
   const [asking, setAsking] = useState(false);
+  // A document opened from Home shows its page in the library (rev 8).
+  const [libraryFile, setLibraryFile] = useState<string | null>(null);
   const notes = useNotifications(cfg, token, me.sub);
   const [chatTarget, setChatTarget] = useState<string | null>(null);
   useDeepLink((link) => {
@@ -998,6 +1016,16 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
     contacts: { eyebrow: 'Shared by Blueprint', title: 'Contacts & venues' },
   };
   const [libTab, setLibTab] = useState<LibraryKind>('all');
+  // Which list has a document page open; the rest of the library is hidden meanwhile.
+  const [docOpen, setDocOpen] = useState<'mine' | 'shared' | null>(null);
+  const mineOpen = useCallback(
+    (o: boolean) => setDocOpen((d) => (o ? 'mine' : d === 'mine' ? null : d)),
+    [],
+  );
+  const sharedOpen = useCallback(
+    (o: boolean) => setDocOpen((d) => (o ? 'shared' : d === 'shared' ? null : d)),
+    [],
+  );
   const [bookTab, setBookTab] = useState<'contacts' | 'venues'>('contacts');
   const back =
     view === 'brand' ||
@@ -1070,7 +1098,19 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
         />
       }
     >
-      {view === 'home' && <ArtistHome cfg={cfg} token={token} me={me} onNavigate={setView} />}
+      {view === 'home' && (
+        <ArtistHome
+          cfg={cfg}
+          token={token}
+          me={me}
+          onNavigate={setView}
+          onOpenFile={(id) => {
+            setLibraryFile(id);
+            setLibTab('all');
+            setView('library');
+          }}
+        />
+      )}
       {view === 'chat' && (
         <ArtistChats
           cfg={cfg}
@@ -1083,7 +1123,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       {view === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artistId} isBmg={false} />}
       {view === 'library' && (
         <>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={`flex flex-wrap items-center gap-2 ${docOpen ? 'hidden' : ''}`}>
             <Chips
               label="Type"
               value={libTab}
@@ -1096,15 +1136,30 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
           </div>
           {libTab !== 'assets' ? (
             <>
-              <ArtistFiles
-                cfg={cfg}
-                token={token}
-                artistId={artistId}
-                isBmg={false}
-                kind={libTab}
-              />
-              <div className="eyebrow pt-2 text-muted-foreground">Shared by Blueprint</div>
-              <Library cfg={cfg} token={token} isBmg={false} artists={[]} />
+              <div className={docOpen === 'shared' ? 'hidden' : 'contents'}>
+                <ArtistFiles
+                  cfg={cfg}
+                  token={token}
+                  artistId={artistId}
+                  isBmg={false}
+                  kind={libTab}
+                  onOpenChange={mineOpen}
+                />
+              </div>
+              <div className={docOpen === 'mine' ? 'hidden' : 'contents'}>
+                {!docOpen && (
+                  <div className="eyebrow pt-2 text-muted-foreground">Shared by Blueprint</div>
+                )}
+                <Library
+                  cfg={cfg}
+                  token={token}
+                  isBmg={false}
+                  artists={[]}
+                  openFileId={libraryFile}
+                  onClosed={() => setLibraryFile(null)}
+                  onOpenChange={sharedOpen}
+                />
+              </div>
             </>
           ) : (
             <AssetLibrary
@@ -1216,11 +1271,14 @@ function ArtistHome({
   token,
   me,
   onNavigate,
+  onOpenFile,
 }: {
   cfg: AppConfig;
   token: string;
   me: Me;
   onNavigate: (v: ArtistView) => void;
+  /** Open a shared document's page (rev 8). */
+  onOpenFile: (fileId: string) => void;
 }) {
   const artistId = me.artistId!;
   const [plan, setPlan] = useState<PlanResponse | null>(null);
@@ -1329,7 +1387,12 @@ function ArtistHome({
         </div>
         {shared.length === 0 && <p className="src">Nothing shared yet.</p>}
         {shared.slice(0, 3).map((f) => (
-          <div key={f.fileId} className="flex items-center gap-3 text-[15px]">
+          <button
+            key={f.fileId}
+            type="button"
+            className="flex items-center gap-3 text-left text-[15px]"
+            onClick={() => onOpenFile(f.fileId)}
+          >
             <FileThumb
               src={f.thumbnailUrl}
               kind={f.fileType.kind}
@@ -1338,7 +1401,7 @@ function ArtistHome({
               size={32}
             />
             <span className="truncate">{f.displayName}</span>
-          </div>
+          </button>
         ))}
       </section>
       <section className="card gap-2.5">

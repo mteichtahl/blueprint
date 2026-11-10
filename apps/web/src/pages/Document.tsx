@@ -1,0 +1,624 @@
+import { useCallback, useEffect, useState } from 'react';
+import { api, type ArtistSummary } from '../lib/api.ts';
+import type { AppConfig } from '../lib/config.ts';
+import {
+  download,
+  EDIT_ACCESS_LABEL,
+  formatSize,
+  type EditAccess,
+  type FileItem,
+  type Person,
+} from '../lib/files.ts';
+import { FileThumb } from '../components/FileThumb.tsx';
+import {
+  Avatar,
+  Button,
+  Card,
+  Field,
+  Icon,
+  Notice,
+  shortDate,
+  Tag,
+  WaveLoader,
+} from '../components/ui.tsx';
+
+/**
+ * A document's own pages (rev 8): tapping a document anywhere opens its
+ * **detail** page (preview, owner, who can see and edit it, Download and
+ * Edit). **Edit** is a page of its own: the name, who can see it, who can
+ * edit it, handing it to someone else, and Delete at the bottom.
+ */
+
+const VISIBILITY_LABEL: Record<NonNullable<FileItem['visibility']>, string> = {
+  normal: 'The artist and Blueprint',
+  'bmg-only': 'Blueprint only',
+  private: 'Only the artist (private)',
+};
+const SHARING_LABEL: Record<NonNullable<FileItem['sharing']>, string> = {
+  'bmg-only': 'Blueprint only',
+  'all-artists': 'Blueprint and all artists',
+  selected: 'Blueprint and chosen artists',
+};
+
+export interface DocumentPageProps {
+  cfg: AppConfig;
+  token: string;
+  /** The collection the document lives in: `/library/files` or `/artists/<id>/files`. */
+  collection: string;
+  fileId: string;
+  /** What the list already knows, so the page shows at once. */
+  initial?: FileItem;
+  /** Library sharing: the artists it can be shared with (Blueprint only). */
+  artists?: ArtistSummary[];
+  /** Back to the list. */
+  onBack: () => void;
+  /** Something changed: refresh the list. */
+  onChanged: () => void;
+}
+
+function whoCanSee(f: FileItem, names: Record<string, string>): string {
+  if (f.scope === 'library') {
+    if (f.sharing === 'selected') {
+      const who = f.sharedWithArtistIds.map((id) => names[id] ?? 'an artist').join(', ');
+      return who ? `Blueprint and ${who}` : 'Blueprint only';
+    }
+    return SHARING_LABEL[f.sharing ?? 'bmg-only'];
+  }
+  return VISIBILITY_LABEL[f.visibility ?? 'normal'];
+}
+
+function whoCanEdit(f: FileItem, people: Person[] | null): string {
+  if (f.editAccess === 'everyone') {
+    return f.scope === 'library' ? 'Everyone at Blueprint' : EDIT_ACCESS_LABEL.everyone;
+  }
+  if (f.editAccess === 'owner') return 'Only the owner (locked)';
+  const n = f.editorIds.length;
+  if (people && n) {
+    const by = new Map(people.map((p) => [p.sub, p.displayName]));
+    return `The owner and ${f.editorIds.map((s) => by.get(s) ?? 'someone').join(', ')}`;
+  }
+  return n ? `The owner and ${n} ${n === 1 ? 'person' : 'people'}` : 'The owner and chosen people';
+}
+
+/** Badge beside the name: locked, or how many can edit it. */
+function AccessBadge({ f }: { f: FileItem }) {
+  if (f.locked) return <Tag tone="n">🔒 Locked</Tag>;
+  if (f.editAccess === 'chosen') {
+    const n = f.editorIds.length;
+    return <Tag tone="s">{n ? `Editable by ${n + 1} people` : 'Owner and chosen people'}</Tag>;
+  }
+  return <Tag tone="s">{f.scope === 'library' ? 'Editable by Blueprint' : 'Editable by all'}</Tag>;
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-b border-input py-2.5 last:border-b-0 sm:flex-row sm:gap-4">
+      <dt className="text-sm font-bold sm:w-40 sm:flex-none">{label}</dt>
+      <dd className="min-w-0 flex-1 text-[15px] [overflow-wrap:anywhere]">{children}</dd>
+    </div>
+  );
+}
+
+function useDocument(cfg: AppConfig, token: string, path: string, initial?: FileItem) {
+  const [file, setFile] = useState<FileItem | null>(initial ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setFile(await api<FileItem>(cfg, token, 'GET', path));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [cfg, token, path]);
+  useEffect(() => void load(), [load]);
+  return { file, setFile, error, setError, load };
+}
+
+/** The people who can be given edit access or ownership (owner and managers only). */
+function usePeople(cfg: AppConfig, token: string, path: string, enabled: boolean) {
+  const [people, setPeople] = useState<Person[] | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    api<{ people: Person[] }>(cfg, token, 'GET', `${path}?include=people`)
+      .then((r) => live && setPeople(r.people))
+      .catch(() => live && setPeople([]));
+    return () => {
+      live = false;
+    };
+  }, [cfg, token, path, enabled]);
+  return people;
+}
+
+export function DocumentPage(props: DocumentPageProps) {
+  const [editing, setEditing] = useState(false);
+  const path = `${props.collection}/${props.fileId}`;
+  const doc = useDocument(props.cfg, props.token, path, props.initial);
+  const f = doc.file;
+  const people = usePeople(props.cfg, props.token, path, !!f?.canManage);
+
+  if (!f) {
+    return (
+      <Card title="Document" action={<BackButton onClick={props.onBack} label="Library" />}>
+        {doc.error ? <Notice tone="error">{doc.error}</Notice> : <WaveLoader />}
+      </Card>
+    );
+  }
+  if (editing) {
+    return (
+      <EditDocument
+        {...props}
+        file={f}
+        people={people}
+        onDone={(next) => {
+          if (next) doc.setFile(next);
+          setEditing(false);
+          props.onChanged();
+        }}
+        onDeleted={() => {
+          props.onChanged();
+          props.onBack();
+        }}
+      />
+    );
+  }
+  return (
+    <DocumentDetail
+      {...props}
+      file={f}
+      people={people}
+      error={doc.error}
+      onError={doc.setError}
+      onEdit={() => setEditing(true)}
+    />
+  );
+}
+
+function BackButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <Button size="sm" variant="ghost" onClick={onClick}>
+      ← {label}
+    </Button>
+  );
+}
+
+function DocumentDetail({
+  cfg,
+  token,
+  collection,
+  file: f,
+  artists = [],
+  people,
+  error,
+  onError,
+  onBack,
+  onEdit,
+}: DocumentPageProps & {
+  file: FileItem;
+  people: Person[] | null;
+  error: string | null;
+  onError: (e: string | null) => void;
+  onEdit: () => void;
+}) {
+  const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
+  const path = `${collection}/${f.fileId}`;
+  return (
+    <Card
+      title={<h2 className="t text-[19px]">Document</h2>}
+      action={<BackButton onClick={onBack} label="Library" />}
+    >
+      <div className="flex flex-wrap items-start gap-4">
+        <FileThumb
+          src={f.thumbnailUrl}
+          kind={f.fileType.kind}
+          ext={f.fileType.ext}
+          label={f.fileType.label}
+          size={128}
+        />
+        <div className="flex min-w-0 flex-[1_1_220px] flex-col gap-1.5">
+          <h3 className="t text-[22px] leading-tight [overflow-wrap:anywhere]">{f.displayName}</h3>
+          {f.title && <span className="src [overflow-wrap:anywhere]">{f.name}</span>}
+          <span className="src">
+            {f.fileType.label} · {formatSize(f.size)}
+          </span>
+          <span className="flex flex-wrap gap-1.5">
+            <AccessBadge f={f} />
+            {f.status !== 'available' && (
+              <Tag tone={f.status === 'pending' ? 's' : 'c'}>
+                {f.status === 'pending' ? 'Scanning' : 'Rejected'}
+              </Tag>
+            )}
+          </span>
+        </div>
+      </div>
+      {f.status === 'rejected' && f.rejectReason && <Notice tone="error">{f.rejectReason}</Notice>}
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="navy"
+          disabled={f.status !== 'available'}
+          onClick={() =>
+            void download(cfg, token, path).catch((e) => onError((e as Error).message))
+          }
+        >
+          <Icon name="download" size={16} />
+          Download
+        </Button>
+        {(f.canEdit || f.canManage) && (
+          <Button variant="ghost" onClick={onEdit}>
+            <Icon name="pencil" size={16} />
+            Edit
+          </Button>
+        )}
+      </div>
+      <dl className="flex flex-col">
+        <Row label="Owner">
+          <span className="flex items-center gap-2.5">
+            <Avatar name={f.ownerName} />
+            <span>
+              <b className="block">
+                {f.ownerName}
+                {f.ownedByMe && ' (you)'}
+              </b>
+              {f.ownerJobTitle && <span className="src block">{f.ownerJobTitle}</span>}
+            </span>
+          </span>
+        </Row>
+        <Row label="Uploaded">{shortDate(f.createdAt)}</Row>
+        <Row label="Who can see it">{whoCanSee(f, names)}</Row>
+        <Row label="Who can edit it">{whoCanEdit(f, people)}</Row>
+      </dl>
+    </Card>
+  );
+}
+
+/** Delete with a second click to confirm (no browser dialogs). */
+function DeleteZone({ f, onDelete }: { f: FileItem; onDelete: () => Promise<void> }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!confirm) return;
+    const t = setTimeout(() => setConfirm(false), 6000);
+    return () => clearTimeout(t);
+  }, [confirm]);
+  return (
+    <section
+      aria-labelledby="delete-doc"
+      className="mt-2 flex flex-col gap-2 rounded-[10px] border border-[#E7B9B7] bg-[#FDF3F2] p-3.5"
+    >
+      <h3 id="delete-doc" className="text-[15px] font-bold text-[#8E2F2C]">
+        Delete this document
+      </h3>
+      <p className="src">
+        It’s removed for everyone it’s shared with. An admin can still recover it for 35 days.
+      </p>
+      {error && <Notice tone="error">{error}</Notice>}
+      <span>
+        <Button
+          variant={confirm ? 'cta' : 'ghost'}
+          disabled={busy}
+          aria-label={confirm ? `Confirm delete ${f.displayName}` : `Delete ${f.displayName}`}
+          onClick={async () => {
+            if (!confirm) return setConfirm(true);
+            setBusy(true);
+            setError(null);
+            try {
+              await onDelete();
+            } catch (e) {
+              setError((e as Error).message);
+              setBusy(false);
+              setConfirm(false);
+            }
+          }}
+        >
+          <Icon name="trash" size={16} />
+          {busy ? 'Deleting…' : confirm ? 'Click again to delete' : 'Delete'}
+        </Button>
+      </span>
+    </section>
+  );
+}
+
+function Radio({
+  name,
+  checked,
+  onChange,
+  children,
+  disabled,
+}: {
+  name: string;
+  checked: boolean;
+  onChange: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex min-h-9 items-center gap-2.5 text-[15px]">
+      <input type="radio" name={name} checked={checked} onChange={onChange} disabled={disabled} />
+      {children}
+    </label>
+  );
+}
+
+function Fieldset({ legend, children }: { legend: string; children: React.ReactNode }) {
+  return (
+    <fieldset className="flex flex-col gap-1">
+      <legend className="pb-1 text-[15px] font-bold">{legend}</legend>
+      {children}
+    </fieldset>
+  );
+}
+
+function EditDocument({
+  cfg,
+  token,
+  collection,
+  file: f,
+  artists = [],
+  people,
+  onDone,
+  onDeleted,
+}: DocumentPageProps & {
+  file: FileItem;
+  people: Person[] | null;
+  onDone: (next?: FileItem) => void;
+  onDeleted: () => void;
+}) {
+  const path = `${collection}/${f.fileId}`;
+  const library = f.scope === 'library';
+  const isPrivate = f.visibility === 'private';
+  const [name, setName] = useState(f.title ?? '');
+  const [sharing, setSharing] = useState(f.sharing ?? 'bmg-only');
+  const [picked, setPicked] = useState<Set<string>>(new Set(f.sharedWithArtistIds));
+  const [visibility, setVisibility] = useState(f.visibility ?? 'normal');
+  const [access, setAccess] = useState<EditAccess>(f.editAccess);
+  const [editors, setEditors] = useState<Set<string>>(new Set(f.editorIds));
+  const [newOwner, setNewOwner] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Blueprint decides whether its own uploads are shared with the artist.
+  const canSetVisibility =
+    !library &&
+    f.canManage &&
+    f.ownerRole !== 'artist' &&
+    f.uploaderRole !== 'artist' &&
+    !isPrivate;
+
+  const toggle = (set: Set<string>, id: string) => {
+    const n = new Set(set);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    return n;
+  };
+
+  async function save() {
+    const body: Record<string, unknown> = {};
+    if (f.canEdit && name.trim() !== (f.title ?? '')) body.title = name.trim();
+    if (f.canManage) {
+      if (library) {
+        const ids = sharing === 'selected' ? [...picked] : [];
+        if (
+          sharing !== (f.sharing ?? 'bmg-only') ||
+          ids.sort().join() !== [...f.sharedWithArtistIds].sort().join()
+        ) {
+          body.sharing = sharing;
+          body.sharedWithArtistIds = ids;
+        }
+      } else if (canSetVisibility && visibility !== (f.visibility ?? 'normal')) {
+        body.visibility = visibility;
+      }
+      const ids = access === 'chosen' ? [...editors] : [];
+      if (access !== f.editAccess || ids.sort().join() !== [...f.editorIds].sort().join()) {
+        body.editAccess = access;
+        body.editorIds = ids;
+      }
+    }
+    if (Object.keys(body).length === 0) return onDone();
+    setBusy(true);
+    setError(null);
+    try {
+      onDone(await api<FileItem>(cfg, token, 'PATCH', path, body));
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  async function handOver() {
+    if (!newOwner) return;
+    setBusy(true);
+    setError(null);
+    try {
+      onDone(await api<FileItem>(cfg, token, 'PATCH', path, { ownerId: newOwner }));
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title={<h2 className="t text-[19px]">Edit document</h2>}
+      action={
+        <Button size="sm" variant="ghost" onClick={() => onDone()} disabled={busy}>
+          ← Back
+        </Button>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onDone();
+        }}
+      >
+        <span className="flex items-center gap-3">
+          <FileThumb
+            src={f.thumbnailUrl}
+            kind={f.fileType.kind}
+            ext={f.fileType.ext}
+            label={f.fileType.label}
+            size={56}
+          />
+          <span className="min-w-0">
+            <b className="block [overflow-wrap:anywhere]">{f.displayName}</b>
+            <span className="src">
+              {f.fileType.label} · {formatSize(f.size)}
+            </span>
+          </span>
+        </span>
+
+        {f.canEdit ? (
+          <Field
+            label="Name"
+            value={name}
+            maxLength={200}
+            placeholder={f.name}
+            onChange={(e) => setName(e.target.value)}
+            hint={`Shown in lists instead of the file name. Leave blank to show the file name (${f.name}).`}
+          />
+        ) : (
+          <Notice>🔒 This document is locked by its owner, so you can’t rename it.</Notice>
+        )}
+
+        {f.canManage && library && (
+          <Fieldset legend="Who can see it">
+            {(['bmg-only', 'all-artists', 'selected'] as const).map((s) => (
+              <Radio key={s} name="sharing" checked={sharing === s} onChange={() => setSharing(s)}>
+                {SHARING_LABEL[s]}
+              </Radio>
+            ))}
+            {sharing === 'selected' && (
+              <div className="grid gap-1 pl-7 sm:grid-cols-2">
+                {artists.map((a) => (
+                  <label key={a.artistId} className="flex min-h-9 items-center gap-2 text-[15px]">
+                    <input
+                      type="checkbox"
+                      checked={picked.has(a.artistId)}
+                      onChange={() => setPicked((s) => toggle(s, a.artistId))}
+                    />
+                    {a.displayName}
+                  </label>
+                ))}
+                {artists.length === 0 && <p className="src">No artists yet.</p>}
+              </div>
+            )}
+          </Fieldset>
+        )}
+        {canSetVisibility && (
+          <Fieldset legend="Who can see it">
+            {(['normal', 'bmg-only'] as const).map((v) => (
+              <Radio
+                key={v}
+                name="visibility"
+                checked={visibility === v}
+                onChange={() => setVisibility(v)}
+              >
+                {VISIBILITY_LABEL[v]}
+              </Radio>
+            ))}
+          </Fieldset>
+        )}
+
+        {f.canManage &&
+          (isPrivate ? (
+            <Notice>Private files can only be opened by you, so only you can edit them.</Notice>
+          ) : (
+            <Fieldset legend="Who can edit it">
+              {(['owner', 'chosen', 'everyone'] as const).map((a) => (
+                <Radio key={a} name="access" checked={access === a} onChange={() => setAccess(a)}>
+                  {a === 'everyone' && library ? 'Everyone at Blueprint' : EDIT_ACCESS_LABEL[a]}
+                </Radio>
+              ))}
+              {access === 'chosen' && (
+                <div className="flex flex-col gap-1 pl-7">
+                  {!people && <WaveLoader />}
+                  {people?.length === 0 && (
+                    <p className="src">There’s nobody else who can see this document yet.</p>
+                  )}
+                  {people?.map((p) => (
+                    <label key={p.sub} className="flex min-h-11 items-center gap-2.5 text-[15px]">
+                      <input
+                        type="checkbox"
+                        checked={editors.has(p.sub)}
+                        onChange={() => setEditors((s) => toggle(s, p.sub))}
+                      />
+                      <Avatar name={p.displayName} />
+                      <span>
+                        <b className="block">{p.displayName}</b>
+                        {p.jobTitle && <span className="src block">{p.jobTitle}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <span className="src">
+                Editing means renaming it and uploading new versions. Only the owner changes who can
+                see it, who can edit it, and deletes it.
+              </span>
+            </Fieldset>
+          ))}
+
+        {error && <Notice tone="error">{error}</Notice>}
+        <span className="flex gap-2">
+          <Button variant="cta" type="submit" disabled={busy}>
+            {busy ? 'Saving…' : 'Save'}
+          </Button>
+          <Button variant="ghost" type="button" onClick={() => onDone()} disabled={busy}>
+            Cancel
+          </Button>
+        </span>
+      </form>
+
+      {f.canManage && !isPrivate && (people?.length ?? 0) > 0 && (
+        <section
+          aria-labelledby="hand-over"
+          className="flex flex-col gap-2 border-t border-input pt-4"
+        >
+          <h3 id="hand-over" className="text-[15px] font-bold">
+            Transfer ownership
+          </h3>
+          <p className="src">
+            The new owner decides who can see and edit it.
+            {f.editAccess === 'chosen' && ' You stay on as an editor.'}
+          </p>
+          <span className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-[220px] flex-1 flex-col gap-1.5">
+              <span className="sr-only">New owner</span>
+              <select
+                className="min-h-11 w-full rounded-lg border border-input bg-white px-3 text-base shadow-xs"
+                value={newOwner}
+                onChange={(e) => setNewOwner(e.target.value)}
+              >
+                <option value="">Choose the new owner…</option>
+                {people?.map((p) => (
+                  <option key={p.sub} value={p.sub}>
+                    {p.displayName}
+                    {p.jobTitle ? ` · ${p.jobTitle}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button variant="ghost" disabled={!newOwner || busy} onClick={() => void handOver()}>
+              Transfer
+            </Button>
+          </span>
+        </section>
+      )}
+
+      {f.canManage && (
+        <DeleteZone
+          f={f}
+          onDelete={async () => {
+            await api(cfg, token, 'DELETE', path);
+            onDeleted();
+          }}
+        />
+      )}
+    </Card>
+  );
+}

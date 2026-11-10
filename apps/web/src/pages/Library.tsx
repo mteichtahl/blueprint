@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
-  download,
   EDIT_ACCESS_LABEL,
   fileTypeOf,
   formatSize,
@@ -13,6 +12,7 @@ import {
 import { CATEGORY_ONE } from './Assets.tsx';
 import { makeThumbnail } from '../lib/thumbnail.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
+import { DocumentPage } from './Document.tsx';
 import {
   Button,
   Card,
@@ -341,39 +341,6 @@ function StatusBadge({ f }: { f: FileItem }) {
   );
 }
 
-/** Delete with a second click to confirm (no browser dialogs). */
-function DeleteButton({ f, onDelete }: { f: FileItem; onDelete: (f: FileItem) => Promise<void> }) {
-  const [confirm, setConfirm] = useState(false);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!confirm) return;
-    const t = setTimeout(() => setConfirm(false), 4000);
-    return () => clearTimeout(t);
-  }, [confirm]);
-  return (
-    <Button
-      size="sm"
-      variant={confirm ? 'cta' : 'ghost'}
-      disabled={busy}
-      aria-label={confirm ? `Confirm delete ${f.displayName}` : `Delete ${f.displayName}`}
-      onClick={async (e) => {
-        e.stopPropagation();
-        if (!confirm) return setConfirm(true);
-        setBusy(true);
-        try {
-          await onDelete(f);
-        } finally {
-          setBusy(false);
-          setConfirm(false);
-        }
-      }}
-    >
-      <Icon name="trash" size={15} />
-      {busy ? 'Deleting…' : confirm ? 'Confirm' : 'Delete'}
-    </Button>
-  );
-}
-
 /** A file's preview, or its type's tile. */
 function Thumb({ f, size }: { f: FileItem; size: number }) {
   return (
@@ -387,148 +354,44 @@ function Thumb({ f, size }: { f: FileItem; size: number }) {
   );
 }
 
-function RenameButton({ f, onClick }: { f: FileItem; onClick: () => void }) {
-  return (
-    <Button size="sm" variant="ghost" aria-label={`Rename ${f.displayName}`} onClick={onClick}>
-      <Icon name="pencil" size={15} />
-      <span className="max-sm:sr-only">Rename</span>
-    </Button>
-  );
-}
-
 /**
- * Rename in place: the name the file shows in lists. Blank goes back to the
- * file name; Enter saves, Escape cancels.
+ * The list of documents. Tapping a document (anywhere on its row or card)
+ * opens its detail page (rev 8); there are no buttons on the rows.
  */
-function RenameForm({
-  f,
-  onSave,
-  onCancel,
-}: {
-  f: FileItem;
-  onSave: (title: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(f.title ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  async function save() {
-    setBusy(true);
-    setError(null);
-    try {
-      await onSave(value.trim());
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
-  }
-  return (
-    <form
-      className="flex min-w-0 flex-1 flex-col gap-1.5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save();
-      }}
-    >
-      <label className="flex flex-col gap-1">
-        <span className="text-sm font-bold">Name</span>
-        <input
-          className="min-h-11 w-full rounded-lg border border-input bg-white px-3 text-base shadow-xs"
-          value={value}
-          maxLength={200}
-          placeholder={f.name}
-          autoFocus
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') onCancel();
-          }}
-        />
-      </label>
-      <span className="src">Leave blank to show the file name ({f.name}).</span>
-      {error && <Notice tone="error">{error}</Notice>}
-      <span className="flex gap-2">
-        <Button size="sm" variant="cta" type="submit" disabled={busy}>
-          {busy ? 'Saving…' : 'Save'}
-        </Button>
-        <Button size="sm" variant="ghost" type="button" onClick={onCancel} disabled={busy}>
-          Cancel
-        </Button>
-      </span>
-    </form>
-  );
-}
-
 function FileTable({
   files,
   empty,
   columns,
   onOpen,
-  onDelete,
-  canDelete = () => false,
-  onRename,
-  canRename = () => false,
   compact = false,
 }: {
   files: FileItem[] | null;
   empty: string;
   columns: { label: string; cell: (f: FileItem) => React.ReactNode }[];
   onOpen: (f: FileItem) => void;
-  onDelete?: (f: FileItem) => Promise<void>;
-  canDelete?: (f: FileItem) => boolean;
-  /** Save a new name ('' shows the file name again). */
-  onRename?: (f: FileItem, title: string) => Promise<void>;
-  canRename?: (f: FileItem) => boolean;
-  /** Phone layout: a list of rows instead of a table. */
+  /** Phone layout: a list of cards instead of a table. */
   compact?: boolean;
 }) {
   // The phone list is used for the artist app and on any phone-width screen.
   const phone = usePhone();
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const rename = (f: FileItem) => async (title: string) => {
-    await onRename!(f, title);
-    setRenaming(null);
-  };
-  const renamable = (f: FileItem) => !!onRename && canRename(f);
   if (!files) return <WaveLoader />;
   if (files.length === 0) return <p className="src pb-5">{empty}</p>;
   if (compact || phone) {
     return (
-      <div className="flex flex-col gap-1.5">
-        {files.map((f) =>
-          renaming === f.fileId ? (
-            <div
-              key={f.fileId}
-              className="flex items-start gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
+      <ul className="flex flex-col gap-1.5">
+        {files.map((f) => (
+          <li key={f.fileId}>
+            <button
+              type="button"
+              onClick={() => onOpen(f)}
+              className="flex min-h-[52px] w-full items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 text-left shadow-xs hover:bg-[#F6F8FA] dark:hover:bg-secondary"
             >
-              <Thumb f={f} size={44} />
-              <RenameForm f={f} onSave={rename(f)} onCancel={() => setRenaming(null)} />
-            </div>
-          ) : (
-            // The name is the open button; the details line (which can hold its
-            // own controls, like "Shared with") sits beside it, not inside it.
-            <div
-              key={f.fileId}
-              className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
-            >
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-hidden="true"
-                disabled={f.status !== 'available'}
-                onClick={() => onOpen(f)}
-                className="flex-none"
-              >
+              {/* The type is in the details line; the tile would only repeat it. */}
+              <span aria-hidden="true" className="flex-none">
                 <Thumb f={f} size={44} />
-              </button>
+              </span>
               <span className="min-w-0 flex-1">
-                <button
-                  type="button"
-                  disabled={f.status !== 'available'}
-                  onClick={() => onOpen(f)}
-                  className="block w-full text-left"
-                >
-                  <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
-                </button>
+                <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
                 <span className="src">
                   {typeLabel(f)} · {formatSize(f.size)} · {date(f.createdAt)}
                   {columns.map((c) => (
@@ -537,16 +400,13 @@ function FileTable({
                 </span>
                 <StatusBadge f={f} />
               </span>
-              {(renamable(f) || (onDelete && canDelete(f))) && (
-                <span className="flex flex-none flex-col items-end gap-1.5">
-                  {renamable(f) && <RenameButton f={f} onClick={() => setRenaming(f.fileId)} />}
-                  {onDelete && canDelete(f) && <DeleteButton f={f} onDelete={onDelete} />}
-                </span>
-              )}
-            </div>
-          ),
-        )}
-      </div>
+              <span aria-hidden="true" className="flex-none text-muted-foreground">
+                ›
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
     );
   }
   return (
@@ -562,23 +422,31 @@ function FileTable({
             </th>
           ))}
           <th scope="col">Added</th>
-          <th scope="col" />
         </tr>
       </thead>
       <tbody>
         {files.map((f) => (
-          <tr key={f.fileId}>
+          <tr
+            key={f.fileId}
+            className="cursor-pointer hover:bg-[#F6F8FA] dark:hover:bg-secondary"
+            onClick={() => onOpen(f)}
+          >
             <td>
               <span className="flex items-center gap-3">
                 <Thumb f={f} size={40} />
-                {renaming === f.fileId ? (
-                  <RenameForm f={f} onSave={rename(f)} onCancel={() => setRenaming(null)} />
-                ) : (
-                  <span className="min-w-0">
-                    <b className="block">{f.displayName}</b>
-                    {f.title && <span className="src block">{f.name}</span>}
-                  </span>
-                )}
+                <span className="min-w-0">
+                  <button
+                    type="button"
+                    className="block text-left font-bold hover:underline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpen(f);
+                    }}
+                  >
+                    {f.displayName}
+                  </button>
+                  {f.title && <span className="src block">{f.name}</span>}
+                </span>
                 <StatusBadge f={f} />
               </span>
             </td>
@@ -588,27 +456,6 @@ function FileTable({
               <td key={c.label}>{c.cell(f)}</td>
             ))}
             <td className="src">{date(f.createdAt)}</td>
-            <td className="whitespace-nowrap text-right">
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={f.status !== 'available'}
-                onClick={() => onOpen(f)}
-              >
-                <Icon name="download" size={15} />
-                Open
-              </Button>
-              {renamable(f) && renaming !== f.fileId && (
-                <span className="ml-2 inline-block">
-                  <RenameButton f={f} onClick={() => setRenaming(f.fileId)} />
-                </span>
-              )}
-              {onDelete && canDelete(f) && (
-                <span className="ml-2 inline-block">
-                  <DeleteButton f={f} onDelete={onDelete} />
-                </span>
-              )}
-            </td>
           </tr>
         ))}
       </tbody>
@@ -627,6 +474,7 @@ export function ArtistFiles({
   artistId,
   isBmg,
   kind = 'all',
+  onOpenChange,
 }: {
   cfg: AppConfig;
   token: string;
@@ -635,46 +483,20 @@ export function ArtistFiles({
   isAdmin?: boolean;
   /** Library type filter: everything, or documents only (assets have their own gallery). */
   kind?: Exclude<LibraryKind, 'assets'>;
+  /** A document page opened or closed (so the screen can hide what's around it). */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const collection = `/artists/${artistId}/files`;
-  const { files, error, setError, load } = useFiles(cfg, token, collection);
+  const { files, error, load } = useFiles(cfg, token, collection);
   const [visibility, setVisibility] = useState('normal');
   const [editAccess, setEditAccess] = useState('owner');
   const [filter, setFilter] = useState<ArtistFilter>('all');
   // Phones get an "Upload document" button that opens the upload page.
   const phone = usePhone();
   const [uploading, setUploading] = useState(false);
-
-  async function setShared(f: FileItem, shared: boolean) {
-    try {
-      await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, {
-        visibility: shared ? 'normal' : 'bmg-only',
-      });
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  const open = (f: FileItem) =>
-    void download(cfg, token, `${collection}/${f.fileId}`).catch((e) =>
-      setError((e as Error).message),
-    );
-  const remove = async (f: FileItem) => {
-    try {
-      await api(cfg, token, 'DELETE', `${collection}/${f.fileId}`);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-  // The API says what each person can do (owner, who can edit; rev 8).
-  const canDelete = (f: FileItem) => f.canManage;
-  const canRename = (f: FileItem) => f.canEdit;
-  const rename = async (f: FileItem, title: string) => {
-    await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
-    await load();
-  };
+  // The document whose detail (or edit) page is open (rev 8).
+  const [opened, setOpened] = useState<FileItem | null>(null);
+  useEffect(() => onOpenChange?.(!!opened), [opened, onOpenChange]);
 
   const upload = (
     <UploadBox
@@ -714,24 +536,24 @@ export function ArtistFiles({
   const columns = [
     {
       label: 'Who can see it',
-      cell: (f: FileItem) =>
-        isBmg && f.uploaderRole !== 'artist' && f.status === 'available' ? (
-          <label className="flex items-center gap-2">
-            <input
-              className="switch"
-              type="checkbox"
-              checked={f.visibility === 'normal'}
-              onChange={(e) => void setShared(f, e.target.checked)}
-            />
-            <span>{f.visibility === 'normal' ? 'Shared with artist' : 'BMG only'}</span>
-          </label>
-        ) : (
-          VISIBILITY_LABEL[f.visibility ?? 'normal']
-        ),
+      cell: (f: FileItem) => VISIBILITY_LABEL[f.visibility ?? 'normal'],
     },
     { label: 'Owner', cell: (f: FileItem) => <OwnerCell f={f} /> },
   ];
 
+  if (opened) {
+    return (
+      <DocumentPage
+        cfg={cfg}
+        token={token}
+        collection={collection}
+        fileId={opened.fileId}
+        initial={opened}
+        onBack={() => setOpened(null)}
+        onChanged={() => void load()}
+      />
+    );
+  }
   if (phone && uploading) return upload;
   if (!isBmg) {
     return (
@@ -742,11 +564,7 @@ export function ArtistFiles({
         <FileTable
           files={ofKind}
           empty="No files yet."
-          onOpen={open}
-          onDelete={remove}
-          canDelete={canDelete}
-          onRename={rename}
-          canRename={canRename}
+          onOpen={setOpened}
           columns={[
             { label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] },
             { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
@@ -771,16 +589,7 @@ export function ArtistFiles({
           options={ARTIST_FILTER_OPTIONS}
         />
         {error && <Notice tone="error">{error}</Notice>}
-        <FileTable
-          files={visible}
-          empty="No files here."
-          onOpen={open}
-          onDelete={remove}
-          canDelete={canDelete}
-          onRename={rename}
-          canRename={canRename}
-          columns={columns}
-        />
+        <FileTable files={visible} empty="No files here." onOpen={setOpened} columns={columns} />
       </Card>
       {!phone && <div className="flex-[1_1_300px]">{upload}</div>}
     </div>
@@ -810,40 +619,58 @@ export function Library({
   cfg,
   token,
   isBmg,
-
   artists,
+  openFileId,
+  onClosed,
+  onOpenChange,
 }: {
   cfg: AppConfig;
   token: string;
   isBmg: boolean;
   isAdmin?: boolean;
   artists: ArtistSummary[];
+  /** Open this document's page straight away (from a Studio HQ card). */
+  openFileId?: string | null;
+  /** The opened document was closed. */
+  onClosed?: () => void;
+  /** A document page opened or closed (so the screen can hide what's around it). */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const collection = '/library/files';
-  const { files, error, setError, load } = useFiles(cfg, token, collection);
+  const { files, error, load } = useFiles(cfg, token, collection);
   const [sharing, setSharing] = useState('bmg-only');
   const [editAccess, setEditAccess] = useState('everyone');
   const [libraryFilter, setLibraryFilter] = useState<
     'all' | 'all-artists' | 'selected' | 'bmg-only'
   >('all');
-  const [editing, setEditing] = useState<FileItem | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
   const phone = usePhone();
   const [uploading, setUploading] = useState(false);
-
-  const open = (f: FileItem) =>
-    void download(cfg, token, `${collection}/${f.fileId}`).catch((e) =>
-      setError((e as Error).message),
-    );
-  const remove = async (f: FileItem) => {
-    try {
-      await api(cfg, token, 'DELETE', `${collection}/${f.fileId}`);
-      if (editing?.fileId === f.fileId) setEditing(null);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  const [opened, setOpened] = useState<FileItem | null>(null);
+  // Opened from elsewhere (a Studio HQ card): show that document's page.
+  useEffect(() => {
+    if (openFileId) setOpened({ fileId: openFileId } as FileItem);
+  }, [openFileId]);
+  useEffect(() => onOpenChange?.(!!opened), [opened, onOpenChange]);
+  const back = () => {
+    setOpened(null);
+    onClosed?.();
   };
+
+  if (opened) {
+    return (
+      <DocumentPage
+        cfg={cfg}
+        token={token}
+        collection={collection}
+        fileId={opened.fileId}
+        initial={opened.displayName ? opened : undefined}
+        artists={artists}
+        onBack={back}
+        onChanged={() => void load()}
+      />
+    );
+  }
 
   if (!isBmg) {
     return (
@@ -852,7 +679,7 @@ export function Library({
         <FileTable
           files={files}
           empty="Nothing has been shared with you yet."
-          onOpen={open}
+          onOpen={setOpened}
           columns={[]}
           compact
         />
@@ -881,7 +708,7 @@ export function Library({
         ]}
       />
       <span className="src">
-        To share with chosen artists, upload first, then pick them under “Shared with”.
+        To share with chosen artists, upload first, then open the document and choose Edit.
       </span>
       <EditAccessSelect value={editAccess} onChange={setEditAccess} team />
     </UploadBox>
@@ -914,123 +741,20 @@ export function Library({
         <FileTable
           files={visible}
           empty="Nothing here."
-          onOpen={open}
-          onDelete={remove}
-          canDelete={(f) => f.canManage}
-          onRename={async (f, title) => {
-            await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
-            await load();
-          }}
-          canRename={(f) => f.canEdit}
+          onOpen={setOpened}
           columns={[
             {
               label: 'Shared with',
-              cell: (f) => (
-                <button
-                  type="button"
-                  className="text-left font-semibold underline disabled:no-underline"
-                  disabled={!f.canManage}
-                  onClick={() => setEditing(f)}
-                >
-                  {f.sharing === 'selected'
-                    ? f.sharedWithArtistIds.map((id) => names[id] ?? 'Artist').join(', ') ||
-                      'Nobody'
-                    : SHARING_LABEL[f.sharing ?? 'bmg-only']}
-                </button>
-              ),
+              cell: (f) =>
+                f.sharing === 'selected'
+                  ? f.sharedWithArtistIds.map((id) => names[id] ?? 'Artist').join(', ') || 'Nobody'
+                  : SHARING_LABEL[f.sharing ?? 'bmg-only'],
             },
             { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
           ]}
         />
       </Card>
-      <div className="flex flex-[1_1_300px] flex-col gap-5">
-        {!phone && uploadBox}
-        {editing && (
-          <ShareDialog
-            file={editing}
-            artists={artists}
-            onClose={() => setEditing(null)}
-            onSave={async (next) => {
-              try {
-                await api(cfg, token, 'PATCH', `${collection}/${editing.fileId}`, next);
-                setEditing(null);
-                await load();
-              } catch (e) {
-                setError((e as Error).message);
-              }
-            }}
-          />
-        )}
-      </div>
+      {!phone && <div className="flex flex-[1_1_300px] flex-col gap-5">{uploadBox}</div>}
     </div>
-  );
-}
-
-function ShareDialog({
-  file,
-  artists,
-  onClose,
-  onSave,
-}: {
-  file: FileItem;
-  artists: ArtistSummary[];
-  onClose: () => void;
-  onSave: (next: { sharing: string; sharedWithArtistIds: string[] }) => Promise<void>;
-}) {
-  const [sharing, setSharing] = useState<string>(file.sharing ?? 'bmg-only');
-  const [picked, setPicked] = useState<Set<string>>(new Set(file.sharedWithArtistIds));
-  const toggle = (id: string) =>
-    setPicked((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  return (
-    <Card title={`Share “${file.displayName}”`}>
-      <div className="space-y-3 text-sm">
-        {(['bmg-only', 'all-artists', 'selected'] as const).map((s) => (
-          <label key={s} className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="sharing"
-              checked={sharing === s}
-              onChange={() => setSharing(s)}
-            />
-            {SHARING_LABEL[s]}
-          </label>
-        ))}
-        {sharing === 'selected' && (
-          <div className="grid gap-1 pl-6 sm:grid-cols-2">
-            {artists.map((a) => (
-              <label key={a.artistId} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={picked.has(a.artistId)}
-                  onChange={() => toggle(a.artistId)}
-                />
-                {a.displayName}
-              </label>
-            ))}
-            {artists.length === 0 && <p className="text-muted-foreground">No artists yet.</p>}
-          </div>
-        )}
-        <div className="flex gap-2 pt-2">
-          <Button
-            onClick={() =>
-              void onSave({
-                sharing,
-                sharedWithArtistIds: sharing === 'selected' ? [...picked] : [],
-              })
-            }
-          >
-            Save
-          </Button>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    </Card>
   );
 }
