@@ -21,3 +21,15 @@ describe('prompts', () => {
     expect(render('Hi {{ name }}{{x}}!', { name: 'Chloe' })).toBe('Hi Chloe!');
   });
 });
+
+describe('artist ids in actions', () => {
+  it('accepts real artist ids (art_ + 16), not only short test ids', async () => {
+    const { Action } = await import('../src/actions.ts');
+    const ok = (artistId: string) =>
+      Action.safeParse({ type: 'createTodo', summary: 'Add a to-do', artistId, title: 'x' })
+        .success;
+    expect(ok('art_k3v9q2m7x1p8z4wa')).toBe(true);
+    expect(ok('art_aaaaaaaaaaaa')).toBe(true);
+    expect(ok('art_short')).toBe(false);
+  });
+});
