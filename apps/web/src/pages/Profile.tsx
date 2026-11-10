@@ -4,7 +4,7 @@ import type { AppConfig } from '../lib/config.ts';
 import type { Preferences } from '../lib/notifications.ts';
 import { disablePush, enablePush, pushSupported } from '../lib/push.ts';
 import type { Theme } from '../components/Shell.tsx';
-import { Button, Card, Notice } from '../components/ui.tsx';
+import { Button, Card, Field, Notice } from '../components/ui.tsx';
 
 /**
  * Profile & preferences (screens doc): notifications (in app, push, email),
@@ -19,6 +19,7 @@ export function Profile({
   theme,
   onTheme,
   onSignOut,
+  onJobTitle,
   compact = false,
 }: {
   cfg: AppConfig;
@@ -28,6 +29,7 @@ export function Profile({
   theme: Theme;
   onTheme: (t: Theme) => void;
   onSignOut: () => void;
+  onJobTitle?: (t: string) => void;
   compact?: boolean;
 }) {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
@@ -51,6 +53,7 @@ export function Profile({
   const row = 'flex min-h-12 items-center gap-3 border-b border-[#EDF0F3] py-2 last:border-0';
   return (
     <div className={`flex flex-wrap items-start gap-5 ${compact ? 'flex-col' : ''}`}>
+      <AboutYou cfg={cfg} token={token} me={me} userName={userName} onJobTitle={onJobTitle} />
       <Card className="flex-[1_1_320px] self-stretch" title="Notifications">
         {!prefs ? (
           <p className="src">Loading…</p>
@@ -186,5 +189,67 @@ export function Profile({
         </Button>
       </Card>
     </div>
+  );
+}
+
+/** Name and job title. Artists are always "Artist"; Blueprint people set their own. */
+function AboutYou({
+  cfg,
+  token,
+  me,
+  userName,
+  onJobTitle,
+}: {
+  cfg: AppConfig;
+  token: string;
+  me: Me;
+  userName: string;
+  onJobTitle?: ((t: string) => void) | undefined;
+}) {
+  const isArtist = me.role === 'artist';
+  const [title, setTitle] = useState(me.jobTitle ?? '');
+  const [saved, setSaved] = useState(me.jobTitle ?? '');
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  async function save() {
+    try {
+      const res = await api<{ jobTitle: string }>(cfg, token, 'PATCH', '/me', {
+        jobTitle: title,
+      });
+      setSaved(res.jobTitle);
+      setTitle(res.jobTitle);
+      onJobTitle?.(res.jobTitle);
+      setMsg({ tone: 'success', text: 'Job title saved.' });
+    } catch (e) {
+      setMsg({ tone: 'error', text: (e as Error).message });
+    }
+  }
+  return (
+    <Card className="flex-[1_1_100%]" title="About you">
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      <p className="m-0">
+        <b>{userName}</b>
+      </p>
+      {isArtist ? (
+        <p className="m-0">
+          Job title: <b>Artist</b>
+          <span className="src block">Every artist's job title is Artist.</span>
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-0 flex-[1_1_260px]">
+            <Field
+              label="Job title"
+              value={title}
+              maxLength={80}
+              placeholder="e.g. Founder & Director"
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+          <Button variant="navy" disabled={title.trim() === saved} onClick={() => void save()}>
+            Save
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }

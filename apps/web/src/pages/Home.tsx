@@ -85,6 +85,7 @@ function greeting(): string {
 
 function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme();
+  const [jobTitle, setJobTitle] = useState(me.jobTitle ?? '');
   // Back from a vendor's sign-in page: open Connectors to finish connecting.
   const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
@@ -203,7 +204,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       current={view}
       onNavigate={setView}
       userName={userName}
-      roleLabel={ROLE_LABEL[me.role]}
+      roleLabel={jobTitle || ROLE_LABEL[me.role]}
       theme={theme}
       onTheme={setTheme}
       onSignOut={onSignOut}
@@ -288,11 +289,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           <Profile
             cfg={cfg}
             token={token}
-            me={me}
+            me={{ ...me, jobTitle }}
             userName={userName}
             theme={theme}
             onTheme={setTheme}
             onSignOut={onSignOut}
+            onJobTitle={setJobTitle}
           />
         </>
       )}

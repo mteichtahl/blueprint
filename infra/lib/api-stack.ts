@@ -61,6 +61,7 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
 /**
  * The REST API for one environment (design 7.2). Phase 2 routes:
  *   GET  /me                    who you are, step-up state, latest consent
+ *   PATCH /me                   your job title (Blueprint people; artists are "Artist")
  *   GET  /consent, POST /consent  append-only consent ledger (F1 step 4)
  *   POST /step-up/totp/setup|verify   app-level MFA for social sign-ins (6.2)
  *   POST /artists               admin invite → onboarding (F1), fresh step-up
@@ -130,7 +131,7 @@ export class ApiStack extends BmgStack {
       USER_POOL_ID: props.userPool.userPoolId,
       WEB_CLIENT_ID_PARAM: names.ssm(cfg, env, 'web/client-id'),
     });
-    const me = fn('Me', 'me', 'GET /me');
+    const me = fn('Me', 'me', 'GET and PATCH /me');
     const consent = fn('Consent', 'consent', 'consent ledger');
     const stepUp = fn('StepUp', 'step-up', 'TOTP step-up for social sign-in', {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
@@ -665,6 +666,9 @@ export class ApiStack extends BmgStack {
     putEvents(addressBook);
     putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
+    // Job title (rev 7) lives on USER#<sub> / PROFILE.
+    allow(me, 'ReadProfile', ['dynamodb:GetItem'], [main]);
+    props.platformKey.grant(me, 'kms:Decrypt');
     new Rule(this, 'AiConsentChanges', {
       eventBus: props.bus,
       description: "Keep each artist's current AI choice in step with the consent ledger",
@@ -1003,6 +1007,7 @@ export class ApiStack extends BmgStack {
       });
     };
     route('GET', '/me', me);
+    route('PATCH', '/me', me);
     route('GET', '/consent', consent);
     route('POST', '/consent', consent);
     route('POST', '/step-up/totp/setup', stepUp);

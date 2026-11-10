@@ -42,6 +42,8 @@ export interface Me {
   sub: string;
   role: 'bmg-admin' | 'bmg-staff' | 'artist';
   artistId: string | null;
+  /** Always "Artist" for artists; Blueprint people set their own (rev 7). */
+  jobTitle?: string;
   mfaLevel: 'cognito' | 'federated';
   stepUpRequired: boolean;
   consent: { termsVersion: string; aiOptIn: boolean; decidedAt: string } | null;
