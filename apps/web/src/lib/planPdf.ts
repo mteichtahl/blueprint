@@ -1,11 +1,13 @@
 import { createElement } from 'react';
-import type { Plan } from './api.ts';
+import type { Plan, PlanChange } from './api.ts';
 import { layoutTimeline } from './timeline.ts';
 
 /**
  * Export an artist's plan to PDF (rev 7): always the whole plan, branded,
- * with the Gantt chart. Built in the browser, so nothing leaves the app; the
- * PDF libraries load only when someone exports.
+ * with the Gantt chart. Rev 8 adds the official logo in the header, a
+ * copyright line in the footer and a timeline of the plan's changes. Built in
+ * the browser, so nothing leaves the app; the PDF libraries load only when
+ * someone exports.
  */
 
 const NAVY = '#011935';
@@ -59,6 +61,31 @@ export function markdownToBlocks(md: string): TextBlock[] {
   return blocks.filter((b) => b.text);
 }
 
+/**
+ * The official white-on-navy logo (2000×2000 PNG), the same file the emails
+ * use. It's placed as supplied, never redrawn; until it's deployed the PDF
+ * falls back to the BLUEPRINT wordmark in text.
+ */
+export const LOGO_PATH = '/brand/bmg-logo-white-on-navy.png';
+
+export const copyrightLine = (year: number) =>
+  `© ${year} Blueprint Music Group. All rights reserved.`;
+
+/** Changes in the order they happened, for the PDF's timeline (the API sends newest first). */
+export const changesOldestFirst = (changes: readonly PlanChange[]) =>
+  [...changes].sort((a, b) => a.at.localeCompare(b.at) || a.version - b.version);
+
+/** The logo's PNG bytes, or undefined if it isn't there (the app's fallback page isn't a PNG). */
+async function loadLogo(): Promise<Uint8Array | undefined> {
+  try {
+    const res = await fetch(LOGO_PATH);
+    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/png')) return;
+    return new Uint8Array(await res.arrayBuffer());
+  } catch {
+    return undefined;
+  }
+}
+
 export const pdfFileName = (artistName: string, today: string) =>
   `Plan - ${artistName.replace(/[\\/:*?"<>|]+/g, '').trim() || 'Artist'} - ${today}.pdf`;
 
@@ -74,12 +101,15 @@ export async function exportPlanPdf(opts: {
   artistName: string;
   plan: Pick<Plan, 'outcome' | 'measures' | 'phases'>;
   gaps: string[];
+  /** The plan's change history (rev 8), newest first as the API sends it. */
+  changes?: PlanChange[];
 }): Promise<void> {
-  const [{ jsPDF }, { svg2pdf }, server, { TimelineSvg }] = await Promise.all([
+  const [{ jsPDF }, { svg2pdf }, server, { TimelineSvg }, logo] = await Promise.all([
     import('jspdf'),
     import('svg2pdf.js'),
     import('react-dom/server'),
     import('../components/PlanTimeline.tsx'),
+    loadLogo(),
   ]);
   // react-dom/server is CommonJS: depending on the bundler its exports may sit on `default`.
   const renderToStaticMarkup = server.renderToStaticMarkup ?? server.default.renderToStaticMarkup;
@@ -95,21 +125,38 @@ export async function exportPlanPdf(opts: {
   let y = 0;
 
   const header = (first: boolean) => {
+    const band = first ? 34 : 14;
     doc.setFillColor(NAVY);
-    doc.rect(0, 0, W, first ? 34 : 14, 'F');
+    doc.rect(0, 0, W, band, 'F');
     doc.setTextColor('#FFFFFF');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(first ? 13 : 9);
-    doc.text('BLUEPRINT', M, first ? 13 : 9);
+    // The logo's navy background matches the band, so it sits in it as supplied.
+    const size = band - 2;
+    const textX = logo ? M + size + 4 : M;
+    if (logo) doc.addImage(logo, 'PNG', M - 2, 1, size, size, 'bmg-logo', 'FAST');
     if (first) {
-      doc.setFontSize(6.5);
-      doc.setFont('helvetica', 'normal');
-      doc.text('M U S I C   G R O U P', M, 17.5);
+      if (!logo) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(13);
+        doc.text('BLUEPRINT', M, 13);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.text('M U S I C   G R O U P', M, 17.5);
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.text('A R T I S T   P L A N', textX, 16);
+      }
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
-      doc.text(`${artistName}: artist plan`, M, 28);
+      doc.text(logo ? artistName : `${artistName}: artist plan`, textX, logo ? 25 : 28);
     } else {
+      if (!logo) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('BLUEPRINT', M, 9);
+      }
       doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
       doc.text(`${artistName}: artist plan`, W - M, 9, { align: 'right' });
     }
     y = first ? 44 : 24;
@@ -243,8 +290,45 @@ export async function exportPlanPdf(opts: {
   if (gaps.length === 0) write('No gaps: every measure is fed by a milestone.');
   for (const g of gaps) write(`•  ${g}`, { indent: 3 });
 
+  // ── Change history (rev 8): a timeline, oldest first ──
+  heading('Change history');
+  const history = changesOldestFirst(opts.changes ?? []);
+  if (history.length === 0) write('No changes recorded yet.', { colour: SLATE });
+  history.forEach((c, i) => {
+    need(12);
+    const page = doc.getCurrentPageInfo().pageNumber;
+    const dotY = y - 1.3;
+    doc.setDrawColor(NAVY);
+    doc.setLineWidth(0.4);
+    doc.setFillColor(i === history.length - 1 ? CORAL : PAPER);
+    doc.circle(M + 1.6, dotY, 1.4, 'FD');
+    const when = new Date(c.at).toLocaleString('en-AU', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+    write(`${when}   ${c.byName} · version ${c.version}`, {
+      size: 9.5,
+      bold: true,
+      colour: NAVY,
+      indent: 6,
+      gap: 0.8,
+    });
+    for (const line of c.changes) write(`•  ${line}`, { size: 9.5, indent: 9, gap: 0.6 });
+    y += 2.5;
+    // Join this dot to the next one while they're on the same page.
+    if (i < history.length - 1 && doc.getCurrentPageInfo().pageNumber === page) {
+      doc.setDrawColor(SLATE);
+      doc.setLineWidth(0.25);
+      doc.line(M + 1.6, dotY + 1.4, M + 1.6, y - 2.7);
+    }
+  });
+
   // Footer on every page.
   const pages = doc.getNumberOfPages();
+  const year = now.getFullYear();
   for (let i = 1; i <= pages; i++) {
     doc.setPage(i);
     doc.setFillColor(PAPER);
@@ -252,7 +336,7 @@ export async function exportPlanPdf(opts: {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(SLATE);
-    doc.text('Blueprint Music Group · blueprintmusic.group', M, H - 5);
+    doc.text(`${copyrightLine(year)}  ·  blueprintmusic.group`, M, H - 5);
     doc.text(`Page ${i} of ${pages}`, W - M, H - 5, { align: 'right' });
   }
 
