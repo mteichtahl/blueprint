@@ -355,3 +355,16 @@ Spec: `claude/BMG_Rev10_Folders_and_Permissions.md` in the BMG App project. Thes
   - Artists' folders are `/artists/{artistId}/folders` and `/{proxy+}`.
   - This keeps the API stack under its 460-resource guardrail: 113 methods, down from 117.
 - **Not built yet:** Copy to…, Download as ZIP, "new access" notifications, and drag and drop between the tree and the table. Moves use Move to….
+
+## Gig photos and videos (10 Nov 2026)
+
+- **Where they go:** uploaded on a gig's page and filed in the artist's Library under `gigs › <year> › <month> › <day>` for the gig's date (two-digit month and day). Missing folders are made on the first upload. The uploader owns them and needs Can edit where each one goes, as for New folder. Folders the artist already made are reused, with case ignored.
+- **One folder, even under races:** each path's folder has a fixed id. Two uploads at once can't make two `gigs` folders, because the second write fails its "doesn't exist yet" check and re-reads. If that id belongs to a folder that has since been renamed, a fresh id is used.
+- **Names:** `<gig name>_<img|video>_<00000>` plus the original extension. Numbers come from an atomic counter per artist, day, gig name (case ignored) and kind, reserved as a block for each batch. A renamed gig starts at 00001.
+- **Access:** the folder rules apply unchanged.
+  - Adding needs Can edit on the day folder, or wherever folders still have to be made.
+  - The list only shows files the person can open.
+  - On top of that, the person must be able to open the gig. Blueprint only sees gigs the artist has shared.
+- **Routes:** no new routes, so the stack stays under its guardrail.
+  - Listing uses `GET /artists/{id}/files?gigId=`.
+  - Uploads use `POST /artists/{id}/files` with `{ gigId, files: [...] }`, up to 20 files per request; the page sends larger selections in batches.
