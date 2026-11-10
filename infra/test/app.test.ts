@@ -455,7 +455,8 @@ describe('environment API', () => {
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
     // Rev 10: the seven library file routes became one /library/{proxy+} (which
     // also serves folders), plus two for artist folders: 118 - 7 + 1 + 2.
-    expect(routed.length).toBe(114);
+    // Rev 11: meetings are one function on /meetings/{proxy+}.
+    expect(routed.length).toBe(115);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
@@ -858,7 +859,51 @@ describe('Phase 6 policy review', () => {
   });
 });
 
+describe('environment meetings (rev 11)', () => {
+  const prod = Template.fromStack(stacks.environments[1]!.meetings);
+
+  it('gives Transcribe its own work bucket and key, emptied within 3 days', () => {
+    prod.hasResourceProperties('AWS::KMS::Alias', { AliasName: 'alias/bmg/prod/meetings-work' });
+    prod.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: Match.stringLikeRegexp('^bmg-prod-meetings-work-'),
+      LifecycleConfiguration: { Rules: [Match.objectLike({ ExpirationInDays: 3 })] },
+      PublicAccessBlockConfiguration: Match.objectLike({ BlockPublicAcls: true }),
+    });
+  });
+
+  it("only hears about this environment's transcription jobs", () => {
+    prod.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: {
+        source: ['aws.transcribe'],
+        'detail-type': ['Transcribe Job State Change'],
+        detail: {
+          TranscriptionJobName: [{ prefix: 'bmg-prod-meeting-' }],
+          TranscriptionJobStatus: ['COMPLETED', 'FAILED'],
+        },
+      },
+    });
+  });
+
+  it('limits Transcribe to its own jobs and checks the AI opt-out', () => {
+    const json = JSON.stringify(prod.toJSON());
+    expect(json).toContain('transcription-job/bmg-prod-meeting-*');
+    expect(json).toContain('organizations:DescribeEffectivePolicy');
+    prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-meetings-worker' });
+    prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-meetings' });
+  });
+});
+
 describe('Phase 6 web headers', () => {
+  it('lets the page itself use the microphone, for recording meetings (rev 11)', () => {
+    const web = Template.fromStack(stacks.environments[1]!.web);
+    const policy = Object.values(web.findResources('AWS::CloudFront::ResponseHeadersPolicy'))[0]!;
+    const header = policy.Properties.ResponseHeadersPolicyConfig.CustomHeadersConfig.Items.find(
+      (i: { Header: string }) => i.Header === 'Permissions-Policy',
+    );
+    expect(header.Value).toContain('microphone=(self)');
+    expect(header.Value).toContain('camera=()');
+  });
+
   it('sends Permissions-Policy and COOP from CloudFront (finding W2)', () => {
     const web = Template.fromStack(stacks.environments[1]!.web);
     web.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {

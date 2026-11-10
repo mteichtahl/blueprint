@@ -377,3 +377,22 @@ Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project, section 12.
 - **What changed from D12:** `blueprint ai opt-out` turns on AWS Organizations (all features) with this account as its only account, enables the `AISERVICES_OPT_OUT_POLICY` type on the root and attaches `bmg-ai-services-opt-out`, which opts out of every AI service and stops child policies opting back in. No other accounts, OUs or SCPs are created; the permission boundary still does the job SCPs would. The command checks each step first, so it's safe to re-run, and it refuses to touch an account that belongs to someone else's organization.
 - **Transcription fails closed:** before each job the meetings worker reads the account's effective opt-out policy (`DescribeEffectivePolicy`). If Transcribe isn't opted out, or the call fails, no audio is sent and the meeting says transcription is off. `blueprint ai status` shows the same check.
 - **Bedrock isn't affected:** it doesn't use customer content for service improvement, so summaries and plan suggestions don't depend on this.
+
+## Meeting notes: recordings and transcripts (rev 11, 11 Nov 2026)
+
+Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project. These are the places the build departs from it, and why.
+
+- **Where things live:**
+  - The meeting is `<space> / MEETING#<id>` (the artist's `ARTIST#…`, or `ORG#meetings` for Blueprint only), on GSI3 `MEETINGS` for the list. It holds metadata only.
+  - What was said (transcript, typed notes, marked moments, speaker names) is one JSON object in the space's own bucket: under the artist's key in `artist-data` (through a tagged data-access session), or the platform key in `org-data` (`meetings/`). Each change writes the next `content-<n>.json` and moves the meeting's `contentVersion` only if nobody saved in between (409 otherwise), so edits never overwrite each other and nothing said in a meeting sits in DynamoDB.
+  - The recording and the meeting note are ordinary documents in `Meetings › <year> › <month>`, made like gig media's folders. They're Blueprint only (`bmg-only`) until the meeting is shared with the artist; sharing flips both files and tells the knowledge base (`file.share`).
+- **Recording upload:** the browser keeps the recording on the device as it goes and uploads it when you stop, through the files API (`POST …/files` with `meetingId`), so it's scanned and encrypted like every upload. The spec's 30-second background pieces aren't built: one upload of at most 500 MB (the app's file limit, about 3 hours of speech) reuses the whole scan-and-promote path.
+- **Formats:** WebM, Ogg, M4A/AAC, MP4, MP3, WAV and FLAC. MOV is refused because Transcribe can't read it.
+- **Transcription (`bmg-<env>-meetings` stack):** the worker copies the scanned recording into its own work bucket and key (kept 3 days at most), and Transcribe reads and writes only there, so it never touches an artist's key. Job names carry the environment, the space and the attempt (`bmg-prod-meeting-<space>-<id>-<n>`), so the finished-job event leads back to the meeting and other environments' jobs are ignored. The work copies and the job are deleted as soon as the transcript is filed. The meeting note goes into quarantine and through the malware scan like an upload.
+- **Fails closed:** before every job the worker checks each artist involved (the linked artist and artist attendees) has AI on, and the account's AWS AI opt-out covers Transcribe. Otherwise nothing is sent and the meeting says why (`no-ai` or `off`); "Try again" re-checks.
+- **Not built yet:** the custom word list for names (spec 4), and live captions.
+- **Notifications:** `meeting.processed` tells only the person who recorded it (bell, email, push) when the transcript is in or couldn't be made.
+- **Deleting a meeting** removes the meeting and its content. The recording and note are documents, so they follow the document rules: the app deletes them first where the person may.
+- **Microphone:** the `Permissions-Policy` header now allows `microphone=(self)` (it was `()`), so the app itself can record. Camera stays off.
+- **Data-access callers (I1):** `api-meetings` and `api-meetings-worker` join the list, which is now 10 roles.
+- **API stack size:** the meetings API function lives in the meetings stack; the API stack only has `/meetings/{proxy+}` and its invoke permission (the list is `/meetings/items`). The API stack is now at 459 of its 460 guardrail, so **the next new route must go into a second API stack**.

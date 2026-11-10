@@ -11,7 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { authorize, type Principal } from '@bmg/authz';
 import { DataAccessSessions, isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
-import type { z } from 'zod';
+import { z } from 'zod';
 import {
   archivedKey,
   currentVersion,
@@ -36,6 +36,7 @@ import {
   LibraryPatch,
   LibraryUpload,
   manageAllowed,
+  MAX_UPLOAD_BYTES,
   ownerOf,
   PENDING_TTL_SECONDS,
   publicFile,
@@ -74,6 +75,16 @@ import {
   type MediaKind,
 } from '../gigs/media.ts';
 import { artistPk, newId } from '../workspace/model.ts';
+import {
+  isMeetingAudio,
+  MAX_DURATION_SEC,
+  meetingAllowed,
+  meetingFileName,
+  meetingFolderLabel,
+  meetingFolderPath,
+  MEETING_ID_PATTERN,
+} from '../meetings/model.ts';
+import { loadMeeting, updateMeeting } from '../meetings/store.ts';
 import {
   audit,
   authContext,
@@ -826,16 +837,22 @@ async function reserve(artistId: string, gig: Gig, kind: MediaKind, count: numbe
 }
 
 type ArtistSpace = { kind: 'artist'; artistId: string };
+type AnySpace = ArtistSpace | { kind: 'library' };
 
 /**
- * Where a gig's media lives: the day folder, if it exists yet, and whether
- * this person could add to it (Can edit on the day folder, or on the deepest
- * folder that exists, or the Library's top level, since the rest gets made).
+ * A folder path in a space (gig media's `gigs › year › month › day`, a
+ * meeting's `Meetings › year › month`): the folders that exist, the names
+ * still missing, and whether this person could add there (Can edit on the
+ * deepest folder that exists, or the space's top level, since the rest gets
+ * made).
  */
-async function dayFolder(principal: Principal, artistId: string, gig: Gig) {
-  const space: ArtistSpace = { kind: 'artist', artistId };
-  const map = await foldersOf(artistPk(artistId));
-  const names = mediaFolderPath(gig.date);
+async function pathFolder(
+  principal: Principal,
+  pk: string,
+  space: AnySpace,
+  names: readonly string[],
+) {
+  const map = await foldersOf(pk);
   const { found, missing } = walkFolderPath(map.values(), names);
   const deepest = found.at(-1);
   const access = deepest
@@ -847,9 +864,20 @@ async function dayFolder(principal: Principal, artistId: string, gig: Gig) {
     names,
     found,
     missing,
-    day: missing.length ? undefined : deepest,
+    leaf: missing.length ? undefined : deepest,
     access,
   };
+}
+
+/** Where a gig's media lives: its day folder (see pathFolder). */
+async function dayFolder(principal: Principal, artistId: string, gig: Gig) {
+  const where = await pathFolder(
+    principal,
+    artistPk(artistId),
+    { kind: 'artist', artistId },
+    mediaFolderPath(gig.date),
+  );
+  return { ...where, day: where.leaf };
 }
 
 /** `GET /artists/{artistId}/files?gigId=…`: the gig's photos and videos this person can open. */
@@ -874,21 +902,24 @@ async function listGigMedia(principal: Principal, artistId: string, gigId: strin
 }
 
 /**
- * Makes the missing folders of `gigs › year › month › day`. The person needs
- * Can edit where each new folder goes, as for New folder; they own what they
- * make. Ids are fixed per path so two uploads at once share one folder.
+ * Makes the missing folders of a path in a space (see pathFolder). The person
+ * needs Can edit where each new folder goes, as for New folder; they own what
+ * they make. Ids are fixed per path so two uploads at once share one folder.
  */
-async function makeDayFolder(
+async function makePathFolder(
   event: APIGatewayProxyEvent,
   principal: Principal,
-  artistId: string,
-  gig: Gig,
+  pk: string,
+  space: AnySpace,
+  names: readonly string[],
+  extra: Record<string, string | boolean> = {},
 ) {
-  const pk = artistPk(artistId);
-  let where = await dayFolder(principal, artistId, gig);
+  const label = names.join(' › ');
+  const idKey = space.kind === 'artist' ? space.artistId : 'library';
+  let where = await pathFolder(principal, pk, space, names);
   for (let attempt = 0; where.missing.length && attempt < 3; attempt++) {
     if (!can(where.access, 'view') && where.found.length) {
-      throw new HttpError(403, `You can’t add to ${mediaFolderLabel(gig.date)}`);
+      throw new HttpError(403, `You can’t add to ${label}`);
     }
     if (!can(where.access, 'edit')) {
       throw new HttpError(
@@ -901,7 +932,7 @@ async function makeDayFolder(
     for (const [i, name] of where.missing.entries()) {
       const path = where.names.slice(0, where.found.length + i + 1);
       // The path's fixed id first; if that's taken by a folder since renamed, a fresh one.
-      const folderId = attempt === 0 ? pathFolderId(artistId, path) : newId();
+      const folderId = attempt === 0 ? pathFolderId(idKey, path) : newId();
       let made: string | undefined;
       try {
         await db.send(
@@ -923,7 +954,11 @@ async function makeDayFolder(
           }),
         );
         made = folderId;
-        await audit(event, 'folder.create', 'success', { artistId, folderId, gigMedia: true });
+        await audit(event, 'folder.create', 'success', {
+          ...(space.kind === 'artist' ? { artistId: space.artistId } : { library: true }),
+          folderId,
+          ...extra,
+        });
       } catch (e) {
         if ((e as { name?: string }).name !== 'ConditionalCheckFailedException') throw e;
         // Someone else made it a moment ago: read the folders again and carry on from there.
@@ -933,17 +968,31 @@ async function makeDayFolder(
       parentId = made;
     }
     folderCache.delete(pk);
-    where = await dayFolder(principal, artistId, gig);
+    where = await pathFolder(principal, pk, space, names);
   }
-  if (!where.day) throw new HttpError(409, 'Couldn’t make the gig’s folder. Please try again.');
-  if (!can(where.access, 'view')) {
-    throw new HttpError(403, `You can’t add to ${mediaFolderLabel(gig.date)}`);
-  }
+  if (!where.leaf) throw new HttpError(409, `Couldn’t make ${label}. Please try again.`);
+  if (!can(where.access, 'view')) throw new HttpError(403, `You can’t add to ${label}`);
   if (!can(where.access, 'edit')) {
-    throw new HttpError(403, `You can open ${mediaFolderLabel(gig.date)} but not add to it`);
+    throw new HttpError(403, `You can open ${label} but not add to it`);
   }
-  return where.day;
+  return where.leaf;
 }
+
+/** Makes a gig's day folder (gigs › year › month › day) if it isn't there yet. */
+const makeDayFolder = (
+  event: APIGatewayProxyEvent,
+  principal: Principal,
+  artistId: string,
+  gig: Gig,
+) =>
+  makePathFolder(
+    event,
+    principal,
+    artistPk(artistId),
+    { kind: 'artist', artistId },
+    mediaFolderPath(gig.date),
+    { gigMedia: true },
+  );
 
 /**
  * `POST /artists/{artistId}/files` with a `gigId`: several photos and videos
@@ -1010,6 +1059,127 @@ async function uploadGigMedia(
   });
 }
 
+// ── Meeting audio (rev 11): a recording, filed in Meetings › year › month ──
+const MeetingAudioUpload = z
+  .object({
+    meetingId: z.string().regex(MEETING_ID_PATTERN, 'No such meeting'),
+    name: z.string().trim().min(1).max(200),
+    size: z
+      .number()
+      .int()
+      .min(1, 'The recording is empty')
+      .max(MAX_UPLOAD_BYTES, `Recordings are limited to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`),
+    contentType: z
+      .string()
+      .max(100)
+      // Recorders say `audio/webm;codecs=opus`; the upload is pinned to the plain type.
+      .transform((t) => t.toLowerCase().split(';')[0]!.trim())
+      .refine(isMeetingAudio, 'Pick an audio recording (or an MP4 or WebM video)'),
+    durationSec: z.number().min(0).max(MAX_DURATION_SEC).optional(),
+  })
+  .strict();
+
+/**
+ * `POST …/files` with a `meetingId`: the meeting's recording. Blueprint only.
+ * It's named after the meeting and filed in `Meetings › year › month` of the
+ * meeting's space (made if needed; folder access applies, rev 10). It's
+ * Blueprint only until the meeting is shared with the artist. When the scan
+ * passes, the meetings worker transcribes it.
+ */
+async function uploadMeetingAudio(
+  event: APIGatewayProxyEvent,
+  principal: Principal,
+  space: AnySpace,
+  show: (f: FileRecord) => unknown,
+) {
+  const body = parseBody(event, MeetingAudioUpload);
+  const mSpace = space.kind === 'artist' ? space : ({ kind: 'library' } as const);
+  if (!meetingAllowed(principal, mSpace, 'write').allow) {
+    throw new HttpError(404, 'No such meeting');
+  }
+  const meeting = await loadMeeting(mSpace, body.meetingId);
+  if (meeting.audioFileId) {
+    const prior = await db.send(
+      new GetCommand({
+        TableName: table(),
+        Key: {
+          PK: space.kind === 'artist' ? artistPk(space.artistId) : LIBRARY_PK,
+          SK: fileSk(meeting.audioFileId),
+        },
+      }),
+    );
+    // A recording that was rejected by the scan (or never arrived) can be sent again.
+    if (prior.Item && (prior.Item as FileRecord).status !== 'rejected') {
+      throw new HttpError(409, 'This meeting already has its recording');
+    }
+  }
+  const pk = space.kind === 'artist' ? artistPk(space.artistId) : LIBRARY_PK;
+  const folder = await makePathFolder(
+    event,
+    principal,
+    pk,
+    space,
+    meetingFolderPath(meeting.startedAt),
+    { meeting: true },
+  );
+  const fileId = newId();
+  const rec: FileRecord = {
+    fileId,
+    scope: space.kind,
+    ...(space.kind === 'artist' ? { artistId: space.artistId } : {}),
+    name: meetingFileName(meeting, 'audio', body.name),
+    size: body.size,
+    contentType: body.contentType,
+    status: 'pending',
+    ...(space.kind === 'artist'
+      ? { visibility: meeting.shared ? ('normal' as const) : ('bmg-only' as const) }
+      : { sharing: 'bmg-only' as const, sharedWithArtistIds: [] }),
+    uploadedBy: principal.sub,
+    uploaderRole: principal.role,
+    folderId: folder.folderId,
+    editAccess: 'everyone',
+    createdAt: new Date().toISOString(),
+  };
+  await createRecord(pk, { ...rec, meetingId: meeting.meetingId } as FileRecord);
+  await updateMeeting(
+    meeting,
+    {
+      audioFileId: fileId,
+      folderId: folder.folderId,
+      status: 'uploading',
+      ...(body.durationSec !== undefined ? { durationSec: Math.round(body.durationSec) } : {}),
+    },
+    { remove: ['statusReason'] },
+  );
+  const upload = await uploadTarget(
+    quarantineKey(space.kind, fileId, space.kind === 'artist' ? space.artistId : undefined),
+    body.size,
+    body.contentType,
+  );
+  await audit(event, 'meeting.audio-upload-requested', 'success', {
+    ...(space.kind === 'artist' ? { artistId: space.artistId } : { library: true }),
+    meetingId: meeting.meetingId,
+    fileId,
+    size: body.size,
+  });
+  return json(201, {
+    folder: meetingFolderLabel(meeting.startedAt),
+    folderId: folder.folderId,
+    file: show(rec),
+    upload,
+  });
+}
+
+/** Whether an upload request is for a meeting's recording (it names the meeting). */
+function isMeetingUpload(event: APIGatewayProxyEvent): boolean {
+  try {
+    const b = JSON.parse(event.body ?? '{}') as unknown;
+    return typeof b === 'object' && b !== null && 'meetingId' in b;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether an upload request is for gig media (it names the gig). */
 function isGigUpload(event: APIGatewayProxyEvent): boolean {
   try {
@@ -1072,6 +1242,9 @@ export const handler = handle(async (raw) => {
       const artistId = artistIdParam(event);
       ensure(canArtistSpace(principal, 'write', artistId));
       if (isGigUpload(event)) return uploadGigMedia(event, principal, artistId, show);
+      if (isMeetingUpload(event)) {
+        return uploadMeetingAudio(event, principal, { kind: 'artist', artistId }, show);
+      }
       const body = parseBody(event, ArtistUpload);
       const folder = await uploadFolder(
         principal,
@@ -1320,6 +1493,9 @@ export const handler = handle(async (raw) => {
 
     case 'POST /library/files': {
       ensure(authorize(principal, 'write', { kind: 'org-shared', visibility: 'bmg-only' }));
+      if (isMeetingUpload(event)) {
+        return uploadMeetingAudio(event, principal, { kind: 'library' }, show);
+      }
       const body = parseBody(event, LibraryUpload);
       const folder = await uploadFolder(principal, LIBRARY_PK, { kind: 'library' }, body.folderId);
       const fileId = newId();

@@ -22,6 +22,7 @@ import type { IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
 import { Rule, Schedule, type IEventBus } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { Function as LambdaFn, type IFunction } from 'aws-cdk-lib/aws-lambda';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
@@ -56,6 +57,8 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly actionKey: IKey;
   /** The newsroom stack's draft function ("Regenerate"). */
   readonly newsroomDraftArn: string;
+  /** The meetings stack's API function (rev 11), served at /meetings. */
+  readonly meetingsFunctionArn: string;
 }
 
 /**
@@ -698,6 +701,7 @@ export class ApiStack extends BmgStack {
     allow(addressBook, 'VenueBookings', ['dynamodb:Query'], [`${main}/index/GSI3`]);
     putEvents(addressBook);
     putEvents(newsroom);
+
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
     // Job title (rev 7) and profile picture live on USER#<sub> / PROFILE.
     // BatchGetItem: GET /avatars (profile pictures on USER#<sub> / PROFILE and ARTIST#<id> / AVATAR).
@@ -820,6 +824,7 @@ export class ApiStack extends BmgStack {
           'todo.commented',
           'connector.reminder',
           'connector.needsReauth',
+          'meeting.processed',
         ],
       },
       targets: [
@@ -1017,8 +1022,8 @@ export class ApiStack extends BmgStack {
     // One proxy integration and one invoke permission per function, scoped to
     // this API. LambdaIntegration adds two permissions per route, which pushed
     // the stack past CloudFormation's 500-resource limit.
-    const integrations = new Map<BmgFunction, Integration>();
-    const integrationFor = (handler: BmgFunction) => {
+    const integrations = new Map<IFunction, Integration>();
+    const integrationFor = (handler: IFunction) => {
       let i = integrations.get(handler);
       if (!i) {
         handler.addPermission('ApiInvoke', {
@@ -1124,6 +1129,17 @@ export class ApiStack extends BmgStack {
       authorizer,
       requestValidator: validator,
     });
+    // Meeting notes (rev 11): one function under a proxy resource. The function
+    // lives in the meetings stack; only its routes and invoke permission are here.
+    const meetings = LambdaFn.fromFunctionAttributes(this, 'MeetingsFunction', {
+      functionArn: props.meetingsFunctionArn,
+      sameEnvironment: true,
+    });
+    // Only the proxy (the list is /meetings/items): the stack is at its guardrail.
+    this.api.root
+      .addResource('meetings')
+      .addResource('{proxy+}')
+      .addMethod('ANY', integrationFor(meetings), { authorizer, requestValidator: validator });
     // Access & permissions (settings and the Blueprint team): one proxy route
     // on the artists function, which already manages Cognito users.
     this.api.root

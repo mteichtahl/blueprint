@@ -48,6 +48,9 @@ export const DATA_ACCESS_CALLERS = [
   'api-connectors-sync',
   'api-kb-provision',
   'api-kb-sync',
+  // Meeting notes (rev 11): content under the artist's key, recordings to transcribe.
+  'api-meetings',
+  'api-meetings-worker',
 ] as const;
 
 export class KeysStack extends BmgStack {
