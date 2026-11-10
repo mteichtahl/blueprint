@@ -15,6 +15,7 @@ import {
   findDuplicate,
   fullName,
   applyVenuePatch,
+  countVenueBookings,
   findDuplicateVenue,
   VenueBody,
   venueFor,
@@ -39,6 +40,7 @@ import {
   venueLogoSk,
   type VenueLogoMeta,
 } from '../address-book/logo.ts';
+import { EVENTS_PK, GIGS_GSI3PK } from '../events/model.ts';
 import { newId } from '../workspace/model.ts';
 import {
   audit,
@@ -53,6 +55,41 @@ import {
 } from '../lib.ts';
 
 const table = () => env('MAIN_TABLE');
+
+/** Every item from a query, following pages; only the attributes asked for. */
+async function queryAll(
+  input: ConstructorParameters<typeof QueryCommand>[0],
+): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const res = await db.send(new QueryCommand({ ...input, ExclusiveStartKey: start }));
+    items.push(...(res.Items ?? []));
+    start = res.LastEvaluatedKey;
+  } while (start);
+  return items;
+}
+
+/** Booking counts for the venue cards (shared gigs and Blueprint events). */
+async function venueBookings(): Promise<Map<string, number>> {
+  const [gigs, events] = await Promise.all([
+    queryAll({
+      TableName: table(),
+      IndexName: 'GSI3',
+      KeyConditionExpression: 'GSI3PK = :pk',
+      ExpressionAttributeValues: { ':pk': GIGS_GSI3PK },
+      ProjectionExpression: 'venueId, #s',
+      ExpressionAttributeNames: { '#s': 'status' },
+    }),
+    queryAll({
+      TableName: table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :e)',
+      ExpressionAttributeValues: { ':pk': EVENTS_PK, ':e': 'EVENT#' },
+      ProjectionExpression: 'venueId',
+    }),
+  ]);
+  return countVenueBookings(gigs, events);
+}
 const ID = /^[a-z0-9]{10,40}$/;
 const isBmg = (p: Principal) => p.role === 'bmg-admin' || p.role === 'bmg-staff';
 
@@ -295,14 +332,21 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       ensure(principal, 'read');
       const f = venueFilter(event);
       const withArchived = bmg && event.queryStringParameters?.archived === 'true';
-      const [venues, contacts] = await Promise.all([allVenues(), allContacts()]);
+      const [venues, contacts, bookings] = await Promise.all([
+        allVenues(),
+        allContacts(),
+        venueBookings(),
+      ]);
       const byId = new Map(contacts.map((c) => [c.contactId, c]));
       return json(200, {
         venues: venues
           .filter((v) => withArchived || !v.archived)
           .filter((v) => venueMatches(v, f))
           .sort((a, b) => a.name.localeCompare(b.name, 'en-AU', { sensitivity: 'base' }))
-          .map((v) => venueFor(v, bmg, v.createdBy === principal.sub, byId)),
+          .map((v) => ({
+            ...venueFor(v, bmg, v.createdBy === principal.sub, byId),
+            bookings: bookings.get(v.venueId) ?? 0,
+          })),
       });
     }
 
@@ -329,8 +373,12 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       ensure(principal, 'read');
       const v = await loadVenue(idParam(id));
       if (v.archived && !bmg) throw new HttpError(404, 'No such venue');
-      const contacts = new Map((await allContacts()).map((c) => [c.contactId, c]));
-      return json(200, venueFor(v, bmg, v.createdBy === principal.sub, contacts));
+      const [all, bookings] = await Promise.all([allContacts(), venueBookings()]);
+      const contacts = new Map(all.map((c) => [c.contactId, c]));
+      return json(200, {
+        ...venueFor(v, bmg, v.createdBy === principal.sub, contacts),
+        bookings: bookings.get(v.venueId) ?? 0,
+      });
     }
 
     case 'PATCH /venues/:id': {

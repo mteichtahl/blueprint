@@ -549,6 +549,8 @@ describe('environment web app', () => {
         .ContentSecurityPolicy;
     expect(JSON.stringify(csp)).toContain("frame-ancestors 'none'");
     expect(JSON.stringify(csp)).not.toContain('unsafe-inline');
+    // Only Google Maps may be framed (venue details), nothing else.
+    expect(JSON.stringify(csp)).toMatch(/frame-src https:\/\/www\.google\.com;/);
   });
 
   it('owns the web client: our own sign-in, with no hosted UI', () => {

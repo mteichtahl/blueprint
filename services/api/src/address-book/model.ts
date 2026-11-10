@@ -312,3 +312,26 @@ export function applyVenuePatch(v: Venue, patch: VenuePatchInput, isBmg: boolean
 /** Venues that list this contact as manager or booker (a contact in use can't be deleted). */
 export const venuesUsing = (venues: readonly Venue[], contactId: string) =>
   venues.filter((v) => v.managerContactId === contactId || v.bookerContactId === contactId);
+
+// ── Bookings per venue ──────────────────────────────────────────────────
+/** Gig statuses that mean the venue was actually booked (not an idea, pitch or cancellation). */
+export const BOOKED_GIG_STATUSES: ReadonlySet<string> = new Set(['confirmed', 'booked', 'played']);
+
+/**
+ * How many times each venue has been booked: shared artist gigs that are
+ * confirmed, booked or played, plus Blueprint events, picked from the venues
+ * list (venueId). Typed-in venue names aren't counted.
+ */
+export function countVenueBookings(
+  gigs: readonly { venueId?: unknown; status?: unknown }[],
+  events: readonly { venueId?: unknown }[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  const add = (id: unknown) => {
+    if (typeof id === 'string' && id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  };
+  for (const g of gigs)
+    if (typeof g.status === 'string' && BOOKED_GIG_STATUSES.has(g.status)) add(g.venueId);
+  for (const e of events) add(e.venueId);
+  return counts;
+}
