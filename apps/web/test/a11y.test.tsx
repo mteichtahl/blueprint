@@ -314,10 +314,25 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     ['stats', /^My stats/],
     ['connectors', /^Connect Instagram/],
     ['submit', /^Upload music or lyrics/],
-    ['profile', 'Profile & preferences'],
   ] as const)('artist phone: %s', async (_view, name) => {
     await phone();
     await click(name);
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist phone: account menu open', async () => {
+    await phone();
+    await click('Your account');
+    expect(screen.getByRole('menu', { name: 'Your account' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist phone: profile (from the account menu)', async () => {
+    await phone();
+    await click('Your account');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile & preferences' }));
+    await settle();
+    expect(screen.getByRole('button', { name: 'Upload a photo' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 

@@ -53,6 +53,126 @@ function AppearanceSwitch({ theme, onChange }: { theme: Theme; onChange: (t: The
   );
 }
 
+// ── Profile menu: the user's picture in the header opens a dropdown ─────────
+export interface ProfileMenuItem {
+  label: string;
+  icon?: IconName;
+  onSelect: () => void;
+}
+
+export function ProfileMenu({
+  userName,
+  roleLabel,
+  avatar,
+  size = 36,
+  items,
+  onProfile,
+  onSignOut,
+}: {
+  userName: string;
+  roleLabel: string;
+  avatar?: string | null | undefined;
+  size?: number;
+  /** Extra rows between "Profile & preferences" and "Sign out". */
+  items?: ProfileMenuItem[];
+  onProfile: () => void;
+  onSignOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        button.current?.focus();
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      const rows = [...(root.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+      const i = rows.indexOf(document.activeElement as HTMLElement);
+      const next =
+        e.key === 'ArrowDown' ? (i + 1) % rows.length : (i - 1 + rows.length) % rows.length;
+      rows[next]?.focus();
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  const pick = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+  const rows: ProfileMenuItem[] = [
+    { label: 'Profile & preferences', icon: 'user', onSelect: onProfile },
+    ...(items ?? []),
+  ];
+  return (
+    <div ref={root} className="relative">
+      <button
+        ref={button}
+        type="button"
+        aria-label="Your account"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Avatar name={userName} src={avatar} size={size} className="!bg-cta !text-white" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Your account"
+          className="absolute top-[calc(100%+8px)] right-0 z-50 flex w-64 flex-col overflow-hidden rounded-xl border border-input bg-card text-foreground shadow-md"
+        >
+          <div className="flex items-center gap-3 border-b border-input px-4 py-3">
+            <Avatar name={userName} src={avatar} size={40} className="!bg-cta !text-white" />
+            <span className="min-w-0 flex-1">
+              <b className="block truncate text-[15px]">{userName}</b>
+              <span className="src block truncate">{roleLabel}</span>
+            </span>
+          </div>
+          <div className="flex flex-col py-1">
+            {rows.map((r) => (
+              <button
+                key={r.label}
+                type="button"
+                role="menuitem"
+                className="flex min-h-11 items-center gap-2.5 px-4 text-left text-[15px] hover:bg-secondary focus-visible:bg-secondary focus-visible:outline-none"
+                onClick={pick(r.onSelect)}
+              >
+                {r.icon && <Icon name={r.icon} size={18} className="text-muted-foreground" />}
+                {r.label}
+              </button>
+            ))}
+          </div>
+          <div className="border-t border-input py-1">
+            <button
+              type="button"
+              role="menuitem"
+              className="flex min-h-11 w-full items-center gap-2.5 px-4 text-left text-[15px] font-bold hover:bg-secondary focus-visible:bg-secondary focus-visible:outline-none"
+              onClick={pick(onSignOut)}
+            >
+              <Icon name="logout" size={18} className="text-muted-foreground" />
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── BMG desktop shell: 264px blueprint sidebar + sticky top bar ──────────────
 export interface NavItem {
   id: string;
@@ -210,31 +330,6 @@ export function BmgShell({
       <div className="mt-auto pt-5">
         <AppearanceSwitch theme={theme} onChange={onTheme} />
       </div>
-      <div className="ws mt-2.5">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-          onClick={() => go('profile')}
-        >
-          <Avatar
-            name={userName}
-            src={avatar}
-            size={34}
-            className="!rounded-lg !bg-cta !text-white"
-          />
-          <span className="min-w-0 flex-1">
-            <b className="block truncate text-[15px]">{userName}</b>
-            <span className="block text-[13px] text-[#D3D8DE]">{roleLabel} · Profile</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="rounded-md px-2 py-1 text-[13px] font-bold text-[#D3D8DE] hover:bg-white/10 hover:text-white"
-        >
-          Sign out
-        </button>
-      </div>
     </nav>
   );
 
@@ -318,9 +413,13 @@ export function BmgShell({
           <div className="ml-auto flex items-center gap-2.5">
             {bell}
             {topActions}
-            <button type="button" aria-label="Profile & preferences" onClick={onProfile}>
-              <Avatar name={userName} src={avatar} size={36} className="!bg-cta !text-white" />
-            </button>
+            <ProfileMenu
+              userName={userName}
+              roleLabel={roleLabel}
+              avatar={avatar}
+              onProfile={onProfile}
+              onSignOut={onSignOut}
+            />
           </div>
         </header>
         <main
