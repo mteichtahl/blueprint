@@ -1031,6 +1031,7 @@ export class ApiStack extends BmgStack {
     route('PUT', '/artists/{artistId}/brand-kit', workspace);
     route('GET', '/artists/{artistId}/plan', workspace);
     route('PUT', '/artists/{artistId}/plan', workspace);
+    route('GET', '/artists/{artistId}/plan/history', workspace);
     route('GET', '/artists/{artistId}/todos', workspace);
     route('POST', '/artists/{artistId}/todos', workspace);
     route('PATCH', '/artists/{artistId}/todos/{todoId}', workspace);

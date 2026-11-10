@@ -114,6 +114,18 @@ export interface PlanResponse {
   exists: boolean;
 }
 
+/** One saved change to a plan (rev 8): who, when and what, newest first. */
+export interface PlanChange {
+  changeId: string;
+  /** The plan version this change produced. */
+  version: number;
+  at: string;
+  kind: 'created' | 'edited' | 'stage-added';
+  /** "Blueprint", or "Blueprint · <job title>". */
+  byName: string;
+  changes: string[];
+}
+
 /** Same limits as the API (services/api/src/workspace/model.ts). */
 export const OUTCOME_MAX = 2000;
 export const GOAL_MAX = 4000;

@@ -277,3 +277,11 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - **Who sees emails:** staff can view the team list, but without email addresses.
 - **One proxy route:** `/access/{proxy+}` on the artists function (which already manages Cognito users), to keep the API stack under CloudFormation's limit. It's now at 448.
 - **Roster Terms and AI columns:** the consent handler (and `GET /me`, for artists who chose earlier) records the accepted terms version and date on `ARTIST#id / AI`, next to the AI choice. The roster shows these to Blueprint only.
+
+## Notes: Plan history and branded PDF (rev 8, 10 Nov 2026)
+
+- **Every plan save writes a history entry** (`PLANLOG#<at>#<id>` next to the plan) in the same transaction as the plan, so a save and its entry land together or not at all. Adding a custom stage to plans writes one too. Saves that change nothing write no entry.
+- **Entries say what changed in plain words** (`workspace/plan-history.ts`): outcome, success measures, stages added, removed, renamed, re-dated or reordered, and milestones added, removed, moved, renamed, ticked, re-dated or re-linked. Very large saves are capped at 40 lines.
+- **Who:** staff have no names in the app, so an entry shows "Blueprint", or "Blueprint · <job title>" when the person set one. The person's id is stored but not returned.
+- **Artists and Blueprint both see the history** (`GET /artists/{id}/plan/history`, the plan's History tab), and the PDF ends with it as a timeline, oldest first. History starts with this release; earlier saves weren't recorded.
+- **The PDF header uses the official white-on-navy logo** from `/brand/bmg-logo-white-on-navy.png` (the file the emails use), placed as supplied in the navy band. It is never redrawn; if the file isn't deployed, the PDF falls back to the text wordmark. The footer carries "© <year> Blueprint Music Group. All rights reserved."
