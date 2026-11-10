@@ -195,6 +195,8 @@ export class ApiStack extends BmgStack {
         ARTIST_BUCKET: bucket('artist-data'),
         LIBRARY_BUCKET: bucket('org-data'),
         DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
+        // Owners and editors are people: names and who can be chosen (rev 8).
+        USER_POOL_ID: props.userPool.userPoolId,
       },
       // The S3 presigners aren't guaranteed to be in the Lambda runtime.
       true,
@@ -467,6 +469,8 @@ export class ApiStack extends BmgStack {
       'FileRecords',
       [
         'dynamodb:GetItem',
+        // Owner and editor names: profiles, roster names and staff assignments (rev 8).
+        'dynamodb:BatchGetItem',
         'dynamodb:PutItem',
         'dynamodb:UpdateItem',
         'dynamodb:DeleteItem',
@@ -494,6 +498,8 @@ export class ApiStack extends BmgStack {
     allow(files, 'SignLibraryDownloads', ['s3:GetObject'], [libraryObjects]);
     allow(files, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
     putEvents(files);
+    // Who can own or edit a document: the artist, admin and staff groups (rev 8).
+    allow(files, 'ListPeople', ['cognito-idp:ListUsersInGroup'], [props.userPool.userPoolArn]);
     acknowledge(
       files.role!,
       'Uploads are signed for the artists/ and library/ prefixes of the quarantine bucket; library downloads for library/ in org-data.',

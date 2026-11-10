@@ -107,7 +107,7 @@ describe('assets', () => {
         createdAt: '',
         asset: { category: 'logo', title: 'Wordmark', approvedFor: [], status: 'approved' },
       },
-      'u',
+      { sub: 'u', role: 'artist' },
     );
     expect(f.asset).toMatchObject({ title: 'Wordmark' });
   });

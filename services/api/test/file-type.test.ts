@@ -5,10 +5,12 @@ import {
   LibraryPatch,
   LibraryUpload,
   publicFile,
-  renameAllowed,
+  editAllowed,
   type FileRecord,
 } from '../src/files/model.ts';
 import { detectFileType, extensionOf, guessFileType } from '../src/files/type.ts';
+
+const U1 = { sub: 'u1', role: 'bmg-admin' as const };
 
 const bytes = (...parts: (string | number[])[]) =>
   Uint8Array.from(
@@ -139,7 +141,7 @@ describe('names and previews on upload', () => {
       createdAt: '2026-11-10T00:00:00Z',
       thumb: { status: 'available', size: 900, contentType: 'image/webp' },
     };
-    const shown = publicFile(rec, 'u1');
+    const shown = publicFile(rec, U1);
     expect(shown).toMatchObject({
       name: 'IMG_0042.JPG',
       title: 'Mixer Night poster',
@@ -147,13 +149,13 @@ describe('names and previews on upload', () => {
       hasThumbnail: true,
       fileType: { kind: 'image', label: 'JPEG image', detected: false },
     });
-    const plain = publicFile({ ...rec, title: undefined, thumb: undefined }, 'u1');
+    const plain = publicFile({ ...rec, title: undefined, thumb: undefined }, U1);
     expect(plain.displayName).toBe('IMG_0042.JPG');
     expect(plain.hasThumbnail).toBe(false);
     // Once scanned, the detected type wins over the guess.
     const detected = publicFile(
       { ...rec, fileType: detectFileType(bytes('%PDF-1.4'), rec.name, rec.contentType) },
-      'u1',
+      U1,
     );
     expect(detected.fileType).toMatchObject({ kind: 'pdf', detected: true });
   });
@@ -179,17 +181,17 @@ describe('renaming after upload', () => {
   const otherArtist = { sub: 'u-art2', role: 'artist' as const };
   const staff = { sub: 'u-other', role: 'bmg-staff' as const };
 
-  it('Blueprint renames library documents; artists cannot', () => {
-    expect(renameAllowed(staff, lib)).toBeUndefined();
-    expect(renameAllowed(artist, lib)).toMatch(/Only Blueprint/);
+  it('the whole Blueprint team renames library documents by default; artists cannot', () => {
+    expect(editAllowed(staff, lib)).toBeUndefined();
+    expect(editAllowed(artist, lib)).toMatch(/Only Blueprint/);
   });
 
-  it("each side renames its own side's files only", () => {
-    expect(renameAllowed(artist, artistUpload)).toBeUndefined();
-    expect(renameAllowed(otherArtist, artistUpload)).toMatch(/your own uploads/);
-    expect(renameAllowed(artist, bmgUpload)).toMatch(/your own uploads/);
-    expect(renameAllowed(staff, bmgUpload)).toBeUndefined();
-    expect(renameAllowed(staff, artistUpload)).toMatch(/Only the artist/);
+  it('other files are locked to their owner by default (rev 8)', () => {
+    expect(editAllowed(artist, artistUpload)).toBeUndefined();
+    expect(editAllowed(otherArtist, artistUpload)).toMatch(/locked/);
+    expect(editAllowed(artist, bmgUpload)).toMatch(/locked/);
+    expect(editAllowed({ sub: 'u-staff', role: 'bmg-staff' }, bmgUpload)).toBeUndefined();
+    expect(editAllowed(staff, artistUpload)).toMatch(/locked/);
   });
 
   it('accepts a new name, or an empty one to show the file name again', () => {
