@@ -1101,8 +1101,9 @@ function NewChat({
 /* Share menu                                                               */
 /* ------------------------------------------------------------------------ */
 
-type ShareKind = 'document' | 'photo' | 'review' | 'gig' | 'todo' | 'event';
+type ShareKind = 'upload' | 'document' | 'photo' | 'review' | 'gig' | 'todo' | 'event';
 const SHARE: Record<ShareKind, { label: string; colour: string; icon: ReactNode }> = {
+  upload: { label: 'Upload a file', colour: '#34506E', icon: <Icon name="upload" size={22} /> },
   document: { label: 'Document', colour: '#7A4FA3', icon: <Icon name="file" size={22} /> },
   photo: { label: 'Photo', colour: '#1F6F8B', icon: <G n="image" size={22} /> },
   review: { label: 'Submit for review', colour: '#D9534F', icon: <Icon name="upload" size={22} /> },
@@ -1129,6 +1130,7 @@ function SharePanel({
     { key: string; title: string; subtitle: string; attachment: ChatAttachment }[] | null
   >(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [accept, setAccept] = useState('image/*');
   const fileInput = useRef<HTMLInputElement>(null);
 
   /** The artist this chat is about: the artist themself, or the one artist in a BMG direct chat. */
@@ -1140,7 +1142,7 @@ function SharePanel({
   const filesAllowed =
     ctx.isBmg || conv.type !== 'group' || (conv.settings?.artistsShareFiles ?? true);
   const kinds: ShareKind[] = [
-    ...(filesAllowed ? (['document', 'photo'] as const) : []),
+    ...(filesAllowed ? (['upload', 'document', 'photo'] as const) : []),
     'review',
     ...(artistId ? (['gig', 'todo'] as const) : []),
     ...(ctx.isBmg ? (['event'] as const) : []),
@@ -1153,8 +1155,10 @@ function SharePanel({
       ctx.onNavigate(ctx.isBmg ? 'review' : 'submit');
       return;
     }
-    if (kind === 'photo') {
-      fileInput.current?.click();
+    if (kind === 'photo' || kind === 'upload') {
+      setAccept(kind === 'photo' ? 'image/*' : '');
+      // Let the accept attribute update before the file dialog opens.
+      requestAnimationFrame(() => fileInput.current?.click());
       return;
     }
     setPicking(kind);
@@ -1248,7 +1252,18 @@ function SharePanel({
               sharedWithArtistIds: conv.artists.map((a) => a.artistId),
             },
           }
-      : { path: `/artists/${ctx.me.artistId}/files`, extra: { visibility: 'normal' } };
+      : {
+          // An artist's upload goes into their own files and is shared with the
+          // other artists in the chat. Between artists it's private: Blueprint
+          // can't open it, like the chat itself (rev 7).
+          path: `/artists/${ctx.me.artistId}/files`,
+          extra: {
+            visibility: conv.type === 'artist-to-artist' ? 'private' : 'normal',
+            sharedWithArtistIds: conv.artists
+              .map((a) => a.artistId)
+              .filter((id) => id !== ctx.me.artistId),
+          },
+        };
     try {
       setStatus(`Uploading ${file.name}…`);
       const created = await uploadFile(ctx.cfg, ctx.token, target.path, file, target.extra);
@@ -1258,7 +1273,10 @@ function SharePanel({
         ctx.token,
         `${target.path}/${created.fileId}`,
       );
-      if (!settled) return setStatus('Still scanning. Share it from Document once it’s ready.');
+      if (!settled)
+        return setStatus(
+          'Still checking it for malware. It’s in your files; share it from Document once it’s ready.',
+        );
       if (settled.status === 'rejected')
         return setStatus(settled.rejectReason ?? 'That file was blocked by the malware scan.');
       await onSend(fileAttachment(settled));
@@ -1272,7 +1290,7 @@ function SharePanel({
     <input
       ref={fileInput}
       type="file"
-      accept="image/*"
+      accept={accept || undefined}
       hidden
       onChange={(e) => {
         const f = e.target.files?.[0];
@@ -1366,16 +1384,57 @@ const shortDay = (iso: string) =>
 /* Conversation                                                             */
 /* ------------------------------------------------------------------------ */
 
-function AttachmentCard({ a, onOpen }: { a: ChatAttachment; onOpen: () => void }) {
+/** The API path for a shared file's download link (signed for the person asking). */
+export function downloadPath(a: ChatAttachment): string | null {
+  if (a.kind !== 'file') return null;
+  if (a.scope === 'library') return `/library/files/${a.id}/download`;
+  return a.artistId ? `/artists/${a.artistId}/files/${a.id}/download` : null;
+}
+
+function AttachmentCard({
+  a,
+  onOpen,
+  ctx,
+}: {
+  a: ChatAttachment;
+  onOpen: () => void;
+  ctx?: ChatCtx;
+}) {
   const tag = a.kind === 'event' ? a.subtitle.split(' · ')[0] || 'Event' : attachmentTag(a);
+  const dl = downloadPath(a);
+  const [state, setState] = useState<string | null>(null);
+  async function download() {
+    if (!ctx || !dl) return;
+    setState('Getting the link…');
+    try {
+      const { url } = await api<{ url: string }>(ctx.cfg, ctx.token, 'POST', dl);
+      setState(null);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      setState((e as Error).message);
+    }
+  }
   return (
-    <button type="button" className="wa-att" onClick={onOpen} aria-label={`Open ${a.title}`}>
-      <span className={`wa-tag wa-tag-${a.kind}`}>{tag}</span>
-      <span className="min-w-0 flex-1">
-        <b className="block truncate">{a.title}</b>
-        <span className="wa-sub block truncate">{a.subtitle}</span>
-      </span>
-    </button>
+    <span className="flex flex-col">
+      <button
+        type="button"
+        className="wa-att"
+        onClick={dl && ctx ? () => void download() : onOpen}
+        aria-label={dl && ctx ? `Download ${a.title}` : `Open ${a.title}`}
+      >
+        <span className={`wa-tag wa-tag-${a.kind}`}>{tag}</span>
+        <span className="min-w-0 flex-1">
+          <b className="block truncate">{a.title}</b>
+          <span className="wa-sub block truncate">{a.subtitle}</span>
+        </span>
+        {dl && ctx && <Icon name="download" size={18} />}
+      </button>
+      {state && (
+        <span className="wa-sub px-1" role="status">
+          {state}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -1596,6 +1655,7 @@ function Conversation({
     rows.push(
       <MessageBubble
         key={m.messageId}
+        ctx={ctx}
         m={m}
         first={first}
         showName={first && !m.mine && isGroupish(conv.type)}
@@ -1962,7 +2022,9 @@ function MessageBubble({
   onReplyPrivately,
   onStar,
   onOpen,
+  ctx,
 }: {
+  ctx: ChatCtx;
   m: ChatMessage;
   first: boolean;
   showName: boolean;
@@ -1987,7 +2049,9 @@ function MessageBubble({
             <span className="block">{m.replyTo.text}</span>
           </span>
         )}
-        {m.attachment && <AttachmentCard a={m.attachment} onOpen={() => onOpen(m.attachment!)} />}
+        {m.attachment && (
+          <AttachmentCard a={m.attachment} ctx={ctx} onOpen={() => onOpen(m.attachment!)} />
+        )}
         {m.text && <span className="wa-text">{m.text}</span>}
         <span className="wa-meta">
           {m.starred && <G n="star" size={11} filled className="wa-staricon" />}

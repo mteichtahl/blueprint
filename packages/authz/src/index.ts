@@ -160,7 +160,10 @@ function artistData(
     }
     const sharedToMe =
       !!principal.artistId && (resource.sharedWithArtistIds ?? []).includes(principal.artistId);
-    if (sharedToMe && action === 'read' && resource.visibility === 'normal') {
+    // Another artist can read what was shared with them, including a private
+    // file sent in an artist-to-artist chat (rev 7). BMG-only stays hidden,
+    // and Blueprint still never reads private items (below, and KMS).
+    if (sharedToMe && action === 'read' && resource.visibility !== 'bmg-only') {
       return allow('shared with this artist');
     }
     return deny("another artist's workspace");
