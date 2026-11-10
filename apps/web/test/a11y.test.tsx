@@ -49,6 +49,11 @@ const todo = {
 const file = {
   fileId: 'file000000001',
   name: 'press-shot.jpg',
+  title: 'Press shot',
+  displayName: 'Press shot',
+  fileType: { kind: 'image', label: 'JPEG image', ext: 'jpg', mime: 'image/jpeg', detected: true },
+  hasThumbnail: false,
+  thumbnailUrl: null,
   size: 2_400_000,
   contentType: 'image/jpeg',
   status: 'available',
@@ -407,14 +412,14 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
 
   it('artist phone: account menu open', async () => {
     await phone();
-    await click('Your account');
+    await click(/your account$/i);
     expect(screen.getByRole('menu', { name: 'Your account' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
   it('artist phone: profile (from the account menu)', async () => {
     await phone();
-    await click('Your account');
+    await click(/your account$/i);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Profile & preferences' }));
     await settle();
     expect(screen.getByRole('button', { name: 'Upload a photo' })).toBeTruthy();

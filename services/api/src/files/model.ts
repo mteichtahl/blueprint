@@ -13,6 +13,7 @@
  * no threats is it moved to its real home and marked available.
  */
 import { z } from 'zod';
+import { guessFileType, type FileTypeInfo } from './type.ts';
 
 export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 /** Upload and download URLs live for 5 minutes (design 9.3). */
@@ -32,7 +33,14 @@ export interface FileRecord {
   scope: FileScope;
   /** Artist files only. */
   artistId?: string;
+  /** The original file name (kept for downloads). */
   name: string;
+  /** The name the uploader gave it; shown instead of the file name in lists. */
+  title?: string;
+  /** What the file really is, from its bytes (set after the scan). */
+  fileType?: FileTypeInfo;
+  /** A small preview image made by the browser at upload, stored and scanned like the file. */
+  thumb?: ThumbRecord;
   size: number;
   contentType: string;
   status: FileStatus;
@@ -93,30 +101,79 @@ export function guessCategory(contentType: string): (typeof ASSET_CATEGORIES)[nu
   return 'other';
 }
 
+// ── Thumbnails ────────────────────────────────────────────────────────────
+/**
+ * The browser draws a small preview (an image, a video frame or a PDF's first
+ * page) and uploads it next to the file. It goes through the same quarantine
+ * and malware scan, and is stored next to the file with the same encryption,
+ * so a private file's preview is as private as the file.
+ */
+export const THUMB_MAX_BYTES = 64 * 1024;
+export const THUMB_TYPES = ['image/webp', 'image/jpeg', 'image/png'] as const;
+export interface ThumbRecord {
+  status: 'pending' | 'available' | 'rejected';
+  size: number;
+  contentType: (typeof THUMB_TYPES)[number];
+}
+export const ThumbUpload = z
+  .object({
+    size: z.number().int().min(1).max(THUMB_MAX_BYTES, 'The preview is too large'),
+    contentType: z.enum(THUMB_TYPES),
+  })
+  .strict();
+const THUMB_SUFFIX = '.thumb';
+
 export const LIBRARY_PK = 'ORG#library';
 export const fileSk = (fileId: string) => `FILE#${fileId}`;
 export const FILE_ID_PATTERN = /^[a-z0-9]{10,40}$/;
 const ARTIST = 'art_[a-z0-9]{10,32}';
 
+/** Which object: the file itself, or its preview. */
+export type FilePart = 'file' | 'thumb';
+const suffix = (part: FilePart) => (part === 'thumb' ? THUMB_SUFFIX : '');
+
 /** Where the browser uploads to (quarantine bucket). */
-export function quarantineKey(scope: FileScope, fileId: string, artistId?: string): string {
-  return scope === 'artist' ? `artists/${artistId}/${fileId}` : `library/${fileId}`;
+export function quarantineKey(
+  scope: FileScope,
+  fileId: string,
+  artistId?: string,
+  part: FilePart = 'file',
+): string {
+  return (
+    (scope === 'artist' ? `artists/${artistId}/${fileId}` : `library/${fileId}`) + suffix(part)
+  );
 }
 
-/** Where a clean file is kept (artist-data or org-data bucket). */
-export function storedKey(scope: FileScope, fileId: string, artistId?: string): string {
-  return scope === 'artist' ? `artists/${artistId}/files/${fileId}` : `library/${fileId}`;
+/** Where a clean file (or its preview) is kept (artist-data or org-data bucket). */
+export function storedKey(
+  scope: FileScope,
+  fileId: string,
+  artistId?: string,
+  part: FilePart = 'file',
+): string {
+  return (
+    (scope === 'artist' ? `artists/${artistId}/files/${fileId}` : `library/${fileId}`) +
+    suffix(part)
+  );
 }
 
-export type QuarantineRef =
-  { scope: 'artist'; artistId: string; fileId: string } | { scope: 'library'; fileId: string };
+export type QuarantineRef = (
+  { scope: 'artist'; artistId: string; fileId: string } | { scope: 'library'; fileId: string }
+) & { part: FilePart };
 
 /** The inverse of quarantineKey; anything else in the bucket is ignored. */
 export function parseQuarantineKey(key: string): QuarantineRef | undefined {
-  const artist = new RegExp(`^artists/(${ARTIST})/([a-z0-9]{10,40})$`).exec(key);
-  if (artist) return { scope: 'artist', artistId: artist[1]!, fileId: artist[2]! };
-  const library = /^library\/([a-z0-9]{10,40})$/.exec(key);
-  if (library) return { scope: 'library', fileId: library[1]! };
+  const artist = new RegExp(`^artists/(${ARTIST})/([a-z0-9]{10,40})(\\.thumb)?$`).exec(key);
+  if (artist)
+    return {
+      scope: 'artist',
+      artistId: artist[1]!,
+      fileId: artist[2]!,
+      part: artist[3] ? 'thumb' : 'file',
+    };
+  const library = /^library\/([a-z0-9]{10,40})(\.thumb)?$/.exec(key);
+  if (library)
+    return { scope: 'library', fileId: library[1]!, part: library[2] ? 'thumb' : 'file' };
   return undefined;
 }
 
@@ -132,6 +189,18 @@ const FileName = z
     'File names cannot contain / \\ or control characters',
   );
 
+/** The name shown in lists (optional; the file name is used when it's blank). */
+const Title = z
+  .string()
+  .trim()
+  .max(200, 'Names are limited to 200 characters')
+  .refine(
+    // eslint-disable-next-line no-control-regex
+    (n) => !/[\u0000-\u001f\u007f]/.test(n),
+    'Names cannot contain control characters',
+  )
+  .optional();
+
 const ContentType = z
   .string()
   .max(100)
@@ -146,6 +215,9 @@ const Size = z
 
 export const ArtistUpload = z.object({
   name: FileName,
+  title: Title,
+  /** Send this to get a second upload target for the preview image. */
+  thumbnail: ThumbUpload.optional(),
   size: Size,
   contentType: ContentType.default('application/octet-stream'),
   visibility: z.enum(['normal', 'bmg-only', 'private']).default('normal'),
@@ -165,21 +237,67 @@ const ArtistIds = z.array(z.string().regex(new RegExp(`^${ARTIST}$`))).max(200);
 
 export const LibraryUpload = z.object({
   name: FileName,
+  title: Title,
+  thumbnail: ThumbUpload.optional(),
   size: Size,
   contentType: ContentType.default('application/octet-stream'),
   sharing: z.enum(['bmg-only', 'all-artists', 'selected']).default('bmg-only'),
   sharedWithArtistIds: ArtistIds.default([]),
 });
 
-export const ArtistFilePatch = z.object({
-  /** Private can't be switched on or off after upload: it decides how the file was encrypted. */
-  visibility: z.enum(['normal', 'bmg-only']),
-});
+/** A new name; an empty one goes back to showing the file name. */
+const Rename = z
+  .string()
+  .trim()
+  .max(200, 'Names are limited to 200 characters')
+  .refine(
+    // eslint-disable-next-line no-control-regex
+    (n) => !/[\u0000-\u001f\u007f]/.test(n),
+    'Names cannot contain control characters',
+  );
 
-export const LibraryPatch = z.object({
-  sharing: z.enum(['bmg-only', 'all-artists', 'selected']),
-  sharedWithArtistIds: ArtistIds.default([]),
-});
+const somethingToChange = (v: Record<string, unknown>) =>
+  Object.values(v).some((x) => x !== undefined);
+
+export const ArtistFilePatch = z
+  .object({
+    /** Private can't be switched on or off after upload: it decides how the file was encrypted. */
+    visibility: z.enum(['normal', 'bmg-only']).optional(),
+    /** Rename: the name shown in lists ('' shows the file name again). */
+    title: Rename.optional(),
+  })
+  .strict()
+  .refine(somethingToChange, 'Nothing to change');
+
+export const LibraryPatch = z
+  .object({
+    sharing: z.enum(['bmg-only', 'all-artists', 'selected']).optional(),
+    sharedWithArtistIds: ArtistIds.default([]),
+    title: Rename.optional(),
+  })
+  .strict()
+  .refine((v) => v.sharing !== undefined || v.title !== undefined, 'Nothing to change');
+
+/**
+ * Who may rename a file (on top of write access):
+ * - Library documents: anyone at Blueprint.
+ * - Artist files: the artist renames their own uploads; Blueprint renames the
+ *   ones Blueprint uploaded. Nobody renames someone else's side's files.
+ */
+export function renameAllowed(
+  principal: { sub: string; role: FileRecord['uploaderRole'] },
+  f: Pick<FileRecord, 'scope' | 'uploadedBy' | 'uploaderRole'>,
+): string | undefined {
+  if (f.scope === 'library') {
+    return principal.role === 'artist' ? 'Only Blueprint can rename library documents' : undefined;
+  }
+  if (principal.role === 'artist') {
+    return f.uploaderRole === 'artist' && f.uploadedBy === principal.sub
+      ? undefined
+      : 'You can only rename your own uploads';
+  }
+  return f.uploaderRole === 'artist' ? 'Only the artist can rename their own uploads' : undefined;
+}
 
 /** Which visibilities each side may choose for an artist file. */
 export function visibilityAllowed(role: FileRecord['uploaderRole'], v: FileVisibility): boolean {
@@ -267,6 +385,12 @@ export function publicFile(f: FileRecord & { uploadedBy: string }, viewerSub: st
     scope: f.scope,
     artistId: f.artistId ?? null,
     name: f.name,
+    title: f.title || null,
+    /** What lists and tables show: the given name, else the file name. */
+    displayName: f.title || f.name,
+    /** Detected from the bytes once scanned; a guess from the name until then. */
+    fileType: f.fileType ?? guessFileType(f.name, f.contentType),
+    hasThumbnail: f.thumb?.status === 'available',
     size: f.size,
     contentType: f.contentType,
     status: f.status,

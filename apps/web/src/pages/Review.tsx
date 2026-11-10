@@ -190,7 +190,7 @@ function AttachFiles({
                 disabled={!selected.includes(f.fileId) && selected.length >= 10}
                 onChange={(e) => toggle(f.fileId, e.target.checked)}
               />
-              <span className="min-w-0 flex-1 truncate">{f.name}</span>
+              <span className="min-w-0 flex-1 truncate">{f.displayName}</span>
               <span className="src whitespace-nowrap">
                 {f.uploadedByMe ? 'Your upload' : 'From Blueprint'} · {formatSize(f.size)}
               </span>
