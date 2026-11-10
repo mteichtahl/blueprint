@@ -169,12 +169,26 @@ export function Avatar({
   name,
   size = 40,
   className = '',
+  src,
 }: {
   name: string;
   size?: number;
   className?: string;
+  /** A profile picture (data URL); the initials show when there isn't one. */
+  src?: string | null | undefined;
 }) {
   const tone = AVATAR_TONES[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % 3];
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        aria-hidden="true"
+        className={`av ${className} !bg-transparent object-cover`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   return (
     <span
       aria-hidden="true"

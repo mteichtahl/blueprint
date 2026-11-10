@@ -82,6 +82,7 @@ export function BmgShell({
   onTheme,
   onSignOut,
   onProfile,
+  avatar,
   bell,
   topActions,
   onAsk,
@@ -96,6 +97,8 @@ export function BmgShell({
   onTheme: (t: Theme) => void;
   onSignOut: () => void;
   onProfile: () => void;
+  /** The user's profile picture, if they've set one. */
+  avatar?: string | null | undefined;
   bell?: ReactNode;
   topActions?: ReactNode;
   /** Opens the assistant (button and ⌘K). */
@@ -213,7 +216,12 @@ export function BmgShell({
           className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
           onClick={() => go('profile')}
         >
-          <Avatar name={userName} size={34} className="!rounded-lg !bg-cta !text-white" />
+          <Avatar
+            name={userName}
+            src={avatar}
+            size={34}
+            className="!rounded-lg !bg-cta !text-white"
+          />
           <span className="min-w-0 flex-1">
             <b className="block truncate text-[15px]">{userName}</b>
             <span className="block text-[13px] text-[#D3D8DE]">{roleLabel} · Profile</span>
@@ -313,10 +321,12 @@ export function BmgShell({
             <button
               type="button"
               // The initials are what's on screen, so they lead the name (WCAG 2.5.3).
-              aria-label={`${initials(userName)}, Profile & preferences`}
+              aria-label={
+                avatar ? 'Profile & preferences' : `${initials(userName)}, Profile & preferences`
+              }
               onClick={onProfile}
             >
-              <Avatar name={userName} size={36} className="!bg-cta !text-white" />
+              <Avatar name={userName} src={avatar} size={36} className="!bg-cta !text-white" />
             </button>
           </div>
         </header>

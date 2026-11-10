@@ -89,6 +89,7 @@ function greeting(): string {
 function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const [jobTitle, setJobTitle] = useState(me.jobTitle ?? '');
+  const [avatar, setAvatar] = useState(me.avatar ?? null);
   // Back from a vendor's sign-in page: open Connectors to finish connecting.
   const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
@@ -213,6 +214,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       onTheme={setTheme}
       onSignOut={onSignOut}
       onProfile={() => setView('profile')}
+      avatar={avatar}
       onAsk={() => setAsking(true)}
       bell={
         <Bell
@@ -303,12 +305,13 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           <Profile
             cfg={cfg}
             token={token}
-            me={{ ...me, jobTitle }}
+            me={{ ...me, jobTitle, avatar }}
             userName={userName}
             theme={theme}
             onTheme={setTheme}
             onSignOut={onSignOut}
             onJobTitle={setJobTitle}
+            onAvatar={setAvatar}
           />
         </>
       )}
@@ -954,6 +957,7 @@ type ArtistView =
 
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
+  const [avatar, setAvatar] = useState(me.avatar ?? null);
   const [asking, setAsking] = useState(false);
   const notes = useNotifications(cfg, token, me.sub);
   const [chatTarget, setChatTarget] = useState<string | null>(null);
@@ -1051,10 +1055,14 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                 />
                 <button
                   type="button"
-                  aria-label={`${initials(userName)}, Profile & preferences`}
+                  aria-label={
+                    avatar
+                      ? 'Profile & preferences'
+                      : `${initials(userName)}, Profile & preferences`
+                  }
                   onClick={() => setView('profile')}
                 >
-                  <Avatar name={userName} size={34} className="!bg-cta !text-white" />
+                  <Avatar name={userName} src={avatar} size={34} className="!bg-cta !text-white" />
                 </button>
               </span>
             )
@@ -1166,11 +1174,12 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
         <Profile
           cfg={cfg}
           token={token}
-          me={me}
+          me={{ ...me, avatar }}
           userName={userName}
           theme={theme}
           onTheme={setTheme}
           onSignOut={onSignOut}
+          onAvatar={setAvatar}
           compact
         />
       )}

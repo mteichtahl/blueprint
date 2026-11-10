@@ -4,11 +4,12 @@ import type { AppConfig } from '../lib/config.ts';
 import type { Preferences } from '../lib/notifications.ts';
 import { disablePush, enablePush, pushSupported } from '../lib/push.ts';
 import type { Theme } from '../components/Shell.tsx';
+import { ProfilePicture } from '../components/ProfilePicture.tsx';
 import { Button, Card, Field, Notice, WaveLoader } from '../components/ui.tsx';
 
 /**
  * Profile & preferences (screens doc): notifications (in app, push, email),
- * quiet hours, appearance and sign-out. Contact details, socials and
+ * quiet hours, appearance and sign-out, plus the profile picture. Contact details, socials and
  * security arrive with the next profile release.
  */
 export function Profile({
@@ -20,6 +21,7 @@ export function Profile({
   onTheme,
   onSignOut,
   onJobTitle,
+  onAvatar,
   compact = false,
 }: {
   cfg: AppConfig;
@@ -30,6 +32,7 @@ export function Profile({
   onTheme: (t: Theme) => void;
   onSignOut: () => void;
   onJobTitle?: (t: string) => void;
+  onAvatar?: (avatar: string | null) => void;
   compact?: boolean;
 }) {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
@@ -53,7 +56,14 @@ export function Profile({
   const row = 'flex min-h-12 items-center gap-3 border-b border-[#EDF0F3] py-2 last:border-0';
   return (
     <div className={`flex flex-wrap items-start gap-5 ${compact ? 'flex-col' : ''}`}>
-      <AboutYou cfg={cfg} token={token} me={me} userName={userName} onJobTitle={onJobTitle} />
+      <AboutYou
+        cfg={cfg}
+        token={token}
+        me={me}
+        userName={userName}
+        onJobTitle={onJobTitle}
+        onAvatar={onAvatar}
+      />
       <Card className="flex-[1_1_320px] self-stretch" title="Notifications">
         {!prefs ? (
           <WaveLoader />
@@ -199,13 +209,16 @@ function AboutYou({
   me,
   userName,
   onJobTitle,
+  onAvatar,
 }: {
   cfg: AppConfig;
   token: string;
   me: Me;
   userName: string;
   onJobTitle?: ((t: string) => void) | undefined;
+  onAvatar?: ((avatar: string | null) => void) | undefined;
 }) {
+  const [avatar, setAvatar] = useState(me.avatar ?? null);
   const isArtist = me.role === 'artist';
   const [title, setTitle] = useState(me.jobTitle ?? '');
   const [saved, setSaved] = useState(me.jobTitle ?? '');
@@ -225,6 +238,17 @@ function AboutYou({
   }
   return (
     <Card className="flex-[1_1_100%]" title="About you">
+      <ProfilePicture
+        cfg={cfg}
+        token={token}
+        userName={userName}
+        artistId={me.artistId}
+        avatar={avatar}
+        onChange={(a) => {
+          setAvatar(a);
+          onAvatar?.(a);
+        }}
+      />
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       <p className="m-0">
         <b>{userName}</b>

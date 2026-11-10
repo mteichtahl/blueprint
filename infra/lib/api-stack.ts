@@ -679,7 +679,7 @@ export class ApiStack extends BmgStack {
     putEvents(addressBook);
     putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
-    // Job title (rev 7) lives on USER#<sub> / PROFILE.
+    // Job title (rev 7) and profile picture live on USER#<sub> / PROFILE.
     allow(me, 'ReadProfile', ['dynamodb:GetItem'], [main]);
     props.platformKey.grant(me, 'kms:Decrypt');
     new Rule(this, 'AiConsentChanges', {
