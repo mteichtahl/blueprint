@@ -137,39 +137,40 @@ async function syncReminder(todo: Todo) {
 }
 
 /**
- * Schedules the reminder without letting a Scheduler problem undo the save.
- * The to-do is already stored when this runs, so a failure here used to turn
- * into a 500, and a retry made a duplicate to-do. Now the reminder is cleared,
- * the error is logged, and the caller tells the user to set it again.
+ * Schedules the reminder without ever failing the save: the to-do is already
+ * stored, so a Scheduler error is logged and flagged on the to-do
+ * (`reminderFailed`) instead of turning into a 500 and a duplicate on retry.
  */
-async function scheduleReminder(todo: Todo): Promise<Todo & { reminderFailed?: true }> {
+async function scheduleReminder(todo: Todo, key: { PK: string; SK: string }): Promise<Todo> {
+  let failed = false;
   try {
     await syncReminder(todo);
-    return todo;
   } catch (err) {
-    const e = err as { name?: string; message?: string };
+    failed = true;
     console.error(
       JSON.stringify({
-        msg: 'todo reminder schedule failed',
+        msg: 'reminder.failed',
         artistId: todo.artistId,
         todoId: todo.todoId,
-        error: e.name,
-        detail: e.message,
+        error: (err as Error).name,
+        detail: (err as Error).message,
       }),
     );
-    if (!todo.remindAt) return todo;
-    await db.send(
-      new UpdateCommand({
-        TableName: table(),
-        Key: { PK: artistPk(todo.artistId), SK: todoSk(todo.todoId) },
-        UpdateExpression: 'REMOVE remindAt',
-        ConditionExpression: 'attribute_exists(PK)',
-      }),
-    );
-    const rest: Todo = { ...todo };
-    delete rest.remindAt;
-    return { ...rest, reminderFailed: true };
   }
+  if (failed === !!todo.reminderFailed) return todo;
+  await db.send(
+    new UpdateCommand({
+      TableName: table(),
+      Key: key,
+      UpdateExpression: failed ? 'SET reminderFailed = :t' : 'REMOVE reminderFailed',
+      ...(failed ? { ExpressionAttributeValues: { ':t': true } } : {}),
+      ConditionExpression: 'attribute_exists(PK)',
+    }),
+  );
+  const next = { ...todo };
+  if (failed) next.reminderFailed = true;
+  else delete next.reminderFailed;
+  return next;
 }
 
 /** The to-do a thread belongs to (404 if it doesn't exist). */
@@ -304,10 +305,7 @@ const publicProfile = (p: Record<string, unknown>) => ({
   createdAt: p.createdAt,
 });
 
-const publicTodo = (t: Todo & { reminderFailed?: true }) => ({
-  ...(t.reminderFailed
-    ? { warning: "Saved, but the reminder couldn't be set. Open the to-do and set it again." }
-    : {}),
+const publicTodo = (t: Todo) => ({
   todoId: t.todoId,
   artistId: t.artistId,
   title: t.title,
@@ -316,6 +314,7 @@ const publicTodo = (t: Todo & { reminderFailed?: true }) => ({
   dueTime: t.dueTime ?? null,
   reminder: t.reminder ?? null,
   remindAt: t.remindAt ?? null,
+  reminderFailed: !!t.reminderFailed,
   commentCount: (t as Todo & { commentCount?: number }).commentCount ?? 0,
   phaseId: t.phaseId ?? null,
   submissionId: t.submissionId ?? null,
@@ -676,7 +675,10 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_not_exists(PK)',
         }),
       );
-      const saved = await scheduleReminder(todo);
+      const saved = await scheduleReminder(todo, {
+        PK: artistPk(artistId),
+        SK: todoSk(todoId),
+      });
       return json(201, publicTodo(saved));
     }
 
@@ -711,7 +713,8 @@ export const handler = handle(async (event) => {
       }
       if (!merged.notes) delete merged.notes;
       const changed = changedFields(existing, merged);
-      if (changed.length === 0) return json(200, publicTodo(existing));
+      // Saving unchanged still retries a reminder that couldn't be scheduled.
+      if (changed.length === 0 && !existing.reminderFailed) return json(200, publicTodo(existing));
       // Only a newly set timing is held to "not in the past"; ticking an old to-do is fine.
       const timing = changed.some((f) => f === 'due' || f === 'dueTime' || f === 'reminder');
       const updated: Todo = {
@@ -741,8 +744,8 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_exists(PK)',
         }),
       );
-      const saved = await scheduleReminder(updated);
-      const notify = notifyOnEdit(principal.role, existing);
+      const stored = await scheduleReminder(updated, key);
+      const notify = changed.length > 0 && notifyOnEdit(principal.role, existing);
       if (notify) {
         await domainEvent('todo.updated', {
           artistId,
@@ -753,7 +756,7 @@ export const handler = handle(async (event) => {
         });
       }
       await audit(event, 'todo.update', 'success', { artistId, todoId, fields: changed.join(',') });
-      return json(200, publicTodo(saved));
+      return json(200, publicTodo(stored));
     }
 
     // ── To-do threads (rev 7): artist + Blueprint; BMG-only to-dos stay BMG-only ──
