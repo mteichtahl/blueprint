@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
@@ -947,32 +947,44 @@ function EditDocument({
           ) : (
             <Fieldset legend="Who can edit it">
               {(['owner', 'chosen', 'everyone'] as const).map((a) => (
-                <Radio key={a} name="access" checked={access === a} onChange={() => setAccess(a)}>
-                  {a === 'everyone' && library ? 'Everyone at Blueprint' : EDIT_ACCESS_LABEL[a]}
-                </Radio>
-              ))}
-              {access === 'chosen' && (
-                <div className="flex flex-col gap-1 pl-7">
-                  {!people && <WaveLoader />}
-                  {people?.length === 0 && (
-                    <p className="src">There’s nobody else who can see this document yet.</p>
+                <Fragment key={a}>
+                  <Radio name="access" checked={access === a} onChange={() => setAccess(a)}>
+                    {a === 'everyone' && library ? 'Everyone at Blueprint' : EDIT_ACCESS_LABEL[a]}
+                  </Radio>
+                  {/* The people picker sits under "Me and chosen people". */}
+                  {a === 'chosen' && (
+                    <>
+                      {access === 'chosen' && (
+                        <div className="flex flex-col gap-1 pl-7">
+                          {!people && <WaveLoader />}
+                          {people?.length === 0 && (
+                            <p className="src">
+                              There’s nobody else who can see this document yet.
+                            </p>
+                          )}
+                          {people?.map((p) => (
+                            <label
+                              key={p.sub}
+                              className="flex min-h-11 items-center gap-2.5 text-[15px]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={editors.has(p.sub)}
+                                onChange={() => setEditors((s) => toggle(s, p.sub))}
+                              />
+                              <Avatar name={p.displayName} />
+                              <span>
+                                <b className="block">{p.displayName}</b>
+                                {p.jobTitle && <span className="src block">{p.jobTitle}</span>}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
-                  {people?.map((p) => (
-                    <label key={p.sub} className="flex min-h-11 items-center gap-2.5 text-[15px]">
-                      <input
-                        type="checkbox"
-                        checked={editors.has(p.sub)}
-                        onChange={() => setEditors((s) => toggle(s, p.sub))}
-                      />
-                      <Avatar name={p.displayName} />
-                      <span>
-                        <b className="block">{p.displayName}</b>
-                        {p.jobTitle && <span className="src block">{p.jobTitle}</span>}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
+                </Fragment>
+              ))}
               <span className="src">
                 Editing means renaming it and uploading new versions. Only the owner changes who can
                 see it, who can edit it, and deletes it.
