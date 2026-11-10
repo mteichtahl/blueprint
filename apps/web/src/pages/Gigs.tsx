@@ -86,8 +86,6 @@ export function timeRange(start?: string, end?: string): string {
   if (!end) return fmt(start);
   return `${fmt(start)} – ${fmt(end)}${end < start ? ' (next day)' : ''}`;
 }
-const when = (g: Gig) =>
-  [longDate(g.date), timeRange(g.startTime, g.endTime)].filter(Boolean).join(', ');
 
 /** "Other" shows what the user wrote. */
 const dealLabel = (g: Pick<Gig, 'deal' | 'dealNote'>) =>
@@ -445,7 +443,11 @@ const FILTERS = [
 const matches = (g: Gig, f: Filter) =>
   f === 'help' ? g.help?.status === 'open' : f === 'past' ? isPast(g) : !isPast(g);
 
-/** Workspace Gigs tab (BMG): stats, all gigs, the open help request and its checklist. */
+/**
+ * Workspace Gigs tab (BMG): the stats, the gig list and "Add a gig". No gig detail on
+ * the page: opening a gig (row or Edit) opens its editor, with the help request,
+ * checklist and money underneath while it is open.
+ */
 export function GigsTab({
   cfg,
   token,
@@ -458,16 +460,25 @@ export function GigsTab({
   const { gigs, error, load, patch } = useGigs(cfg, token, `/artists/${artist.artistId}/gigs`);
   const [filter, setFilter] = useState<Filter>('upcoming');
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<Gig | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
   const first = artist.displayName.split(' ')[0];
   const all = gigs ?? [];
   const played = all.filter((g) => g.status === 'played').length;
   const upcoming = all.filter((g) => !isPast(g));
   const helping = all.filter((g) => g.help?.status === 'open');
   const byArtist = all.filter((g) => g.plannedBy === 'artist').length;
-  const open = all.find((g) => g.gigId === openId) ?? helping[0] ?? upcoming[0] ?? undefined;
+  // Read the gig from the latest list so checklist, money and help changes show at once.
+  const editing = all.find((g) => g.gigId === editingId) ?? null;
+  const close = () => {
+    setAdding(false);
+    setEditingId(null);
+  };
+  const edit = (g: Gig) => {
+    setAdding(false);
+    setSaved(null);
+    setEditingId(g.gigId);
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -499,7 +510,15 @@ export function GigsTab({
         action={
           <>
             <Chips label="Filter gigs" value={filter} onChange={setFilter} options={FILTERS} />
-            <Button size="sm" variant="cta" onClick={() => setAdding(true)}>
+            <Button
+              size="sm"
+              variant="cta"
+              onClick={() => {
+                setEditingId(null);
+                setSaved(null);
+                setAdding(true);
+              }}
+            >
               Add a gig for {first}
             </Button>
           </>
@@ -507,24 +526,58 @@ export function GigsTab({
       >
         {saved && <Notice tone="success">{saved}</Notice>}
         {(adding || editing) && (
-          <GigForm
-            key={editing?.gigId ?? 'new'}
-            cfg={cfg}
-            token={token}
-            artistId={artist.artistId}
-            {...(editing ? { gig: editing } : {})}
-            isArtist={false}
-            onCancel={() => {
-              setAdding(false);
-              setEditing(null);
-            }}
-            onSaved={() => {
-              setSaved(editing ? `Saved ${editing.title}. ${first} can see the change.` : null);
-              setAdding(false);
-              setEditing(null);
-              void load();
-            }}
-          />
+          <div className="flex flex-col gap-4 rounded-lg border border-input p-4">
+            <GigForm
+              key={editing?.gigId ?? 'new'}
+              cfg={cfg}
+              token={token}
+              artistId={artist.artistId}
+              {...(editing ? { gig: editing } : {})}
+              isArtist={false}
+              onCancel={close}
+              onSaved={() => {
+                setSaved(editing ? `Saved ${editing.title}. ${first} can see the change.` : null);
+                close();
+                void load();
+              }}
+            />
+            {editing?.help?.status === 'open' && (
+              <HelpCard
+                cfg={cfg}
+                token={token}
+                gig={editing}
+                artistName={artist.displayName}
+                onDone={() => void patch(editing, { helpDone: true })}
+              />
+            )}
+            {editing && editing.checklist.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="eyebrow">
+                  Gig checklist ({editing.plannedBy === 'artist' ? `${first}'s` : 'Blueprint'})
+                </span>
+                <Checklist gig={editing} onPatch={(b) => void patch(editing, b)} />
+              </div>
+            )}
+            {editing && (
+              <div className="flex flex-col gap-2">
+                <b className="text-[15px]">Tickets, takings and profit</b>
+                <MoneyEditor
+                  key={editing.gigId}
+                  value={editing.money}
+                  onSave={async (money) => {
+                    await api(
+                      cfg,
+                      token,
+                      'PATCH',
+                      `/artists/${editing.artistId}/gigs/${editing.gigId}`,
+                      { money },
+                    );
+                    await load();
+                  }}
+                />
+              </div>
+            )}
+          </div>
         )}
         {gigs === null ? (
           <WaveLoader />
@@ -532,84 +585,16 @@ export function GigsTab({
           <GigTable
             gigs={all.filter((g) => matches(g, filter))}
             artistName={first}
-            selected={open?.gigId}
-            onOpen={setOpenId}
-            onEdit={(g) => {
-              setAdding(false);
-              setSaved(null);
-              setEditing(g);
+            {...(editingId ? { selected: editingId } : {})}
+            onOpen={(gigId) => {
+              const g = all.find((x) => x.gigId === gigId);
+              if (g) edit(g);
             }}
+            onEdit={edit}
             empty={`No ${filter === 'help' ? 'help requests' : `${filter} gigs`} for ${first} yet.`}
           />
         )}
       </Card>
-
-      {open && (
-        <div className="flex flex-wrap items-start gap-5">
-          <div className="flex-[3_1_480px]">
-            {open.help?.status === 'open' ? (
-              <HelpCard
-                cfg={cfg}
-                token={token}
-                gig={open}
-                artistName={artist.displayName}
-                onDone={() => void patch(open, { helpDone: true })}
-              />
-            ) : (
-              <Card
-                title={open.title}
-                action={
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setAdding(false);
-                      setSaved(null);
-                      setEditing(open);
-                    }}
-                  >
-                    Edit gig
-                  </Button>
-                }
-              >
-                <p className="src">
-                  {when(open)}
-                  {open.venue ? ` · ${open.venue}` : ''}
-                </p>
-                {open.deal !== 'tbc' && (
-                  <p className="m-0">
-                    <b>Deal:</b> {dealLabel(open)}
-                  </p>
-                )}
-                {open.notes && <p>{open.notes}</p>}
-                {open.ticketUrl && (
-                  <a className="font-bold" href={open.ticketUrl} target="_blank" rel="noreferrer">
-                    Ticket link
-                  </a>
-                )}
-              </Card>
-            )}
-          </div>
-          <Card className="flex-[2_1_300px]">
-            <span className="eyebrow">
-              Gig checklist ({open.plannedBy === 'artist' ? `${first}'s` : 'Blueprint'})
-            </span>
-            <Checklist gig={open} onPatch={(b) => void patch(open, b)} />
-          </Card>
-          <Card className="flex-[1_1_100%]" title="Tickets, takings and profit">
-            <MoneyEditor
-              key={open.gigId}
-              value={open.money}
-              onSave={async (money) => {
-                await api(cfg, token, 'PATCH', `/artists/${open.artistId}/gigs/${open.gigId}`, {
-                  money,
-                });
-                await load();
-              }}
-            />
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
