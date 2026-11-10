@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { Bar, Button, Card, DataTable, Field, Notice, PageHeader, Tag } from '../components/ui.tsx';
+import { aud, PRESET_COSTS } from '../components/Money.tsx';
 
 /** BMG-only events (screen: Events · Industry Mixer Night). */
 
@@ -14,6 +15,7 @@ interface EventInfo {
   ticketTarget: number;
   ticketPriceCents: number;
   ticketsSold: number;
+  takingsCents: number;
   compsTarget: number;
   surveyAfter: boolean;
   humanitixEventId?: string;
@@ -36,6 +38,8 @@ interface Detail {
     budgetCents: number;
     spentCents: number;
     ticketIncomeCents: number;
+    takingsCents: number;
+    profitCents: number;
   };
 }
 type Part = 'guests' | 'speakers' | 'crew' | 'run' | 'budget';
@@ -386,9 +390,14 @@ function EventDetail({
           <span className="src">Tickets + comps</span>
         </Card>
         <Card className="flex-[1_1_200px]">
-          <span className="eyebrow">Budget</span>
-          <span className="t text-[36px]">{money(s.budgetCents)}</span>
-          <span className="src">Ticket income so far {money(s.ticketIncomeCents)}</span>
+          <span className="eyebrow">Profit</span>
+          <span className={`t text-[36px] ${s.profitCents < 0 ? 'text-[#8E2F2C]' : ''}`}>
+            {aud(s.profitCents)}
+          </span>
+          <span className="src">
+            Takings {aud(s.takingsCents)} − costs {aud(s.spentCents)} · budget{' '}
+            {money(s.budgetCents)}
+          </span>
         </Card>
       </div>
 
@@ -597,13 +606,44 @@ function EventDetail({
 
         <Card
           className="flex-[2_1_320px]"
-          title="Budget"
+          title="Takings, costs and profit"
           action={
             <Button size="sm" variant="ghost" onClick={() => setAdding('budget')}>
-              Add line
+              + Add a cost
             </Button>
           }
         >
+          <div className="flex flex-wrap items-end gap-3">
+            <span className="flex flex-col gap-1.5">
+              <span className="text-[15px] font-bold">Tickets sold</span>
+              <span className="t text-[22px]">{e.ticketsSold}</span>
+            </span>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[15px] font-bold">Total event takings ($)</span>
+              <SpentInput
+                label="Total event takings"
+                cents={e.takingsCents ?? 0}
+                onSave={(c) => void patchEvent({ takingsCents: c })}
+              />
+            </label>
+          </div>
+          {PRESET_COSTS.some((p) => !d.budget.some((b) => String(b.item) === p)) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                void run(async () => {
+                  for (const item of PRESET_COSTS.filter(
+                    (p) => !d.budget.some((b) => String(b.item) === p),
+                  )) {
+                    await api(cfg, token, 'POST', `${base}/budget`, { item });
+                  }
+                })
+              }
+            >
+              Add standard costs (venue, photography, videography, content, bands)
+            </Button>
+          )}
           {adding === 'budget' && (
             <RowForm
               fields={[
@@ -624,9 +664,12 @@ function EventDetail({
           <DataTable>
             <thead>
               <tr>
-                <th scope="col">Item</th>
+                <th scope="col">Cost</th>
                 <th scope="col">Budget</th>
                 <th scope="col">Spent</th>
+                <th scope="col">
+                  <span className="sr-only">Delete</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -641,6 +684,9 @@ function EventDetail({
                       onSave={(c) => void patchRow('budget', b.itemId, { spentCents: c })}
                     />
                   </td>
+                  <td>
+                    <RemoveButton onClick={() => void removeRow('budget', b.itemId)} />
+                  </td>
                 </tr>
               ))}
               <tr>
@@ -652,6 +698,18 @@ function EventDetail({
                 </td>
                 <td>
                   <b>{money(s.spentCents)}</b>
+                </td>
+                <td />
+              </tr>
+              <tr>
+                <td colSpan={2}>
+                  <b>Profit</b> <span className="src">(takings − spent)</span>
+                </td>
+                <td colSpan={2}>
+                  <b className={s.profitCents < 0 ? 'text-[#8E2F2C]' : ''}>
+                    {aud(s.profitCents)}
+                    {s.profitCents < 0 && ' loss'}
+                  </b>
                 </td>
               </tr>
             </tbody>

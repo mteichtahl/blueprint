@@ -13,6 +13,7 @@ import {
   Tag,
   TextArea,
 } from '../components/ui.tsx';
+import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
 
 /** Gigs (screens: workspace Gigs tab, BMG Artist gigs, artist My gigs / Plan a gig). */
 
@@ -32,6 +33,7 @@ export interface Gig {
   deal: GigDeal;
   dealNote?: string;
   ticketUrl?: string;
+  money?: MoneyFigures;
   checklist: { id: string; title: string; done: boolean }[];
   plannedBy: 'artist' | 'bmg';
   shared: boolean;
@@ -583,6 +585,18 @@ export function GigsTab({
             </span>
             <Checklist gig={open} onPatch={(b) => void patch(open, b)} />
           </Card>
+          <Card className="flex-[1_1_100%]" title="Tickets, takings and profit">
+            <MoneyEditor
+              key={open.gigId}
+              value={open.money}
+              onSave={async (money) => {
+                await api(cfg, token, 'PATCH', `/artists/${open.artistId}/gigs/${open.gigId}`, {
+                  money,
+                });
+                await load();
+              }}
+            />
+          </Card>
         </div>
       )}
     </div>
@@ -781,6 +795,22 @@ export function ArtistGigs({
             void load();
           }}
         />
+        {gig && (
+          <div className="card !gap-2 !p-3">
+            <b className="text-[15px]">Tickets, takings and profit</b>
+            <MoneyEditor
+              key={gig.gigId}
+              value={gig.money}
+              onSave={async (money) => {
+                await api(cfg, token, 'PATCH', `/artists/${artistId}/gigs/${gig.gigId}`, {
+                  money,
+                });
+                setEditing({ ...gig, money });
+                await load();
+              }}
+            />
+          </div>
+        )}
         {gig && gig.checklist.length > 0 && (
           <div className="card !gap-0.5 !p-3">
             <b className="text-[15px]">Checklist</b>
