@@ -1,6 +1,10 @@
 import { authorize, type Principal } from '@bmg/authz';
 import { describe, expect, it } from 'vitest';
 import {
+  blocksDelete,
+  chatUseSk,
+  fileUsePk,
+  inUseMessage,
   archivedKey,
   asVersion,
   currentVersion,
@@ -507,5 +511,31 @@ describe('versions (rev 8)', () => {
       pendingVersion: { v: 3, status: 'pending', restoredFrom: null },
     });
     expect(JSON.stringify(shown)).not.toContain('files/');
+  });
+});
+
+describe('where it’s used (rev 8)', () => {
+  it('blocks deleting while used anywhere other than chat', () => {
+    expect(blocksDelete('asset')).toBe(true);
+    expect(blocksDelete('brand-kit')).toBe(true);
+    expect(blocksDelete('submission', 'open')).toBe(true);
+    expect(blocksDelete('submission', 'reviewed')).toBe(false);
+    expect(blocksDelete('chat')).toBe(false);
+  });
+
+  it('says how many places hold it', () => {
+    expect(inUseMessage([{ blocks: false }])).toBeUndefined();
+    expect(inUseMessage([{ blocks: true }])).toBe(
+      'This document is used in 1 place. Remove it from there before deleting.',
+    );
+    expect(inUseMessage([{ blocks: true }, { blocks: true }, { blocks: false }])).toMatch(
+      /used in 2 places\. Remove it from them/,
+    );
+  });
+
+  it('keeps chat uses next to the file they belong to', () => {
+    expect(fileUsePk('artist', fileId, A)).toBe(`FILEUSE#${A}#${fileId}`);
+    expect(fileUsePk('library', fileId)).toBe(`FILEUSE#library#${fileId}`);
+    expect(chatUseSk('dm-art_aaaaaaaaaaaa')).toBe('CHAT#dm-art_aaaaaaaaaaaa');
   });
 });

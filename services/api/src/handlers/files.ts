@@ -29,6 +29,7 @@ import {
   deleteAllowed,
   editAccessOf,
   editAllowed,
+  inUseMessage,
   FILE_ID_PATTERN,
   fileSk,
   LIBRARY_PK,
@@ -46,6 +47,8 @@ import {
   type FileRecord,
 } from '../files/model.ts';
 import { namesFor, people, type Person } from '../files/people.ts';
+import { usesOf } from '../files/usage.ts';
+import { BRAND_SK } from '../brand/model.ts';
 import { artistPk, newId } from '../workspace/model.ts';
 import {
   audit,
@@ -316,13 +319,59 @@ async function ownerChanges(
 }
 
 /**
- * One file. `?include=people` adds who can be given edit access or ownership
- * (rev 8; owner and managers only), so the picker needs no route of its own.
+ * One file. `?include=` adds, for the document's own page (rev 8):
+ * - `people`: who can be given edit access or ownership (owner and managers
+ *   only; left out for anyone else), so the picker needs no route of its own;
+ * - `uses`: where it's used, and how many more places this person can't see.
  */
 async function single(principal: Principal, event: APIGatewayProxyEvent, f: Stored) {
   const shown = (await withThumbnails(principal, [f]))[0]!;
-  if (event.queryStringParameters?.include !== 'people') return shown;
-  return { ...shown, people: await peopleFor(principal, f) };
+  const include = new Set((event.queryStringParameters?.include ?? '').split(','));
+  const extra: Record<string, unknown> = {};
+  if (include.has('people') && !manageAllowed(principal, f)) {
+    extra.people = await peopleFor(principal, f);
+  }
+  if (include.has('uses')) {
+    const uses = await usesOf(principal, f);
+    extra.uses = uses.visible;
+    extra.hiddenUses = uses.hidden;
+    extra.inUse = uses.all.some((u) => u.blocks);
+  }
+  return { ...shown, ...extra };
+}
+
+/**
+ * Which of an artist's files are in use somewhere that stops them being
+ * deleted (rev 8), for the "In use" chip in lists: the asset library (on the
+ * record), the brand kit, and submissions waiting for review.
+ */
+async function inUseIds(artistId: string, files: FileRecord[]): Promise<Set<string>> {
+  const ids = new Set(files.filter((f) => f.asset).map((f) => f.fileId));
+  const [kit, subs] = await Promise.all([
+    db.send(
+      new GetCommand({
+        TableName: table(),
+        Key: { PK: artistPk(artistId), SK: BRAND_SK },
+        ProjectionExpression: 'logos, imagery',
+      }),
+    ),
+    db.send(
+      new QueryCommand({
+        TableName: table(),
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :s)',
+        FilterExpression: '#st = :open',
+        ExpressionAttributeValues: { ':pk': artistPk(artistId), ':s': 'SUB#', ':open': 'open' },
+        ExpressionAttributeNames: { '#st': 'status' },
+        ProjectionExpression: 'fileIds',
+      }),
+    ),
+  ]);
+  const k = kit.Item as
+    { logos?: { fileId: string }[]; imagery?: { fileIds?: string[] } } | undefined;
+  for (const l of k?.logos ?? []) ids.add(l.fileId);
+  for (const id of k?.imagery?.fileIds ?? []) ids.add(id);
+  for (const s of subs.Items ?? []) for (const id of (s.fileIds as string[]) ?? []) ids.add(id);
+  return ids;
 }
 
 /** The people picker for a file (owner and managers only). */
@@ -650,23 +699,6 @@ async function removeThumb(principal: Principal, f: Stored) {
   );
 }
 
-/** A file attached to a submission that is still waiting for review can't be deleted. */
-async function attachedToOpenSubmission(artistId: string, fileId: string): Promise<boolean> {
-  const res = await db.send(
-    new QueryCommand({
-      TableName: table(),
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :s)',
-      ExpressionAttributeValues: { ':pk': artistPk(artistId), ':s': 'SUB#' },
-      ProjectionExpression: '#st, fileIds',
-      ExpressionAttributeNames: { '#st': 'status' },
-      Limit: 300,
-    }),
-  );
-  return (res.Items ?? []).some(
-    (s) => s.status === 'open' && ((s.fileIds as string[] | undefined) ?? []).includes(fileId),
-  );
-}
-
 /**
  * Files: upload (to quarantine), list, rename-free metadata, sharing, and
  * short-lived download links. The malware scan and the move to the real
@@ -682,13 +714,17 @@ export const handler = handle(async (event) => {
     case 'GET /artists/{artistId}/files': {
       const artistId = artistIdParam(event);
       ensure(canArtistFile(principal, 'read', artistId));
-      const files = await withThumbnails(
-        principal,
-        (await list(artistPk(artistId))).filter(
-          (f) => canArtistFile(principal, 'read', artistId, f).allow,
-        ),
+      const visible = (await list(artistPk(artistId))).filter(
+        (f) => canArtistFile(principal, 'read', artistId, f).allow,
       );
-      return json(200, { files });
+      const [shown, used] = await Promise.all([
+        withThumbnails(principal, visible),
+        // Another artist sees only what was sent to them, not where it's used.
+        principal.role === 'artist' && principal.artistId !== artistId
+          ? Promise.resolve(new Set<string>())
+          : inUseIds(artistId, visible),
+      ]);
+      return json(200, { files: shown.map((f) => ({ ...f, inUse: used.has(f.fileId) })) });
     }
 
     case 'POST /artists/{artistId}/files': {
@@ -911,9 +947,9 @@ export const handler = handle(async (event) => {
       ensure(canArtistFile(principal, 'write', artistId, f));
       const refused = deleteAllowed(principal, f);
       if (refused) throw new HttpError(403, refused);
-      if (await attachedToOpenSubmission(artistId, f.fileId)) {
-        throw new HttpError(409, 'This file is attached to a submission waiting for review');
-      }
+      // In use anywhere other than chat: remove it from there first (rev 8).
+      const inUse = inUseMessage((await usesOf(principal, f)).all);
+      if (inUse) throw new HttpError(409, inUse);
       await removeFile(principal, f);
       await audit(event, 'file.delete', 'success', { artistId, fileId: f.fileId });
       return json(200, { deleted: f.fileId });
@@ -1076,6 +1112,8 @@ export const handler = handle(async (event) => {
       ensure(authorize(principal, 'write', librarySharing(f)));
       const refused = deleteAllowed(principal, f);
       if (refused) throw new HttpError(403, refused);
+      const inUse = inUseMessage((await usesOf(principal, f)).all);
+      if (inUse) throw new HttpError(409, inUse);
       await removeFile(principal, f);
       await audit(event, 'file.delete', 'success', { library: true, fileId: f.fileId });
       return json(200, { deleted: f.fileId });

@@ -145,6 +145,18 @@ function answer(method: string, path: string): [number, unknown] {
       /^\/artists\/[^/]+\/files\/[^/]+$/,
       {
         ...file,
+        uses: [
+          {
+            kind: 'asset',
+            id: 'file000000001',
+            title: 'Asset library',
+            detail: 'Press shot',
+            blocks: true,
+          },
+          { kind: 'chat', id: 'dm-art_chloepoli000', title: 'Chat with Blueprint', blocks: false },
+        ],
+        hiddenUses: 1,
+        inUse: true,
         people: [
           {
             sub: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
@@ -591,11 +603,17 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     expect(screen.getByText('Kyra Teichtahl', { exact: false })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull();
     expect(screen.getByRole('heading', { name: 'Version history' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Where it’s used' })).toBeTruthy();
+    expect(screen.getByText('+ 1 place you don’t have access to')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Restore version 1' })).toBeTruthy();
     expect(await violations()).toEqual([]);
     await click('Edit');
     expect(screen.getByRole('heading', { name: 'Edit document' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Delete Press shot/ })).toBeTruthy();
+    // Used in the asset library, so it can't be deleted yet (rev 8).
+    expect(
+      (screen.getByRole('button', { name: /^Delete Press shot/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getByText(/used in 1 place/)).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Who can edit it' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Upload a new version' })).toBeTruthy();
     expect(await violations()).toEqual([]);

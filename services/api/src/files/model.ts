@@ -574,6 +574,48 @@ export function trimVersions(list: VersionMeta[]): { kept: VersionMeta[]; droppe
   return { kept: list.slice(0, MAX_VERSIONS), dropped: list.slice(MAX_VERSIONS) };
 }
 
+// ── Where it's used (rev 8) ────────────────────────────────────────────────
+/**
+ * A place that uses a document. Chats are recorded when a file card is
+ * posted (`FILEUSE#…` items, written by the chat API); submissions, the
+ * brand kit and the asset library are read from where they live.
+ */
+export type UseKind = 'submission' | 'brand-kit' | 'asset' | 'chat';
+export interface FileUse {
+  kind: UseKind;
+  /** Submission or conversation id; the file's own id for the brand kit and assets. */
+  id: string;
+  title: string;
+  /** e.g. "Waiting for review", "Logo", "Reviewed". */
+  detail?: string;
+  /** Whether it stops the document being deleted (see `blocksDelete`). */
+  blocks: boolean;
+}
+
+/** The usage record of a file, by where the file lives. */
+export const fileUsePk = (scope: FileScope, fileId: string, artistId?: string) =>
+  `FILEUSE#${scope === 'library' ? 'library' : artistId}#${fileId}`;
+export const chatUseSk = (conversationId: string) => `CHAT#${conversationId}`;
+
+/**
+ * A document used anywhere other than chat can't be deleted (rev 8): an
+ * asset, the brand kit, or a submission still waiting for review. Reviewed
+ * submissions keep a record but don't hold the document (the submission
+ * then shows "This file was deleted"), and chats never do.
+ */
+export function blocksDelete(kind: UseKind, submissionStatus?: string): boolean {
+  if (kind === 'chat') return false;
+  if (kind === 'submission') return submissionStatus === 'open';
+  return true;
+}
+
+/** The refusal shown when a document can't be deleted yet. */
+export function inUseMessage(uses: Pick<FileUse, 'blocks'>[]): string | undefined {
+  const n = uses.filter((u) => u.blocks).length;
+  if (n === 0) return undefined;
+  return `This document is used in ${n} ${n === 1 ? 'place' : 'places'}. Remove it from ${n === 1 ? 'there' : 'them'} before deleting.`;
+}
+
 // ── Scan results ──────────────────────────────────────────────────────────
 export type ScanOutcome = { promote: true } | { promote: false; reason: string };
 

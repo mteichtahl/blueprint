@@ -331,7 +331,13 @@ function EditAccessSelect({
 }
 
 function StatusBadge({ f }: { f: FileItem }) {
-  if (f.status === 'available') return null;
+  if (f.status === 'available') {
+    return f.inUse ? (
+      <Tag tone="s" className="ml-2">
+        <span title="Used somewhere in the app, so it can’t be deleted">In use</span>
+      </Tag>
+    ) : null;
+  }
   return (
     <Tag tone={f.status === 'pending' ? 's' : 'c'} className="ml-2">
       <span title={f.rejectReason ?? undefined}>
