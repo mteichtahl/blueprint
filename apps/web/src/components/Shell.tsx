@@ -181,6 +181,8 @@ export interface NavItem {
   icon?: IconName;
   /** Artist rows show an avatar instead of an icon. */
   avatar?: string;
+  /** Whose avatar: their profile picture shows when they have one. */
+  avatarArtistId?: string;
   coral?: boolean;
   badge?: string | number;
   badgeTone?: 'k' | 'w';
@@ -312,7 +314,12 @@ export function BmgShell({
               onClick={() => !item.soon && go(item.id)}
             >
               {item.avatar ? (
-                <Avatar name={item.avatar} size={26} className="!bg-[#F1F4F7] !text-[#011935]" />
+                <Avatar
+                  name={item.avatar}
+                  artistId={item.avatarArtistId}
+                  size={26}
+                  className="!bg-[#F1F4F7] !text-[#011935]"
+                />
               ) : item.icon && section.label ? (
                 <span className={`appsq ${item.coral ? 'appsq-c' : ''}`}>
                   <Icon name={item.icon} size={14} strokeWidth={2.4} />

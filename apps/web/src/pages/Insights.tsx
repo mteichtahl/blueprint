@@ -74,7 +74,10 @@ function AccountCard({ a, color, range }: { a: AccountInsight; color: string; ra
   return (
     <div className="flex flex-[1_1_260px] flex-col gap-2 rounded-lg border border-input p-4">
       <div className="flex items-center gap-3">
-        <Avatar name={a.account === 'bmg' ? 'B M G' : a.name} />
+        <Avatar
+          name={a.account === 'bmg' ? 'B M G' : a.name}
+          artistId={a.account === 'bmg' ? null : a.account}
+        />
         <b className="flex-1 text-lg">{a.name}</b>
       </div>
       <div className="flex items-baseline gap-3">

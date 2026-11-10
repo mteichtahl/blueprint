@@ -62,6 +62,7 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
  * The REST API for one environment (design 7.2). Phase 2 routes:
  *   GET  /me                    who you are, step-up state, latest consent
  *   PATCH /me                   your job title (Blueprint people; artists are "Artist")
+ *   GET  /avatars               profile pictures for ?artists=… and ?users=… (missing ones left out)
  *   GET  /consent, POST /consent  append-only consent ledger (F1 step 4)
  *   POST /step-up/totp/setup|verify   app-level MFA for social sign-ins (6.2)
  *   POST /artists               admin invite → onboarding (F1), fresh step-up
@@ -699,7 +700,8 @@ export class ApiStack extends BmgStack {
     putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
     // Job title (rev 7) and profile picture live on USER#<sub> / PROFILE.
-    allow(me, 'ReadProfile', ['dynamodb:GetItem'], [main]);
+    // BatchGetItem: GET /avatars (profile pictures on USER#<sub> / PROFILE and ARTIST#<id> / AVATAR).
+    allow(me, 'ReadProfile', ['dynamodb:GetItem', 'dynamodb:BatchGetItem'], [main]);
     props.platformKey.grant(me, 'kms:Decrypt');
     new Rule(this, 'AiConsentChanges', {
       eventBus: props.bus,
@@ -1048,6 +1050,7 @@ export class ApiStack extends BmgStack {
     };
     route('GET', '/me', me);
     route('PATCH', '/me', me);
+    route('GET', '/avatars', me);
     route('GET', '/consent', consent);
     route('POST', '/consent', consent);
     route('POST', '/step-up/totp/setup', stepUp);

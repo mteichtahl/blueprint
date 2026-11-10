@@ -213,7 +213,7 @@ export function ArtistWorkspace({
   return (
     <>
       <header className="page-head flex flex-wrap items-center gap-[18px]">
-        <Avatar name={artist.displayName} size={64} />
+        <Avatar name={artist.displayName} artistId={artist.artistId} size={64} />
         <div className="flex min-w-[min(300px,100%)] flex-1 flex-col gap-1">
           <span className="eyebrow">Artist workspace</span>
           <div className="flex items-center gap-3">

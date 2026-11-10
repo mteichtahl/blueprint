@@ -291,7 +291,7 @@ export function AccessPage({
           cards={team.map((m) => (
             <RowCard
               key={m.sub}
-              lead={<Avatar name={m.displayName} size={36} />}
+              lead={<Avatar name={m.displayName} userSub={m.sub} size={36} />}
               title={`${m.displayName}${m.sub === me.sub ? ' (you)' : ''}`}
               status={
                 !m.enabled ? (
@@ -340,7 +340,7 @@ export function AccessPage({
               <tr key={m.sub}>
                 <td>
                   <span className="flex items-center gap-3">
-                    <Avatar name={m.displayName} size={32} />
+                    <Avatar name={m.displayName} userSub={m.sub} size={32} />
                     <span className="flex flex-col">
                       <b>
                         {m.displayName}

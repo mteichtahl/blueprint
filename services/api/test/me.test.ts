@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { checkAvatar, jobTitleFor, ProfilePatch } from '../src/handlers/me.ts';
+import {
+  AVATAR_BATCH,
+  avatarIds,
+  checkAvatar,
+  jobTitleFor,
+  ProfilePatch,
+} from '../src/handlers/me.ts';
 
 describe('job titles', () => {
   it('is always "Artist" for artists', () => {
@@ -37,5 +43,18 @@ describe('profile pictures', () => {
     );
     expect(() => checkAvatar('data:image/svg+xml;base64,PHN2Zy8+')).toThrow(/PNG, JPEG or WebP/);
     expect(() => checkAvatar(`data:image/jpeg;base64,${PNG_1PX}`)).toThrow(/valid image/);
+  });
+});
+
+describe('GET /avatars ids', () => {
+  it('takes a comma list, drops blanks and repeats', () => {
+    expect(avatarIds('art_a, art_b,,art_a')).toEqual(['art_a', 'art_b']);
+    expect(avatarIds(undefined)).toEqual([]);
+  });
+
+  it('refuses odd ids and too many at once', () => {
+    expect(() => avatarIds('art_a,USER#x')).toThrow(/valid id/);
+    const many = Array.from({ length: AVATAR_BATCH + 1 }, (_, i) => `a${i}`).join(',');
+    expect(() => avatarIds(many)).toThrow(/at most/);
   });
 });
