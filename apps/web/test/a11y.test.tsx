@@ -319,7 +319,7 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     ['stats', /^My stats/],
     ['connectors', /^Connect Instagram/],
     ['submit', /^Upload music or lyrics/],
-    ['profile', 'Profile & preferences'],
+    ['profile', /Profile & preferences$/],
   ] as const)('artist phone: %s', async (_view, name) => {
     await phone();
     await click(name);

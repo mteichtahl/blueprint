@@ -31,6 +31,7 @@ import {
   Chips,
   DataTable,
   Field,
+  initials,
   Notice,
   PageHeader,
   RowCard,
@@ -1050,7 +1051,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                 />
                 <button
                   type="button"
-                  aria-label="Profile & preferences"
+                  aria-label={`${initials(userName)}, Profile & preferences`}
                   onClick={() => setView('profile')}
                 >
                   <Avatar name={userName} size={34} className="!bg-cta !text-white" />

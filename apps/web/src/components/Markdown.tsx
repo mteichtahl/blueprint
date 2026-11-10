@@ -105,7 +105,8 @@ function Toolbar({ editor }: { editor: Editor }) {
           key={t.label}
           type="button"
           title={t.label}
-          aria-label={t.label}
+          // Include what's on the button ("H2", "1.") so it can be said aloud (WCAG 2.5.3).
+          aria-label={/[a-z0-9]/i.test(t.short) ? `${t.short} ${t.label}` : t.label}
           aria-pressed={state.active[i]}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => t.run(editor)}
