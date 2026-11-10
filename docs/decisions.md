@@ -233,6 +233,12 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Export PDF** is the browser's print-to-PDF with print styles that show only the kit.
 - **No new Lambdas:** the routes reuse the workspace and files functions, keeping the API stack under 500 resources (now 105 routes).
 
+## Notes: Phase 6 hardening (10 Nov 2026)
+
+- **To-do reminder 500 (change plan WP0):** the reminder role's trust policy matched `aws:SourceArn` against the _schedule_ ARN, but EventBridge Scheduler sends the _schedule group_ ARN. So the role could never be assumed, and `CreateSchedule` failed after the to-do was already saved. The trust policy now uses `ArnEquals` on `schedule-group/<env>-reminders`, which follows AWS's confused-deputy guidance, and an infra test pins it.
+  - **A reminder can no longer break a save.** Scheduler errors are logged (`reminder.failed`) and flagged on the to-do (`reminderFailed`). The API returns the saved to-do, and the UI shows "Reminder not set". Saving the to-do again, even unchanged, retries it, and that retry sends no change notification.
+  - **Schedule names stay `todo-<artistId>-<todoId>`.** Artist ids are at most 36 characters, so names are at most 61 and never truncated, and a test already checks the 64-character limit. Renaming would orphan existing schedules.
+
 ## Notes: Phase 6 policy review (10 Nov 2026)
 
 - **Full findings are in [security-review.md](security-review.md).** The gate is met: no high findings are open.

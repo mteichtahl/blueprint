@@ -131,6 +131,43 @@ async function syncReminder(todo: Todo) {
 }
 
 /**
+ * Schedules the reminder without ever failing the save: the to-do is already
+ * stored, so a Scheduler error is logged and flagged on the to-do
+ * (`reminderFailed`) instead of turning into a 500 and a duplicate on retry.
+ */
+async function scheduleReminder(todo: Todo, key: { PK: string; SK: string }): Promise<Todo> {
+  let failed = false;
+  try {
+    await syncReminder(todo);
+  } catch (err) {
+    failed = true;
+    console.error(
+      JSON.stringify({
+        msg: 'reminder.failed',
+        artistId: todo.artistId,
+        todoId: todo.todoId,
+        error: (err as Error).name,
+        detail: (err as Error).message,
+      }),
+    );
+  }
+  if (failed === !!todo.reminderFailed) return todo;
+  await db.send(
+    new UpdateCommand({
+      TableName: table(),
+      Key: key,
+      UpdateExpression: failed ? 'SET reminderFailed = :t' : 'REMOVE reminderFailed',
+      ...(failed ? { ExpressionAttributeValues: { ':t': true } } : {}),
+      ConditionExpression: 'attribute_exists(PK)',
+    }),
+  );
+  const next = { ...todo };
+  if (failed) next.reminderFailed = true;
+  else delete next.reminderFailed;
+  return next;
+}
+
+/**
  * Works out remindAt. When the user just set the timing (`strict`), a
  * reminder that would already have gone off is refused; otherwise (e.g.
  * re-opening an old to-do) a past reminder is simply not scheduled again.
@@ -260,6 +297,7 @@ const publicTodo = (t: Todo) => ({
   dueTime: t.dueTime ?? null,
   reminder: t.reminder ?? null,
   remindAt: t.remindAt ?? null,
+  reminderFailed: !!t.reminderFailed,
   phaseId: t.phaseId ?? null,
   submissionId: t.submissionId ?? null,
   done: t.done,
@@ -619,8 +657,11 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_not_exists(PK)',
         }),
       );
-      await syncReminder(todo);
-      return json(201, publicTodo(todo));
+      const saved = await scheduleReminder(todo, {
+        PK: artistPk(artistId),
+        SK: todoSk(todoId),
+      });
+      return json(201, publicTodo(saved));
     }
 
     case 'PATCH /artists/{artistId}/todos/{todoId}': {
@@ -654,7 +695,8 @@ export const handler = handle(async (event) => {
       }
       if (!merged.notes) delete merged.notes;
       const changed = changedFields(existing, merged);
-      if (changed.length === 0) return json(200, publicTodo(existing));
+      // Saving unchanged still retries a reminder that couldn't be scheduled.
+      if (changed.length === 0 && !existing.reminderFailed) return json(200, publicTodo(existing));
       // Only a newly set timing is held to "not in the past"; ticking an old to-do is fine.
       const timing = changed.some((f) => f === 'due' || f === 'dueTime' || f === 'reminder');
       const updated: Todo = {
@@ -684,8 +726,8 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_exists(PK)',
         }),
       );
-      await syncReminder(updated);
-      const notify = notifyOnEdit(principal.role, existing);
+      const stored = await scheduleReminder(updated, key);
+      const notify = changed.length > 0 && notifyOnEdit(principal.role, existing);
       if (notify) {
         await domainEvent('todo.updated', {
           artistId,
@@ -696,7 +738,7 @@ export const handler = handle(async (event) => {
         });
       }
       await audit(event, 'todo.update', 'success', { artistId, todoId, fields: changed.join(',') });
-      return json(200, publicTodo(updated));
+      return json(200, publicTodo(stored));
     }
 
     case 'GET /todos': {
