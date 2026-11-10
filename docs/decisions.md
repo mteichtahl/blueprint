@@ -420,3 +420,4 @@ Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project. These are the 
   - **Create to-dos** from action items uses the normal to-dos API (artist meetings only), not the assistant's checklist. Each to-do notes the meeting it came from.
   - Staff use the same screens on a phone (responsive); there's no separate phone layout.
 - **Saving names or transcript fixes refiles the meeting note** as its next version.
+- **Not built yet (rev 11):** the custom word list for names; deleting audio after 90 days and its setting; starting a meeting from the assistant; the Timeline preview on the plan review; the plan under the note's "Where it's used"; "[recording paused]" in the transcript; the staging gate additions (a real Transcribe job across two artists' keys).
