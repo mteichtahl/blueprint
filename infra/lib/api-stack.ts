@@ -146,8 +146,11 @@ export class ApiStack extends BmgStack {
       assumedBy: new ServicePrincipal('scheduler.amazonaws.com', {
         conditions: {
           StringEquals: { 'aws:SourceAccount': this.account },
-          ArnLike: {
-            'aws:SourceArn': `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/*`,
+          // Scheduler sets SourceArn to the schedule *group*, not the schedule
+          // (AWS confused-deputy guidance). Matching the schedule ARN meant the
+          // role could never be assumed, so CreateSchedule failed (WP0).
+          ArnEquals: {
+            'aws:SourceArn': `arn:aws:scheduler:${this.region}:${this.account}:schedule-group/${p}-reminders`,
           },
         },
       }),
