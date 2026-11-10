@@ -43,6 +43,7 @@ import { useNotifications, type AppNotification } from '../lib/notifications.ts'
 import { useDeepLink } from '../lib/push.ts';
 import { AssetLibrary } from './Assets.tsx';
 import { BrandKit } from './BrandKit.tsx';
+import { AccessPage } from './Access.tsx';
 import { ArtistFiles, Library } from './Library.tsx';
 import { Profile } from './Profile.tsx';
 import { ArtistChats, BmgChat, useInbox, type ConversationSummary } from './Messages.tsx';
@@ -189,7 +190,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         { id: 'events', label: 'Events', icon: 'calendar' },
         { id: 'newsroom', label: 'Newsroom', icon: 'mail' },
         { id: 'connectors', label: 'Connectors', icon: 'plug' },
-        { id: 'access', label: 'Access & permissions', icon: 'lock', soon: true },
+        { id: 'access', label: 'Access & permissions', icon: 'lock' },
         { id: 'prompts', label: 'AI prompts', icon: 'sparkle' },
       ],
     },
@@ -267,6 +268,16 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             sub="Website, socials and newsletter in one place. Numbers update every hour from the connected apps."
           />
           <Insights cfg={cfg} token={token} onManage={() => setView('connectors')} />
+        </>
+      )}
+      {view === 'access' && (
+        <>
+          <PageHeader
+            eyebrow="BMG only · Settings"
+            title="Access & permissions"
+            sub="What artist accounts can do, and who is on the Blueprint team."
+          />
+          <AccessPage cfg={cfg} token={token} me={me} artists={artists} onReauth={onReauth} />
         </>
       )}
       {view === 'connectors' && (
@@ -730,7 +741,9 @@ function ArtistsPage({
               <thead>
                 <tr>
                   <th scope="col">Artist</th>
-                  <th scope="col">Status</th>
+                  <th scope="col">App account</th>
+                  <th scope="col">Terms</th>
+                  <th scope="col">AI</th>
                   <th scope="col">Joined</th>
                   <th scope="col" />
                 </tr>
@@ -746,6 +759,22 @@ function ArtistsPage({
                     </td>
                     <td>
                       <Tag tone={a.status === 'active' ? 'n' : 's'}>{a.status || 'Invited'}</Tag>
+                    </td>
+                    <td>
+                      {a.termsAcceptedAt ? (
+                        `Accepted ${shortDate(a.termsAcceptedAt)}`
+                      ) : (
+                        <span className="src">Not yet</span>
+                      )}
+                    </td>
+                    <td>
+                      {a.aiOptIn === true ? (
+                        <Tag tone="n">Opted in</Tag>
+                      ) : a.aiOptIn === false ? (
+                        <Tag tone="s">Opted out</Tag>
+                      ) : (
+                        <span className="src">Not chosen</span>
+                      )}
                     </td>
                     <td>{shortDate(a.createdAt)}</td>
                     <td className="text-right">

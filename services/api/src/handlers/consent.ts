@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { projectAiState } from '../ai/state.ts';
 import { PutEventsCommand, EventBridgeClient } from '@aws-sdk/client-eventbridge';
 import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { z } from 'zod';
@@ -106,6 +107,8 @@ export const handler = handle(async (event) => {
       }),
     );
   }
+  // The roster's Terms and AI columns (Artists & access) read this summary.
+  if (ctx.artistId) await projectAiState(ctx.artistId, body.aiOptIn, decidedAt, body.termsVersion);
   await audit(event, 'consent.recorded', 'success', {
     termsVersion: body.termsVersion,
     aiOptIn: body.aiOptIn,

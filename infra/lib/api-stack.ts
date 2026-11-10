@@ -370,6 +370,8 @@ export class ApiStack extends BmgStack {
     // The consent ledger is append-only: Put and Query, never Update or Delete.
     allow(consent, 'AppendConsent', ['dynamodb:PutItem', 'dynamodb:Query'], [consentTable]);
     allow(consent, 'ReadAssignments', ['dynamodb:GetItem'], [main]);
+    // The terms and AI summary on ARTIST#id / AI (Artists & access roster).
+    allow(consent, 'RecordConsentSummary', ['dynamodb:UpdateItem'], [main]);
     putEvents(consent);
     allow(
       stepUp,
@@ -387,7 +389,8 @@ export class ApiStack extends BmgStack {
     allow(
       artists,
       'Invites',
-      ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+      // BatchGetItem: team names, titles and assignments (Access & permissions).
+      ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
       [main],
     );
     allow(artists, 'ReadSmtpSecret', ['secretsmanager:GetSecretValue'], [smtpSecretArn]);
@@ -857,6 +860,13 @@ export class ApiStack extends BmgStack {
         // Resending an invite: check the user is still unconfirmed, then set a new temporary password.
         'cognito-idp:AdminGetUser',
         'cognito-idp:AdminSetUserPassword',
+        // Access & permissions: the Blueprint team (list, role, on/off, sign out).
+        'cognito-idp:ListUsers',
+        'cognito-idp:ListUsersInGroup',
+        'cognito-idp:AdminRemoveUserFromGroup',
+        'cognito-idp:AdminDisableUser',
+        'cognito-idp:AdminEnableUser',
+        'cognito-idp:AdminUserGlobalSignOut',
       ],
       [props.userPool.userPoolArn],
     );
@@ -1080,6 +1090,12 @@ export class ApiStack extends BmgStack {
       authorizer,
       requestValidator: validator,
     });
+    // Access & permissions (settings and the Blueprint team): one proxy route
+    // on the artists function, which already manages Cognito users.
+    this.api.root
+      .addResource('access')
+      .addResource('{proxy+}')
+      .addMethod('ANY', integrationFor(artists), { authorizer, requestValidator: validator });
     // Contacts (and venues): one function under proxy resources, to keep the stack small.
     for (const root of ['contacts', 'venues']) {
       const res = this.api.root.addResource(root);

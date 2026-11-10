@@ -60,7 +60,12 @@ export const handler = handle(async (event) => {
   // Artists who chose before the assistant existed get their choice recorded
   // the next time they open the app (the ledger stays the source of truth).
   if (ctx.artistId && consent && typeof consent.aiOptIn === 'boolean') {
-    await projectAiState(ctx.artistId, consent.aiOptIn, String(consent.decidedAt));
+    await projectAiState(
+      ctx.artistId,
+      consent.aiOptIn,
+      String(consent.decidedAt),
+      typeof consent.termsVersion === 'string' ? consent.termsVersion : undefined,
+    );
   }
   return json(200, {
     sub: ctx.sub,

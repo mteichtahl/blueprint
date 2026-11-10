@@ -101,6 +101,49 @@ export function inviteEmail(
   );
 }
 
+/** A Blueprint team member's invitation (Access & permissions → Add team member). */
+export function teamInviteEmail(
+  ctx: BrandContext,
+  i: {
+    displayName: string;
+    email: string;
+    temporaryPassword: string;
+    roleLabel: string;
+    invitedBy: string;
+    expiresInDays: number;
+  },
+): RenderedEmail {
+  return renderLayout(
+    {
+      subject: 'You’ve been added to the Blueprint team app',
+      preheader: `${i.invitedBy} added you to the Blueprint Music Group app.`,
+      eyebrow: 'Welcome to the team',
+      heading: `Hi ${i.displayName}, you’re on the Blueprint team`,
+      blocks: [
+        {
+          kind: 'p',
+          text: `${i.invitedBy} has given you a login to the BMG app, where Blueprint works with its artists: workspaces, chat, reviews, events and the newsletter.`,
+        },
+        {
+          kind: 'facts',
+          rows: [
+            ['Email', i.email],
+            ['Access', i.roleLabel],
+          ],
+        },
+        { kind: 'code', label: 'Temporary password', text: i.temporaryPassword },
+        {
+          kind: 'p',
+          text: 'The first time you sign in you’ll choose your own password and set up an authenticator app or a passkey.',
+        },
+      ],
+      cta: { label: 'Sign in to Blueprint', url: link(ctx, '/') },
+      footerNote: `This invitation expires in ${i.expiresInDays} days. If you weren’t expecting it, you can ignore this email.`,
+    },
+    layout(ctx),
+  );
+}
+
 // ── To-dos ────────────────────────────────────────────────────────────────
 
 export function todoUpdatedEmail(
