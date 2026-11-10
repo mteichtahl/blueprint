@@ -118,6 +118,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     submit: 'review',
     gigs: 'gigs',
     connectors: 'connectors',
+    todos: 'todos',
   };
   const goTo = (link: string) =>
     link.startsWith('chat:')
@@ -878,7 +879,13 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   useDeepLink((link) => {
     if (link.startsWith('chat:')) setChatTarget(link.slice('chat:'.length) || null);
     setView(
-      link.startsWith('chat:') ? 'chat' : link === 'submit' || link === 'library' ? link : 'home',
+      link.startsWith('chat:')
+        ? 'chat'
+        : link === 'submit' || link === 'library'
+          ? link
+          : link === 'todos'
+            ? 'todo'
+            : 'home',
     );
   });
   const [view, setView] = useState<ArtistView>(hasPendingCallback() ? 'connectors' : 'home');
@@ -955,7 +962,9 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                             ? 'library'
                             : n.link === 'connectors'
                               ? 'connectors'
-                              : 'home',
+                              : n.link === 'todos'
+                                ? 'todo'
+                                : 'home',
                     );
                   }}
                 />

@@ -783,6 +783,7 @@ export class ApiStack extends BmgStack {
           'message.created',
           'file.rejected',
           'gig.helpRequested',
+          'todo.commented',
           'connector.reminder',
           'connector.needsReauth',
         ],
@@ -1024,6 +1025,9 @@ export class ApiStack extends BmgStack {
     route('POST', '/artists/{artistId}/todos', workspace);
     route('PATCH', '/artists/{artistId}/todos/{todoId}', workspace);
     route('GET', '/todos', workspace);
+    route('GET', '/artists/{artistId}/todos/{todoId}/comments', workspace);
+    route('POST', '/artists/{artistId}/todos/{todoId}/comments', workspace);
+    route('DELETE', '/artists/{artistId}/todos/{todoId}/comments/{commentId}', workspace);
     route('GET', '/plan-stages', workspace);
     route('POST', '/plan-stages', workspace);
     route('PUT', '/plan-stages/{stageId}', workspace);

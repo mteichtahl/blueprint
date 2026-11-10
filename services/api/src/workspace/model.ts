@@ -350,3 +350,69 @@ export function planSpan(
   dates.sort();
   return { from: dates[0]!, to: dates.at(-1)! };
 }
+
+// ── To-do threads (rev 7) ─────────────────────────────────────────────────
+/** Comments sit next to their to-do, under their own prefix (not "TODO#"). */
+export const todoCommentPrefix = (todoId: string) => `TODOC#${todoId}#`;
+export const todoCommentSk = (todoId: string, createdAt: string, commentId: string) =>
+  `${todoCommentPrefix(todoId)}${createdAt}#${commentId}`;
+
+export const CommentCreate = z
+  .object({
+    text: z
+      .string()
+      .trim()
+      .min(1, 'Write a comment')
+      .max(2000, 'Keep comments under 2,000 characters'),
+    /** Replying to a comment: replies are one level deep. */
+    parentId: z
+      .string()
+      .regex(/^[a-z0-9]{10,40}$/)
+      .optional(),
+  })
+  .strict();
+
+export interface TodoComment {
+  commentId: string;
+  todoId: string;
+  artistId: string;
+  parentId?: string;
+  text: string;
+  authorSub: string;
+  authorRole: 'artist' | 'bmg-admin' | 'bmg-staff';
+  authorName: string;
+  createdAt: string;
+  deletedAt?: string;
+}
+
+/** Top-level comments in order, each with its replies (a reply to a reply joins its parent). */
+export function threadOf(comments: readonly TodoComment[]) {
+  const sorted = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const byId = new Map(sorted.map((c) => [c.commentId, c]));
+  const rootOf = (c: TodoComment): string => {
+    let cur = c;
+    const seen = new Set<string>();
+    while (cur.parentId && byId.has(cur.parentId) && !seen.has(cur.commentId)) {
+      seen.add(cur.commentId);
+      cur = byId.get(cur.parentId)!;
+    }
+    return cur.commentId;
+  };
+  const roots = sorted.filter((c) => !c.parentId || !byId.has(c.parentId));
+  return roots.map((r) => ({
+    ...r,
+    replies: sorted.filter((c) => c.commentId !== r.commentId && rootOf(c) === r.commentId),
+  }));
+}
+
+/** A removed comment keeps its place in the thread but loses its words. */
+export const publicComment = (c: TodoComment, viewerSub: string) => ({
+  commentId: c.commentId,
+  parentId: c.parentId ?? null,
+  text: c.deletedAt ? '' : c.text,
+  deleted: !!c.deletedAt,
+  authorName: c.authorName,
+  authorRole: c.authorRole,
+  mine: c.authorSub === viewerSub,
+  createdAt: c.createdAt,
+});
