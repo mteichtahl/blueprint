@@ -69,6 +69,13 @@ export interface FileItem {
   versionCreatedAt: string;
   versionNote: string | null;
   versions: FileVersion[];
+  /** In lists of an artist's files: used somewhere that stops it being deleted (rev 8). */
+  inUse?: boolean;
+  /** On the document's own page (rev 8): where it's used, and places you can't see. */
+  uses?: FileUse[];
+  hiddenUses?: number;
+  /** On the document's own page, for its owner: who can edit or own it. */
+  people?: Person[];
   /** A new version being checked, or one that wasn't kept. */
   pendingVersion: {
     v: number;
@@ -82,6 +89,15 @@ export interface FileItem {
   availableAt: string | null;
   /** Set when the file is in the artist's asset library. */
   asset: AssetMeta | null;
+}
+
+export interface FileUse {
+  kind: 'submission' | 'brand-kit' | 'asset' | 'chat';
+  id: string;
+  title: string;
+  detail?: string;
+  /** Stops the document being deleted (everything except chats and reviewed submissions). */
+  blocks: boolean;
 }
 
 export interface FileVersion {

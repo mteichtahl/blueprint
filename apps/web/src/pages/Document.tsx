@@ -10,6 +10,7 @@ import {
   waitForVersion,
   type EditAccess,
   type FileItem,
+  type FileUse,
   type Person,
 } from '../lib/files.ts';
 import { makeThumbnail } from '../lib/thumbnail.ts';
@@ -108,7 +109,8 @@ function useDocument(cfg: AppConfig, token: string, path: string, initial?: File
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
-      setFile(await api<FileItem>(cfg, token, 'GET', path));
+      // Where it's used, and (for its owner) who can be given edit access.
+      setFile(await api<FileItem>(cfg, token, 'GET', `${path}?include=uses,people`));
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -118,28 +120,18 @@ function useDocument(cfg: AppConfig, token: string, path: string, initial?: File
   return { file, setFile, error, setError, load };
 }
 
-/** The people who can be given edit access or ownership (owner and managers only). */
-function usePeople(cfg: AppConfig, token: string, path: string, enabled: boolean) {
-  const [people, setPeople] = useState<Person[] | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    api<{ people: Person[] }>(cfg, token, 'GET', `${path}?include=people`)
-      .then((r) => live && setPeople(r.people))
-      .catch(() => live && setPeople([]));
-    return () => {
-      live = false;
-    };
-  }, [cfg, token, path, enabled]);
-  return people;
-}
-
 export function DocumentPage(props: DocumentPageProps) {
   const [editing, setEditing] = useState(false);
   const path = `${props.collection}/${props.fileId}`;
   const doc = useDocument(props.cfg, props.token, path, props.initial);
   const f = doc.file;
-  const people = usePeople(props.cfg, props.token, path, !!f?.canManage);
+  // The list's copy has no people or uses; keep the last full ones across updates.
+  const [people, setPeople] = useState<Person[] | null>(null);
+  const [uses, setUses] = useState<Pick<FileItem, 'uses' | 'hiddenUses' | 'inUse'> | null>(null);
+  useEffect(() => {
+    if (f?.people) setPeople(f.people);
+    if (f?.uses) setUses({ uses: f.uses, hiddenUses: f.hiddenUses ?? 0, inUse: !!f.inUse });
+  }, [f]);
 
   if (!f) {
     return (
@@ -163,6 +155,7 @@ export function DocumentPage(props: DocumentPageProps) {
           props.onChanged();
           props.onBack();
         }}
+        uses={uses}
         onVersion={(next) => {
           doc.setFile(next);
           props.onChanged();
@@ -177,6 +170,7 @@ export function DocumentPage(props: DocumentPageProps) {
       people={people}
       error={doc.error}
       onError={doc.setError}
+      uses={uses}
       onEdit={() => setEditing(true)}
       onChanged={(next) => {
         if (next) doc.setFile(next);
@@ -206,9 +200,11 @@ function DocumentDetail({
   onBack,
   onEdit,
   onChanged,
+  uses,
 }: DocumentPageProps & {
   file: FileItem;
   people: Person[] | null;
+  uses: Pick<FileItem, 'uses' | 'hiddenUses' | 'inUse'> | null;
   error: string | null;
   onError: (e: string | null) => void;
   onEdit: () => void;
@@ -292,6 +288,7 @@ function DocumentDetail({
         <Row label="Who can see it">{whoCanSee(f, names)}</Row>
         <Row label="Who can edit it">{whoCanEdit(f, people)}</Row>
       </dl>
+      <WhereUsed uses={uses} />
       {f.versions.length > 0 && (
         <VersionHistory
           cfg={cfg}
@@ -303,6 +300,60 @@ function DocumentDetail({
         />
       )}
     </Card>
+  );
+}
+
+const USE_LABEL: Record<FileUse['kind'], string> = {
+  submission: 'Submission for review',
+  'brand-kit': 'Brand kit',
+  asset: 'Asset library',
+  chat: 'Chat',
+};
+
+/** Every place the document is used; places you can't open are counted. */
+function WhereUsed({ uses }: { uses: Pick<FileItem, 'uses' | 'hiddenUses'> | null }) {
+  return (
+    <section
+      aria-labelledby="where-used"
+      className="flex flex-col gap-1.5 border-t border-input pt-3"
+    >
+      <h3 id="where-used" className="text-[15px] font-bold">
+        Where it’s used
+      </h3>
+      {!uses ? (
+        <WaveLoader />
+      ) : (uses.uses ?? []).length === 0 && !uses.hiddenUses ? (
+        <p className="src">Not used anywhere yet.</p>
+      ) : (
+        <ul className="flex flex-col">
+          {(uses.uses ?? []).map((u) => (
+            <li
+              key={`${u.kind}-${u.id}`}
+              className="flex items-center gap-3 border-b border-input py-2 last:border-b-0"
+            >
+              <span className="min-w-0 flex-1">
+                <b className="block [overflow-wrap:anywhere]">{u.title}</b>
+                <span className="src">
+                  {USE_LABEL[u.kind]}
+                  {u.detail ? ` · ${u.detail}` : ''}
+                </span>
+              </span>
+              {u.kind === 'chat' ? (
+                <Tag tone="s">chat</Tag>
+              ) : (
+                u.blocks && <Tag tone="n">In use</Tag>
+              )}
+            </li>
+          ))}
+          {!!uses.hiddenUses && (
+            <li className="src py-2">
+              + {uses.hiddenUses} {uses.hiddenUses === 1 ? 'place' : 'places'} you don’t have access
+              to
+            </li>
+          )}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -597,7 +648,20 @@ function NewVersion({
 }
 
 /** Delete with a second click to confirm (no browser dialogs). */
-function DeleteZone({ f, onDelete }: { f: FileItem; onDelete: () => Promise<void> }) {
+function DeleteZone({
+  f,
+  uses,
+  onDelete,
+}: {
+  f: FileItem;
+  uses: Pick<FileItem, 'uses' | 'hiddenUses' | 'inUse'> | null;
+  onDelete: () => Promise<void>;
+}) {
+  const blocking = (uses?.uses ?? []).filter((u) => u.blocks);
+  const chats = (uses?.uses ?? []).filter((u) => u.kind === 'chat').length;
+  // Blocked by places this person can't see: the server counts them in inUse.
+  const hiddenBlocking = !!uses?.inUse && blocking.length === 0;
+  const blocked = !!uses?.inUse;
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -614,14 +678,38 @@ function DeleteZone({ f, onDelete }: { f: FileItem; onDelete: () => Promise<void
       <h3 id="delete-doc" className="text-[15px] font-bold text-[#8E2F2C]">
         Delete this document
       </h3>
-      <p className="src">
-        It’s removed for everyone it’s shared with. An admin can still recover it for 35 days.
-      </p>
+      {blocked ? (
+        <>
+          <p className="text-sm">
+            {blocking.length > 0
+              ? `This document is used in ${blocking.length} ${blocking.length === 1 ? 'place' : 'places'}. Remove it from ${blocking.length === 1 ? 'there' : 'them'} before deleting.`
+              : 'This document is used somewhere you can’t see.'}
+          </p>
+          {blocking.length > 0 && (
+            <ul className="list-disc pl-5 text-sm">
+              {blocking.map((u) => (
+                <li key={`${u.kind}-${u.id}`}>
+                  {USE_LABEL[u.kind]}: {u.title}
+                  {u.detail ? ` (${u.detail})` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+          {hiddenBlocking && <p className="src">Ask Blueprint to remove it there.</p>}
+        </>
+      ) : (
+        <p className="src">
+          It’s removed for everyone it’s shared with
+          {chats > 0 &&
+            `, and shows as “This file was deleted” in ${chats} ${chats === 1 ? 'chat' : 'chats'}`}
+          . An admin can still recover it for 35 days.
+        </p>
+      )}
       {error && <Notice tone="error">{error}</Notice>}
       <span>
         <Button
           variant={confirm ? 'cta' : 'ghost'}
-          disabled={busy}
+          disabled={busy || blocked || !uses}
           aria-label={confirm ? `Confirm delete ${f.displayName}` : `Delete ${f.displayName}`}
           onClick={async () => {
             if (!confirm) return setConfirm(true);
@@ -684,9 +772,11 @@ function EditDocument({
   onDone,
   onDeleted,
   onVersion,
+  uses,
 }: DocumentPageProps & {
   file: FileItem;
   people: Person[] | null;
+  uses: Pick<FileItem, 'uses' | 'hiddenUses' | 'inUse'> | null;
   onDone: (next?: FileItem) => void;
   onDeleted: () => void;
   /** A new version was uploaded or settled: show it, stay on the Edit page. */
@@ -950,6 +1040,7 @@ function EditDocument({
       {f.canManage && (
         <DeleteZone
           f={f}
+          uses={uses}
           onDelete={async () => {
             await api(cfg, token, 'DELETE', path);
             onDeleted();

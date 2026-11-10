@@ -50,11 +50,13 @@ import {
   UpdateConversation,
   UpdateMine,
   wrapContext,
+  type Attachment,
   type Conversation,
   type MemberState,
   type Payload,
   type Viewer,
 } from '../messages/model.ts';
+import { chatUseSk, fileUsePk } from '../files/model.ts';
 import { publish } from '../realtime.ts';
 import { ROSTER_GSI1PK } from '../workspace/model.ts';
 import {
@@ -569,6 +571,35 @@ async function loadReadable(viewer: Viewer, id: string): Promise<Conversation> {
  * is sealed with a per-conversation key, and artist-to-artist keys only open
  * in an artist session for a member.
  */
+/**
+ * Notes that a document was posted in this chat (rev 8), for its "Where it's
+ * used" list. Ids and the chat's type only; never the message. Best effort:
+ * the message is already sent.
+ */
+async function recordFileUse(conv: Conversation, a: Attachment) {
+  const scope = a.scope === 'library' ? 'library' : 'artist';
+  if (scope === 'artist' && !a.artistId) return;
+  try {
+    await db.send(
+      new PutCommand({
+        TableName: table(),
+        Item: {
+          PK: fileUsePk(scope, a.id, a.artistId),
+          SK: chatUseSk(conv.conversationId),
+          type: 'file-use',
+          kind: 'chat',
+          conversationId: conv.conversationId,
+          at: new Date().toISOString(),
+        },
+      }),
+    );
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ level: 'warn', event: 'file-use.failed', error: (err as Error).name }),
+    );
+  }
+}
+
 /** Access & permissions switches; only artists are bound by them. */
 async function accessRules(viewer: Viewer): Promise<AccessRules> {
   if (viewer.role !== 'artist') return DEFAULT_RULES;
@@ -1023,6 +1054,7 @@ export const handler = handle(async (event) => {
         },
         senderName,
       );
+      if (body.attachment?.kind === 'file') await recordFileUse(conv, body.attachment);
       return json(201, posted);
     }
 
