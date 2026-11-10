@@ -448,6 +448,19 @@ describe('environment API', () => {
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 
+  it('lets Scheduler assume the reminder role from the reminder schedule group (WP0)', () => {
+    const roles = Object.values(prod!.findResources('AWS::IAM::Role')).filter((r) =>
+      r.Properties.AssumeRolePolicyDocument.Statement.some(
+        (st: { Principal?: { Service?: string } }) =>
+          st.Principal?.Service === 'scheduler.amazonaws.com',
+      ),
+    );
+    expect(roles).toHaveLength(1);
+    const cond = roles[0]!.Properties.AssumeRolePolicyDocument.Statement[0].Condition;
+    expect(cond.ArnEquals['aws:SourceArn']).toMatch(/:schedule-group\/bmg-prod-reminders$/);
+    expect(JSON.stringify(cond)).not.toContain(':schedule/');
+  });
+
   it('limits realtime subscribers to their own inbox channel and publishing to IAM', () => {
     const ns = Object.values(prod!.findResources('AWS::AppSync::ChannelNamespace'))[0]!;
     expect(ns.Properties.CodeHandlers).toContain('util.unauthorized()');
@@ -489,28 +502,6 @@ describe('environment API', () => {
         }
       }
     }
-  });
-
-  it('lets Scheduler assume the reminder role from the reminder schedule group', () => {
-    // AWS checks the trust policy at CreateSchedule with the schedule-group ARN;
-    // a schedule-only SourceArn made every new reminder fail.
-    staging!.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'bmg-staging-reminder-scheduler',
-      AssumeRolePolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Principal: { Service: 'scheduler.amazonaws.com' },
-            Condition: Match.objectLike({
-              ArnLike: {
-                'aws:SourceArn': Match.arrayWith([
-                  Match.stringLikeRegexp(':schedule-group/bmg-staging-reminders$'),
-                ]),
-              },
-            }),
-          }),
-        ]),
-      },
-    });
   });
 
   it('owns the account-level API Gateway logging role in staging only', () => {
