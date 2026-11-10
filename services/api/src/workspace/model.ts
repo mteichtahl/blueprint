@@ -224,6 +224,8 @@ export interface Todo {
   reminder?: Reminder;
   /** When the reminder fires (UTC ISO); a scheduled one-off sends it. */
   remindAt?: string;
+  /** The reminder couldn't be scheduled; saving the to-do again retries it. */
+  reminderFailed?: boolean;
   phaseId?: string;
   /** Set on to-dos made from review feedback (design F3). */
   submissionId?: string;
