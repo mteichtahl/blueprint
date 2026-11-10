@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Avatar, Icon, Logo, type IconName } from './ui.tsx';
+import { Avatar, Icon, initials, Logo, type IconName } from './ui.tsx';
 
 // ── Appearance (Light / Dark / System), from the sidebar or Profile ──────────
 export type Theme = 'light' | 'dark' | 'system';
@@ -121,7 +121,8 @@ export function ProfileMenu({
       <button
         ref={button}
         type="button"
-        aria-label="Your account"
+        // With no picture the initials are on screen, so they lead the name (WCAG 2.5.3).
+        aria-label={avatar ? 'Your account' : `${initials(userName)}, your account`}
         aria-haspopup="menu"
         aria-expanded={open}
         className="flex items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2"

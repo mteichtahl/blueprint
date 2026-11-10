@@ -15,11 +15,14 @@ import {
   fileSk,
   LIBRARY_PK,
   parseQuarantineKey,
+  quarantineKey,
   scanOutcome,
   storedKey,
+  THUMB_MAX_BYTES,
   type FileRecord,
   type QuarantineRef,
 } from '../files/model.ts';
+import { detectFileType } from '../files/type.ts';
 import { artistPk } from '../workspace/model.ts';
 import { db, env } from '../lib.ts';
 
@@ -171,6 +174,7 @@ export async function handler(event: ScanResultEvent): Promise<void> {
       }),
     )
   ).Item as FileRecord | undefined;
+  if (ref.part === 'thumb') return promoteThumb(ref, key, rec, event);
   if (!rec || rec.status !== 'pending') {
     // No record (expired) or already settled: just make sure nothing is left in quarantine.
     await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
@@ -185,6 +189,8 @@ export async function handler(event: ScanResultEvent): Promise<void> {
   const reject = async (reason: string) => {
     await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
     await setStatus(ref, 'rejected', reason);
+    // A rejected file keeps no preview.
+    if (rec.thumb) await dropThumb(ref, rec);
     await auditEvent('file.rejected', 'success', { ...ids, reason });
     // Tell the uploader and Blueprint (notifications).
     await events.send(
@@ -198,7 +204,7 @@ export async function handler(event: ScanResultEvent): Promise<void> {
               id: randomUUID(),
               ...ids,
               uploadedBy: rec.uploadedBy,
-              name: rec.name,
+              name: rec.title || rec.name,
               reason,
             }),
           },
@@ -233,6 +239,8 @@ export async function handler(event: ScanResultEvent): Promise<void> {
   // The presigned POST pins the size, so a mismatch means something is wrong.
   if (size !== rec.size) return reject('The uploaded file didn’t match what was expected');
 
+  // What the file really is, from its first 64 KB (the claimed type is often wrong or generic).
+  const fileType = await detect(quarantine, key, rec);
   const obj = await s3.send(new GetObjectCommand({ Bucket: quarantine, Key: key }));
   await dest.client.send(
     new PutObjectCommand({
@@ -245,7 +253,164 @@ export async function handler(event: ScanResultEvent): Promise<void> {
     }),
   );
   await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
+  if (fileType) await saveFileType(ref, fileType);
   await setStatus(ref, 'available');
-  await auditEvent('file.available', 'success', ids);
+  await auditEvent('file.available', 'success', { ...ids, kind: fileType?.kind ?? 'unknown' });
   log('files.promote.available', { fileId: ref.fileId });
+}
+
+async function detect(bucket: string, key: string, rec: FileRecord) {
+  try {
+    const head = await s3.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key, Range: 'bytes=0-65535' }),
+    );
+    const bytes = await head.Body!.transformToByteArray();
+    return detectFileType(bytes, rec.name, rec.contentType);
+  } catch (err) {
+    // Detection is a nicety: never hold a clean file back for it.
+    log('files.promote.detect-failed', { error: (err as Error).name });
+    return undefined;
+  }
+}
+
+async function saveFileType(ref: QuarantineRef, fileType: ReturnType<typeof detectFileType>) {
+  await db.send(
+    new UpdateCommand({
+      TableName: env('MAIN_TABLE'),
+      Key: { PK: pkFor(ref), SK: fileSk(ref.fileId) },
+      UpdateExpression: 'SET fileType = :t',
+      ConditionExpression: 'attribute_exists(PK)',
+      ExpressionAttributeValues: { ':t': fileType },
+    }),
+  );
+}
+
+async function setThumbStatus(ref: QuarantineRef, status: 'available' | 'rejected') {
+  try {
+    await db.send(
+      new UpdateCommand({
+        TableName: env('MAIN_TABLE'),
+        Key: { PK: pkFor(ref), SK: fileSk(ref.fileId) },
+        UpdateExpression: 'SET thumb.#s = :s',
+        ConditionExpression: 'attribute_exists(thumb)',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: { ':s': status },
+      }),
+    );
+  } catch (err) {
+    if ((err as Error).name !== 'ConditionalCheckFailedException') throw err;
+  }
+}
+
+/** Removes a preview from quarantine and from storage, and marks it rejected. */
+async function dropThumb(ref: QuarantineRef, rec: FileRecord) {
+  await s3
+    .send(
+      new DeleteObjectCommand({
+        Bucket: env('QUARANTINE_BUCKET'),
+        Key: quarantineKey(
+          ref.scope,
+          ref.fileId,
+          ref.scope === 'artist' ? ref.artistId : undefined,
+          'thumb',
+        ),
+      }),
+    )
+    .catch(() => undefined);
+  try {
+    const dest = await destination(ref, rec);
+    await dest.client.send(
+      new DeleteObjectCommand({
+        Bucket: dest.bucket,
+        Key: storedKey(
+          ref.scope,
+          ref.fileId,
+          ref.scope === 'artist' ? ref.artistId : undefined,
+          'thumb',
+        ),
+      }),
+    );
+  } catch {
+    /* nothing stored yet */
+  }
+  await setThumbStatus(ref, 'rejected');
+}
+
+/** Only these raster formats are kept as previews, and the bytes must agree. */
+function isPreviewImage(b: Uint8Array, contentType: string): boolean {
+  const png = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+  const jpeg = b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+  const webp =
+    String.fromCharCode(...b.subarray(0, 4)) === 'RIFF' &&
+    String.fromCharCode(...b.subarray(8, 12)) === 'WEBP';
+  return (
+    (contentType === 'image/png' && png) ||
+    (contentType === 'image/jpeg' && jpeg) ||
+    (contentType === 'image/webp' && webp)
+  );
+}
+
+/**
+ * A preview has been scanned. It is kept only if the scan was clean, its file
+ * is still wanted (not rejected or deleted), and it is the small raster image
+ * the record expects; otherwise it is dropped quietly (the list shows the
+ * file type's icon instead). Previews never send notifications.
+ */
+async function promoteThumb(
+  ref: QuarantineRef,
+  key: string,
+  rec: FileRecord | undefined,
+  event: ScanResultEvent,
+): Promise<void> {
+  const quarantine = env('QUARANTINE_BUCKET');
+  const clear = () => s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
+  if (!rec?.thumb || rec.thumb.status !== 'pending' || rec.status === 'rejected') {
+    await clear();
+    log('files.promote.thumb-ignored', { fileId: ref.fileId });
+    return;
+  }
+  const outcome = scanOutcome(event.detail.scanResultDetails?.scanResultStatus);
+  if (!outcome.promote) {
+    await clear();
+    await setThumbStatus(ref, 'rejected');
+    log('files.promote.thumb-rejected', { fileId: ref.fileId });
+    return;
+  }
+  let bytes: Uint8Array;
+  try {
+    const obj = await s3.send(new GetObjectCommand({ Bucket: quarantine, Key: key }));
+    bytes = await obj.Body!.transformToByteArray();
+  } catch (err) {
+    if ((err as Error).name === 'NoSuchKey') return; // already handled by an earlier delivery
+    throw err;
+  }
+  if (
+    bytes.length !== rec.thumb.size ||
+    bytes.length > THUMB_MAX_BYTES ||
+    !isPreviewImage(bytes, rec.thumb.contentType)
+  ) {
+    await clear();
+    await setThumbStatus(ref, 'rejected');
+    log('files.promote.thumb-invalid', { fileId: ref.fileId });
+    return;
+  }
+  const dest = await destination(ref, rec);
+  await dest.client.send(
+    new PutObjectCommand({
+      Bucket: dest.bucket,
+      Key: storedKey(
+        ref.scope,
+        ref.fileId,
+        ref.scope === 'artist' ? ref.artistId : undefined,
+        'thumb',
+      ),
+      Body: bytes,
+      ContentLength: bytes.length,
+      ContentType: rec.thumb.contentType,
+      ...dest.sse,
+    }),
+  );
+  await clear();
+  await setThumbStatus(ref, 'available');
+  log('files.promote.thumb-available', { fileId: ref.fileId });
 }

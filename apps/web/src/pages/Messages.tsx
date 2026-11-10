@@ -1195,8 +1195,8 @@ function SharePanel({
             .filter((f) => f.status === 'available' && f.visibility !== 'private')
             .map((f) => ({
               key: f.fileId,
-              title: f.name,
-              subtitle: formatSize(f.size),
+              title: f.displayName,
+              subtitle: `${f.fileType.label} · ${formatSize(f.size)}`,
               attachment: fileAttachment(f),
             })),
         );
@@ -1252,15 +1252,14 @@ function SharePanel({
   }
 
   function fileAttachment(f: FileItem): ChatAttachment {
-    const ext = (f.name.split('.').pop() ?? '').toUpperCase();
     const where = f.scope === 'library' ? 'from the library' : 'from files';
     return {
       kind: 'file',
       id: f.fileId,
       scope: f.scope,
       ...(f.artistId ? { artistId: f.artistId } : {}),
-      title: f.name,
-      subtitle: `${ext && ext.length <= 5 ? `${ext} · ` : ''}${formatSize(f.size)} · ${where}`,
+      title: f.displayName,
+      subtitle: `${f.fileType.label} · ${formatSize(f.size)} · ${where}`,
     };
   }
 
