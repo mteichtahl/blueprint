@@ -89,6 +89,15 @@ export interface FileItem {
   availableAt: string | null;
   /** Set when the file is in the artist's asset library. */
   asset: AssetMeta | null;
+  // ── Folders (rev 10) ──
+  /** The folder it's in; null at the top of its library. */
+  folderId: string | null;
+  /** It has an access setting of its own. */
+  customAccess: boolean;
+  /** Your access to it (none, view, edit or manage). */
+  level?: 'none' | 'view' | 'edit' | 'manage';
+  /** You can move it to another folder. */
+  canMove?: boolean;
 }
 
 export interface FileUse {

@@ -13,6 +13,7 @@ import { CATEGORY_ONE } from './Assets.tsx';
 import { makeThumbnail } from '../lib/thumbnail.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
 import { DocumentPage } from './Document.tsx';
+import { CustomAccess, FolderBrowser, type Place, type Selection } from '../components/Folders.tsx';
 import {
   Button,
   Card,
@@ -251,6 +252,19 @@ function UploadBox({
   );
 }
 
+/** The folder a Place points at, if it's a real one (not the top or "Shared with me"). */
+const folderOf = (p: Place) => (typeof p === 'string' && p !== 'shared' ? p : undefined);
+
+/** Shown on the upload form inside a folder (rev 10). */
+function InFolderHint() {
+  return (
+    <span className="src">
+      Uploading into this folder: it gets the folder’s access. You can give it its own access from
+      the document afterwards.
+    </span>
+  );
+}
+
 /** The phone's way into the upload page. */
 function UploadDocumentButton({ onClick }: { onClick: () => void }) {
   return (
@@ -370,6 +384,8 @@ function FileTable({
   columns,
   onOpen,
   compact = false,
+  selection,
+  onDragStart,
 }: {
   files: FileItem[] | null;
   empty: string;
@@ -377,7 +393,23 @@ function FileTable({
   onOpen: (f: FileItem) => void;
   /** Phone layout: a list of cards instead of a table. */
   compact?: boolean;
+  /** Selecting files to move (rev 10). */
+  selection?: Selection;
+  /** Dragging a file onto a folder (rev 10, wider screens). */
+  onDragStart?: (e: React.DragEvent, f: FileItem) => void;
 }) {
+  const check = (f: FileItem) =>
+    selection && (
+      <input
+        type="checkbox"
+        className="size-4 flex-none"
+        aria-label={`Select ${f.displayName}`}
+        checked={selection.ids.has(f.fileId)}
+        disabled={!f.canMove}
+        onClick={(e) => e.stopPropagation()}
+        onChange={() => selection.toggle(f.fileId)}
+      />
+    );
   // The phone list is used for the artist app and on any phone-width screen.
   const phone = usePhone();
   if (!files) return <WaveLoader />;
@@ -386,7 +418,8 @@ function FileTable({
     return (
       <ul className="flex flex-col gap-1.5">
         {files.map((f) => (
-          <li key={f.fileId}>
+          <li key={f.fileId} className="flex items-center gap-2">
+            {check(f)}
             <button
               type="button"
               onClick={() => onOpen(f)}
@@ -397,7 +430,9 @@ function FileTable({
                 <Thumb f={f} size={44} />
               </span>
               <span className="min-w-0 flex-1">
-                <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
+                <b className="line-clamp-2 block [overflow-wrap:anywhere]">
+                  {f.displayName} {f.customAccess && <CustomAccess />}
+                </b>
                 <span className="src">
                   {typeLabel(f)} · {formatSize(f.size)} · {date(f.createdAt)}
                   {columns.map((c) => (
@@ -436,9 +471,12 @@ function FileTable({
             key={f.fileId}
             className="cursor-pointer hover:bg-[#F6F8FA] dark:hover:bg-secondary"
             onClick={() => onOpen(f)}
+            draggable={!!onDragStart && !!f.canMove}
+            onDragStart={onDragStart ? (e) => onDragStart(e, f) : undefined}
           >
             <td>
               <span className="flex items-center gap-3">
+                {check(f)}
                 <Thumb f={f} size={40} />
                 <span className="min-w-0">
                   <button
@@ -450,7 +488,8 @@ function FileTable({
                     }}
                   >
                     {f.displayName}
-                  </button>
+                  </button>{' '}
+                  {f.customAccess && <CustomAccess />}
                   {f.title && <span className="src block">{f.name}</span>}
                 </span>
                 <StatusBadge f={f} />
@@ -494,6 +533,9 @@ export function ArtistFiles({
 }) {
   const collection = `/artists/${artistId}/files`;
   const { files, error, load } = useFiles(cfg, token, collection);
+  // Which folder is open (rev 10): null is the top of the Library.
+  const [place, setPlace] = useState<Place>(null);
+  const inFolder = folderOf(place);
   const [visibility, setVisibility] = useState('normal');
   const [editAccess, setEditAccess] = useState('owner');
   const [filter, setFilter] = useState<ArtistFilter>('all');
@@ -512,7 +554,9 @@ export function ArtistFiles({
       title={isBmg ? 'Upload & share' : 'Upload'}
       options={() => ({
         visibility,
-        editAccess: visibility === 'private' ? 'owner' : editAccess,
+        ...(inFolder
+          ? { folderId: inFolder, ...(visibility === 'private' ? { editAccess: 'owner' } : {}) }
+          : { editAccess: visibility === 'private' ? 'owner' : editAccess }),
       })}
       onDone={() => void load()}
       asPage={phone}
@@ -534,7 +578,11 @@ export function ArtistFiles({
               ]
         }
       />
-      {visibility !== 'private' && <EditAccessSelect value={editAccess} onChange={setEditAccess} />}
+      {inFolder ? (
+        <InFolderHint />
+      ) : (
+        visibility !== 'private' && <EditAccessSelect value={editAccess} onChange={setEditAccess} />
+      )}
     </UploadBox>
   );
   const ofKind = files && (kind === 'documents' ? files.filter((f) => !f.asset) : files);
@@ -567,15 +615,28 @@ export function ArtistFiles({
         {phone ? <UploadDocumentButton onClick={() => setUploading(true)} /> : upload}
         {error && <Notice tone="error">{error}</Notice>}
         <div className="eyebrow pt-2 text-muted-foreground">My uploads and files</div>
-        <FileTable
+        <FolderBrowser
+          cfg={cfg}
+          token={token}
+          collection={collection}
+          rootLabel="My library"
           files={ofKind}
-          empty="No files yet."
-          onOpen={setOpened}
-          columns={[
-            { label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] },
-            { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
-          ]}
-          compact
+          place={place}
+          onPlace={setPlace}
+          onChanged={() => void load()}
+          renderFiles={(here, o) => (
+            <FileTable
+              files={here}
+              empty={place === null ? 'No files yet.' : 'No files in this folder.'}
+              onOpen={setOpened}
+              columns={[
+                { label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] },
+                { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
+              ]}
+              compact
+              selection={o.selection}
+            />
+          )}
         />
       </div>
     );
@@ -595,7 +656,26 @@ export function ArtistFiles({
           options={ARTIST_FILTER_OPTIONS}
         />
         {error && <Notice tone="error">{error}</Notice>}
-        <FileTable files={visible} empty="No files here." onOpen={setOpened} columns={columns} />
+        <FolderBrowser
+          cfg={cfg}
+          token={token}
+          collection={collection}
+          rootLabel="Library"
+          files={visible}
+          place={place}
+          onPlace={setPlace}
+          onChanged={() => void load()}
+          renderFiles={(here, o) => (
+            <FileTable
+              files={here}
+              empty={place === null ? 'No files here.' : 'No files in this folder.'}
+              onOpen={setOpened}
+              columns={columns}
+              selection={o.selection}
+              onDragStart={o.onDragStart}
+            />
+          )}
+        />
       </Card>
       {!phone && <div className="flex-[1_1_300px]">{upload}</div>}
     </div>
@@ -644,6 +724,8 @@ export function Library({
 }) {
   const collection = '/library/files';
   const { files, error, load } = useFiles(cfg, token, collection);
+  const [place, setPlace] = useState<Place>(null);
+  const inFolder = folderOf(place);
   const [sharing, setSharing] = useState('bmg-only');
   const [editAccess, setEditAccess] = useState('everyone');
   const [libraryFilter, setLibraryFilter] = useState<
@@ -682,12 +764,26 @@ export function Library({
     return (
       <div className="flex flex-col gap-3">
         {error && <Notice tone="error">{error}</Notice>}
-        <FileTable
+        <FolderBrowser
+          cfg={cfg}
+          token={token}
+          collection={collection}
+          rootLabel="Library"
           files={files}
-          empty="Nothing has been shared with you yet."
-          onOpen={setOpened}
-          columns={[]}
-          compact
+          place={place}
+          onPlace={setPlace}
+          onChanged={() => void load()}
+          renderFiles={(here) => (
+            <FileTable
+              files={here}
+              empty={
+                place === null ? 'Nothing has been shared with you yet.' : 'Nothing in this folder.'
+              }
+              onOpen={setOpened}
+              columns={[]}
+              compact
+            />
+          )}
         />
       </div>
     );
@@ -699,23 +795,29 @@ export function Library({
       token={token}
       collection={collection}
       title="Upload & share"
-      options={() => ({ sharing, editAccess })}
+      options={() => (inFolder ? { folderId: inFolder, editAccess } : { sharing, editAccess })}
       onDone={() => void load()}
       asPage={phone}
       onBack={() => setUploading(false)}
     >
-      <Select
-        label="Share with"
-        value={sharing}
-        onChange={setSharing}
-        options={[
-          { value: 'bmg-only', label: 'Nobody yet (BMG only)' },
-          { value: 'all-artists', label: 'All artists' },
-        ]}
-      />
-      <span className="src">
-        To share with chosen artists, upload first, then open the document and choose Edit.
-      </span>
+      {inFolder ? (
+        <InFolderHint />
+      ) : (
+        <>
+          <Select
+            label="Share with"
+            value={sharing}
+            onChange={setSharing}
+            options={[
+              { value: 'bmg-only', label: 'Nobody yet (BMG only)' },
+              { value: 'all-artists', label: 'All artists' },
+            ]}
+          />
+          <span className="src">
+            To share with chosen artists, upload first, then open the document and choose Edit.
+          </span>
+        </>
+      )}
       <EditAccessSelect value={editAccess} onChange={setEditAccess} team />
     </UploadBox>
   );
@@ -744,20 +846,37 @@ export function Library({
           ]}
         />
         {error && <Notice tone="error">{error}</Notice>}
-        <FileTable
+        <FolderBrowser
+          cfg={cfg}
+          token={token}
+          collection={collection}
+          rootLabel="Library"
           files={visible}
-          empty="Nothing here."
-          onOpen={setOpened}
-          columns={[
-            {
-              label: 'Shared with',
-              cell: (f) =>
-                f.sharing === 'selected'
-                  ? f.sharedWithArtistIds.map((id) => names[id] ?? 'Artist').join(', ') || 'Nobody'
-                  : SHARING_LABEL[f.sharing ?? 'bmg-only'],
-            },
-            { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
-          ]}
+          place={place}
+          onPlace={setPlace}
+          onChanged={() => void load()}
+          renderFiles={(here, o) => (
+            <FileTable
+              files={here}
+              empty={place === null ? 'Nothing here.' : 'No files in this folder.'}
+              onOpen={setOpened}
+              selection={o.selection}
+              onDragStart={o.onDragStart}
+              columns={[
+                {
+                  label: 'Shared with',
+                  cell: (f) =>
+                    f.folderId || f.customAccess
+                      ? 'Folder access'
+                      : f.sharing === 'selected'
+                        ? f.sharedWithArtistIds.map((id) => names[id] ?? 'Artist').join(', ') ||
+                          'Nobody'
+                        : SHARING_LABEL[f.sharing ?? 'bmg-only'],
+                },
+                { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
+              ]}
+            />
+          )}
         />
       </Card>
       {!phone && <div className="flex flex-[1_1_300px] flex-col gap-5">{uploadBox}</div>}
