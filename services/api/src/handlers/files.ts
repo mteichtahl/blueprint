@@ -26,6 +26,7 @@ import {
   PENDING_TTL_SECONDS,
   publicFile,
   quarantineKey,
+  renameAllowed,
   storedKey,
   URL_LIFETIME_SECONDS,
   visibilityAllowed,
@@ -412,31 +413,58 @@ export const handler = handle(async (event) => {
       const f = await load(artistPk(artistId), fileIdParam(event));
       ensure(canArtistFile(principal, 'write', artistId, f));
       const patch = parseBody(event, ArtistFilePatch);
-      if (principal.role === 'artist') {
-        throw new HttpError(403, 'Blueprint decides which of its files you can see');
+      const now = new Date().toISOString();
+      const sets = ['updatedAt = :at', 'updatedBy = :by'];
+      const removes: string[] = [];
+      const values: Record<string, unknown> = { ':at': now, ':by': principal.sub };
+      let condition = 'attribute_exists(PK)';
+      if (patch.visibility !== undefined) {
+        if (principal.role === 'artist') {
+          throw new HttpError(403, 'Blueprint decides which of its files you can see');
+        }
+        if (f.uploaderRole === 'artist') {
+          throw new HttpError(409, 'An artist’s own uploads always stay visible to them');
+        }
+        sets.push('visibility = :v');
+        values[':v'] = patch.visibility;
+        values[':private'] = 'private';
+        condition += ' AND visibility <> :private';
       }
-      if (f.uploaderRole === 'artist') {
-        throw new HttpError(409, 'An artist’s own uploads always stay visible to them');
+      if (patch.title !== undefined) {
+        const refused = renameAllowed(principal, f);
+        if (refused) throw new HttpError(403, refused);
+        if (patch.title) {
+          sets.push('title = :t');
+          values[':t'] = patch.title;
+        } else removes.push('title');
       }
       await db.send(
         new UpdateCommand({
           TableName: table(),
           Key: { PK: f.PK, SK: f.SK },
-          UpdateExpression: 'SET visibility = :v, updatedAt = :at, updatedBy = :by',
-          ConditionExpression: 'attribute_exists(PK) AND visibility <> :private',
-          ExpressionAttributeValues: {
-            ':v': patch.visibility,
-            ':private': 'private',
-            ':at': new Date().toISOString(),
-            ':by': principal.sub,
-          },
+          UpdateExpression: `SET ${sets.join(', ')}${removes.length ? ` REMOVE ${removes.join(', ')}` : ''}`,
+          ConditionExpression: condition,
+          ExpressionAttributeValues: values,
         }),
       );
-      await audit(event, patch.visibility === 'normal' ? 'file.share' : 'file.unshare', 'success', {
-        artistId,
-        fileId: f.fileId,
-      });
-      return json(200, show({ ...f, visibility: patch.visibility }));
+      if (patch.visibility !== undefined)
+        await audit(
+          event,
+          patch.visibility === 'normal' ? 'file.share' : 'file.unshare',
+          'success',
+          { artistId, fileId: f.fileId },
+        );
+      if (patch.title !== undefined)
+        await audit(event, 'file.rename', 'success', { artistId, fileId: f.fileId });
+      const next: FileRecord = {
+        ...f,
+        ...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}),
+      };
+      if (patch.title !== undefined) {
+        if (patch.title) next.title = patch.title;
+        else delete next.title;
+      }
+      return json(200, (await withThumbnails(principal, [next as Stored], principal.sub))[0]);
     }
 
     case 'PUT /artists/{artistId}/files/{fileId}/asset': {
@@ -565,29 +593,57 @@ export const handler = handle(async (event) => {
       const f = await load(LIBRARY_PK, fileIdParam(event));
       ensure(authorize(principal, 'write', librarySharing(f)));
       const patch = parseBody(event, LibraryPatch);
+      if (patch.title !== undefined) {
+        const refused = renameAllowed(principal, f);
+        if (refused) throw new HttpError(403, refused);
+      }
+      const sets = ['updatedAt = :at', 'updatedBy = :by'];
+      const removes: string[] = [];
+      const values: Record<string, unknown> = {
+        ':at': new Date().toISOString(),
+        ':by': principal.sub,
+      };
       const ids = patch.sharing === 'selected' ? patch.sharedWithArtistIds : [];
+      if (patch.sharing !== undefined) {
+        sets.push('sharing = :s', 'sharedWithArtistIds = :ids');
+        values[':s'] = patch.sharing;
+        values[':ids'] = ids;
+      }
+      if (patch.title !== undefined) {
+        if (patch.title) {
+          sets.push('title = :t');
+          values[':t'] = patch.title;
+        } else removes.push('title');
+      }
       await db.send(
         new UpdateCommand({
           TableName: table(),
           Key: { PK: f.PK, SK: f.SK },
-          UpdateExpression:
-            'SET sharing = :s, sharedWithArtistIds = :ids, updatedAt = :at, updatedBy = :by',
+          UpdateExpression: `SET ${sets.join(', ')}${removes.length ? ` REMOVE ${removes.join(', ')}` : ''}`,
           ConditionExpression: 'attribute_exists(PK)',
-          ExpressionAttributeValues: {
-            ':s': patch.sharing,
-            ':ids': ids,
-            ':at': new Date().toISOString(),
-            ':by': principal.sub,
-          },
+          ExpressionAttributeValues: values,
         }),
       );
-      await audit(event, 'file.share', 'success', {
-        library: true,
-        fileId: f.fileId,
-        sharing: patch.sharing,
-        artists: ids.length,
-      });
-      return json(200, show({ ...f, sharing: patch.sharing, sharedWithArtistIds: ids }));
+      if (patch.sharing !== undefined)
+        await audit(event, 'file.share', 'success', {
+          library: true,
+          fileId: f.fileId,
+          sharing: patch.sharing,
+          artists: ids.length,
+        });
+      if (patch.title !== undefined)
+        await audit(event, 'file.rename', 'success', { library: true, fileId: f.fileId });
+      const next: FileRecord = {
+        ...f,
+        ...(patch.sharing !== undefined
+          ? { sharing: patch.sharing, sharedWithArtistIds: ids }
+          : {}),
+      };
+      if (patch.title !== undefined) {
+        if (patch.title) next.title = patch.title;
+        else delete next.title;
+      }
+      return json(200, (await withThumbnails(principal, [next as Stored], principal.sub))[0]);
     }
 
     case 'POST /library/files/{fileId}/download': {

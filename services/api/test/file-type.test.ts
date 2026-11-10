@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { ArtistUpload, LibraryUpload, publicFile, type FileRecord } from '../src/files/model.ts';
+import {
+  ArtistFilePatch,
+  ArtistUpload,
+  LibraryPatch,
+  LibraryUpload,
+  publicFile,
+  renameAllowed,
+  type FileRecord,
+} from '../src/files/model.ts';
 import { detectFileType, extensionOf, guessFileType } from '../src/files/type.ts';
 
 const bytes = (...parts: (string | number[])[]) =>
@@ -148,5 +156,50 @@ describe('names and previews on upload', () => {
       'u1',
     );
     expect(detected.fileType).toMatchObject({ kind: 'pdf', detected: true });
+  });
+});
+
+describe('renaming after upload', () => {
+  const lib = {
+    scope: 'library' as const,
+    uploadedBy: 'u-staff',
+    uploaderRole: 'bmg-staff' as const,
+  };
+  const artistUpload = {
+    scope: 'artist' as const,
+    uploadedBy: 'u-art',
+    uploaderRole: 'artist' as const,
+  };
+  const bmgUpload = {
+    scope: 'artist' as const,
+    uploadedBy: 'u-staff',
+    uploaderRole: 'bmg-staff' as const,
+  };
+  const artist = { sub: 'u-art', role: 'artist' as const };
+  const otherArtist = { sub: 'u-art2', role: 'artist' as const };
+  const staff = { sub: 'u-other', role: 'bmg-staff' as const };
+
+  it('Blueprint renames library documents; artists cannot', () => {
+    expect(renameAllowed(staff, lib)).toBeUndefined();
+    expect(renameAllowed(artist, lib)).toMatch(/Only Blueprint/);
+  });
+
+  it("each side renames its own side's files only", () => {
+    expect(renameAllowed(artist, artistUpload)).toBeUndefined();
+    expect(renameAllowed(otherArtist, artistUpload)).toMatch(/your own uploads/);
+    expect(renameAllowed(artist, bmgUpload)).toMatch(/your own uploads/);
+    expect(renameAllowed(staff, bmgUpload)).toBeUndefined();
+    expect(renameAllowed(staff, artistUpload)).toMatch(/Only the artist/);
+  });
+
+  it('accepts a new name, or an empty one to show the file name again', () => {
+    expect(ArtistFilePatch.parse({ title: '  Final mix  ' })).toEqual({ title: 'Final mix' });
+    expect(ArtistFilePatch.parse({ title: '' })).toEqual({ title: '' });
+    expect(ArtistFilePatch.safeParse({}).success).toBe(false);
+    expect(ArtistFilePatch.safeParse({ title: 'x'.repeat(201) }).success).toBe(false);
+    expect(ArtistFilePatch.safeParse({ name: 'evil.exe' }).success).toBe(false);
+    expect(LibraryPatch.parse({ title: 'Rider' })).toMatchObject({ title: 'Rider' });
+    expect(LibraryPatch.parse({ sharing: 'all-artists' }).sharing).toBe('all-artists');
+    expect(LibraryPatch.safeParse({ sharedWithArtistIds: [] }).success).toBe(false);
   });
 });

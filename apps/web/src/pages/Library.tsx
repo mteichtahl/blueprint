@@ -328,6 +328,77 @@ function Thumb({ f, size }: { f: FileItem; size: number }) {
   );
 }
 
+function RenameButton({ f, onClick }: { f: FileItem; onClick: () => void }) {
+  return (
+    <Button size="sm" variant="ghost" aria-label={`Rename ${f.displayName}`} onClick={onClick}>
+      <Icon name="pencil" size={15} />
+      <span className="max-sm:sr-only">Rename</span>
+    </Button>
+  );
+}
+
+/**
+ * Rename in place: the name the file shows in lists. Blank goes back to the
+ * file name; Enter saves, Escape cancels.
+ */
+function RenameForm({
+  f,
+  onSave,
+  onCancel,
+}: {
+  f: FileItem;
+  onSave: (title: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(f.title ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(value.trim());
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <form
+      className="flex min-w-0 flex-1 flex-col gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+    >
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-bold">Name</span>
+        <input
+          className="min-h-11 w-full rounded-lg border border-input bg-white px-3 text-base shadow-xs"
+          value={value}
+          maxLength={200}
+          placeholder={f.name}
+          autoFocus
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onCancel();
+          }}
+        />
+      </label>
+      <span className="src">Leave blank to show the file name ({f.name}).</span>
+      {error && <Notice tone="error">{error}</Notice>}
+      <span className="flex gap-2">
+        <Button size="sm" variant="cta" type="submit" disabled={busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+        <Button size="sm" variant="ghost" type="button" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+      </span>
+    </form>
+  );
+}
+
 function FileTable({
   files,
   empty,
@@ -335,6 +406,8 @@ function FileTable({
   onOpen,
   onDelete,
   canDelete = () => false,
+  onRename,
+  canRename = () => false,
   compact = false,
 }: {
   files: FileItem[] | null;
@@ -343,42 +416,77 @@ function FileTable({
   onOpen: (f: FileItem) => void;
   onDelete?: (f: FileItem) => Promise<void>;
   canDelete?: (f: FileItem) => boolean;
+  /** Save a new name ('' shows the file name again). */
+  onRename?: (f: FileItem, title: string) => Promise<void>;
+  canRename?: (f: FileItem) => boolean;
   /** Phone layout: a list of rows instead of a table. */
   compact?: boolean;
 }) {
   // The phone list is used for the artist app and on any phone-width screen.
   const phone = usePhone();
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const rename = (f: FileItem) => async (title: string) => {
+    await onRename!(f, title);
+    setRenaming(null);
+  };
+  const renamable = (f: FileItem) => !!onRename && canRename(f);
   if (!files) return <p className="src">Loading…</p>;
   if (files.length === 0) return <p className="src pb-5">{empty}</p>;
   if (compact || phone) {
     return (
       <div className="flex flex-col gap-1.5">
-        {files.map((f) => (
-          <div
-            key={f.fileId}
-            className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
-          >
-            <button
-              type="button"
-              disabled={f.status !== 'available'}
-              onClick={() => onOpen(f)}
-              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        {files.map((f) =>
+          renaming === f.fileId ? (
+            <div
+              key={f.fileId}
+              className="flex items-start gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
             >
               <Thumb f={f} size={44} />
+              <RenameForm f={f} onSave={rename(f)} onCancel={() => setRenaming(null)} />
+            </div>
+          ) : (
+            // The name is the open button; the details line (which can hold its
+            // own controls, like "Shared with") sits beside it, not inside it.
+            <div
+              key={f.fileId}
+              className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
+            >
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-hidden="true"
+                disabled={f.status !== 'available'}
+                onClick={() => onOpen(f)}
+                className="flex-none"
+              >
+                <Thumb f={f} size={44} />
+              </button>
               <span className="min-w-0 flex-1">
-                <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
+                <button
+                  type="button"
+                  disabled={f.status !== 'available'}
+                  onClick={() => onOpen(f)}
+                  className="block w-full text-left"
+                >
+                  <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
+                </button>
                 <span className="src">
                   {f.fileType.label} · {formatSize(f.size)} · {date(f.createdAt)}
                   {columns.map((c) => (
                     <span key={c.label}> · {c.cell(f)}</span>
                   ))}
                 </span>
+                <StatusBadge f={f} />
               </span>
-              <StatusBadge f={f} />
-            </button>
-            {onDelete && canDelete(f) && <DeleteButton f={f} onDelete={onDelete} />}
-          </div>
-        ))}
+              {(renamable(f) || (onDelete && canDelete(f))) && (
+                <span className="flex flex-none flex-col items-end gap-1.5">
+                  {renamable(f) && <RenameButton f={f} onClick={() => setRenaming(f.fileId)} />}
+                  {onDelete && canDelete(f) && <DeleteButton f={f} onDelete={onDelete} />}
+                </span>
+              )}
+            </div>
+          ),
+        )}
       </div>
     );
   }
@@ -404,10 +512,14 @@ function FileTable({
             <td>
               <span className="flex items-center gap-3">
                 <Thumb f={f} size={40} />
-                <span className="min-w-0">
-                  <b className="block">{f.displayName}</b>
-                  {f.title && <span className="src block">{f.name}</span>}
-                </span>
+                {renaming === f.fileId ? (
+                  <RenameForm f={f} onSave={rename(f)} onCancel={() => setRenaming(null)} />
+                ) : (
+                  <span className="min-w-0">
+                    <b className="block">{f.displayName}</b>
+                    {f.title && <span className="src block">{f.name}</span>}
+                  </span>
+                )}
                 <StatusBadge f={f} />
               </span>
             </td>
@@ -427,6 +539,11 @@ function FileTable({
                 <Icon name="download" size={15} />
                 Open
               </Button>
+              {renamable(f) && renaming !== f.fileId && (
+                <span className="ml-2 inline-block">
+                  <RenameButton f={f} onClick={() => setRenaming(f.fileId)} />
+                </span>
+              )}
               {onDelete && canDelete(f) && (
                 <span className="ml-2 inline-block">
                   <DeleteButton f={f} onDelete={onDelete} />
@@ -494,6 +611,13 @@ export function ArtistFiles({
     isBmg
       ? f.uploaderRole !== 'artist' && (isAdmin || f.uploadedByMe)
       : f.uploaderRole === 'artist' && f.uploadedByMe;
+  // Same rule as the API: the artist renames their own uploads; Blueprint renames Blueprint's.
+  const canRename = (f: FileItem) =>
+    isBmg ? f.uploaderRole !== 'artist' : f.uploaderRole === 'artist' && f.uploadedByMe;
+  const rename = async (f: FileItem, title: string) => {
+    await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
+    await load();
+  };
 
   const upload = (
     <UploadBox
@@ -562,6 +686,8 @@ export function ArtistFiles({
           onOpen={open}
           onDelete={remove}
           canDelete={canDelete}
+          onRename={rename}
+          canRename={canRename}
           columns={[{ label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] }]}
           compact
         />
@@ -589,6 +715,8 @@ export function ArtistFiles({
           onOpen={open}
           onDelete={remove}
           canDelete={canDelete}
+          onRename={rename}
+          canRename={canRename}
           columns={columns}
         />
       </Card>
@@ -725,6 +853,11 @@ export function Library({
           onOpen={open}
           onDelete={remove}
           canDelete={(f) => isAdmin || f.uploadedByMe}
+          onRename={async (f, title) => {
+            await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
+            await load();
+          }}
+          canRename={() => true}
           columns={[
             {
               label: 'Shared with',

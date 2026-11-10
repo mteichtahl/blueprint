@@ -245,15 +245,59 @@ export const LibraryUpload = z.object({
   sharedWithArtistIds: ArtistIds.default([]),
 });
 
-export const ArtistFilePatch = z.object({
-  /** Private can't be switched on or off after upload: it decides how the file was encrypted. */
-  visibility: z.enum(['normal', 'bmg-only']),
-});
+/** A new name; an empty one goes back to showing the file name. */
+const Rename = z
+  .string()
+  .trim()
+  .max(200, 'Names are limited to 200 characters')
+  .refine(
+    // eslint-disable-next-line no-control-regex
+    (n) => !/[\u0000-\u001f\u007f]/.test(n),
+    'Names cannot contain control characters',
+  );
 
-export const LibraryPatch = z.object({
-  sharing: z.enum(['bmg-only', 'all-artists', 'selected']),
-  sharedWithArtistIds: ArtistIds.default([]),
-});
+const somethingToChange = (v: Record<string, unknown>) =>
+  Object.values(v).some((x) => x !== undefined);
+
+export const ArtistFilePatch = z
+  .object({
+    /** Private can't be switched on or off after upload: it decides how the file was encrypted. */
+    visibility: z.enum(['normal', 'bmg-only']).optional(),
+    /** Rename: the name shown in lists ('' shows the file name again). */
+    title: Rename.optional(),
+  })
+  .strict()
+  .refine(somethingToChange, 'Nothing to change');
+
+export const LibraryPatch = z
+  .object({
+    sharing: z.enum(['bmg-only', 'all-artists', 'selected']).optional(),
+    sharedWithArtistIds: ArtistIds.default([]),
+    title: Rename.optional(),
+  })
+  .strict()
+  .refine((v) => v.sharing !== undefined || v.title !== undefined, 'Nothing to change');
+
+/**
+ * Who may rename a file (on top of write access):
+ * - Library documents: anyone at Blueprint.
+ * - Artist files: the artist renames their own uploads; Blueprint renames the
+ *   ones Blueprint uploaded. Nobody renames someone else's side's files.
+ */
+export function renameAllowed(
+  principal: { sub: string; role: FileRecord['uploaderRole'] },
+  f: Pick<FileRecord, 'scope' | 'uploadedBy' | 'uploaderRole'>,
+): string | undefined {
+  if (f.scope === 'library') {
+    return principal.role === 'artist' ? 'Only Blueprint can rename library documents' : undefined;
+  }
+  if (principal.role === 'artist') {
+    return f.uploaderRole === 'artist' && f.uploadedBy === principal.sub
+      ? undefined
+      : 'You can only rename your own uploads';
+  }
+  return f.uploaderRole === 'artist' ? 'Only the artist can rename their own uploads' : undefined;
+}
 
 /** Which visibilities each side may choose for an artist file. */
 export function visibilityAllowed(role: FileRecord['uploaderRole'], v: FileVisibility): boolean {
