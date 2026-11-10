@@ -66,7 +66,51 @@ export interface FileRecord {
   availableAt?: string;
   /** Set when the file is part of the artist's asset library. */
   asset?: AssetMeta;
+  // ── Versions (rev 8) ──
+  /** The current version's number (1 for a file that has never been replaced). */
+  version?: number;
+  /** Who uploaded the current version, when, and their note (versions 2 and up). */
+  versionUploadedBy?: string;
+  versionCreatedAt?: string;
+  versionNote?: string;
+  /** Earlier versions, newest first. Their bytes are kept at `archivedKey`. */
+  versions?: VersionMeta[];
+  /** A new version on its way: uploaded to quarantine, waiting for the scan. */
+  pendingVersion?: PendingVersion;
 }
+
+/** An earlier version of a document (rev 8). */
+export interface VersionMeta {
+  v: number;
+  name: string;
+  size: number;
+  contentType: string;
+  fileType?: FileTypeInfo;
+  uploadedBy: string;
+  createdAt: string;
+  note?: string;
+}
+
+/** A new version being scanned, or one that wasn't kept. */
+export interface PendingVersion {
+  v: number;
+  name: string;
+  size: number;
+  contentType: string;
+  uploadedBy: string;
+  createdAt: string;
+  note?: string;
+  status: 'pending' | 'rejected';
+  rejectReason?: string;
+  thumb?: ThumbRecord;
+  /** Set when this version brings back an earlier one ("Restore"). */
+  restoredFrom?: number;
+}
+
+/** Up to this many earlier versions are kept; the oldest go first. */
+export const MAX_VERSIONS = 50;
+
+export const currentVersion = (f: Pick<FileRecord, 'version'>) => f.version ?? 1;
 
 /**
  * Who can edit a document (rev 8), chosen by its owner:
@@ -134,6 +178,8 @@ export interface ThumbRecord {
   status: 'pending' | 'available' | 'rejected';
   size: number;
   contentType: (typeof THUMB_TYPES)[number];
+  /** Which version it's the preview of (rev 8); 1 when absent. */
+  v?: number;
 }
 export const ThumbUpload = z
   .object({
@@ -150,7 +196,12 @@ const ARTIST = 'art_[a-z0-9]{10,32}';
 
 /** Which object: the file itself, or its preview. */
 export type FilePart = 'file' | 'thumb';
-const suffix = (part: FilePart) => (part === 'thumb' ? THUMB_SUFFIX : '');
+/**
+ * Versions 2 and up (rev 8) get their own suffix in quarantine and for their
+ * preview, so a new version never overwrites the file before it's scanned.
+ */
+const suffix = (part: FilePart, v = 1) =>
+  (v > 1 ? `.v${v}` : '') + (part === 'thumb' ? THUMB_SUFFIX : '');
 
 /** Where the browser uploads to (quarantine bucket). */
 export function quarantineKey(
@@ -158,42 +209,63 @@ export function quarantineKey(
   fileId: string,
   artistId?: string,
   part: FilePart = 'file',
+  v = 1,
 ): string {
   return (
-    (scope === 'artist' ? `artists/${artistId}/${fileId}` : `library/${fileId}`) + suffix(part)
+    (scope === 'artist' ? `artists/${artistId}/${fileId}` : `library/${fileId}`) + suffix(part, v)
   );
 }
 
-/** Where a clean file (or its preview) is kept (artist-data or org-data bucket). */
+/**
+ * Where a clean file is kept (artist-data or org-data bucket). The current
+ * version always lives at the plain key, so every reader (downloads, the
+ * knowledge base) keeps working; a preview is kept per version.
+ */
 export function storedKey(
   scope: FileScope,
   fileId: string,
   artistId?: string,
   part: FilePart = 'file',
+  v = 1,
 ): string {
-  return (
-    (scope === 'artist' ? `artists/${artistId}/files/${fileId}` : `library/${fileId}`) +
-    suffix(part)
-  );
+  const base = scope === 'artist' ? `artists/${artistId}/files/${fileId}` : `library/${fileId}`;
+  return base + (part === 'thumb' ? suffix('thumb', v) : '');
+}
+
+/** Where an earlier version's bytes are kept once a newer one replaces it (rev 8). */
+export function archivedKey(
+  scope: FileScope,
+  fileId: string,
+  artistId: string | undefined,
+  v: number,
+) {
+  return `${storedKey(scope, fileId, artistId)}.v${v}`;
 }
 
 export type QuarantineRef = (
   { scope: 'artist'; artistId: string; fileId: string } | { scope: 'library'; fileId: string }
-) & { part: FilePart };
+) & { part: FilePart; v: number };
 
 /** The inverse of quarantineKey; anything else in the bucket is ignored. */
 export function parseQuarantineKey(key: string): QuarantineRef | undefined {
-  const artist = new RegExp(`^artists/(${ARTIST})/([a-z0-9]{10,40})(\\.thumb)?$`).exec(key);
+  const tail = '(?:\\.v([2-9]|[1-9][0-9]{1,3}))?(\\.thumb)?$';
+  const artist = new RegExp(`^artists/(${ARTIST})/([a-z0-9]{10,40})${tail}`).exec(key);
   if (artist)
     return {
       scope: 'artist',
       artistId: artist[1]!,
       fileId: artist[2]!,
-      part: artist[3] ? 'thumb' : 'file',
+      part: artist[4] ? 'thumb' : 'file',
+      v: artist[3] ? Number(artist[3]) : 1,
     };
-  const library = /^library\/([a-z0-9]{10,40})(\.thumb)?$/.exec(key);
+  const library = new RegExp(`^library/([a-z0-9]{10,40})${tail}`).exec(key);
   if (library)
-    return { scope: 'library', fileId: library[1]!, part: library[2] ? 'thumb' : 'file' };
+    return {
+      scope: 'library',
+      fileId: library[1]!,
+      part: library[3] ? 'thumb' : 'file',
+      v: library[2] ? Number(library[2]) : 1,
+    };
   return undefined;
 }
 
@@ -278,6 +350,23 @@ export const LibraryUpload = z.object({
   editAccess: z.enum(EDIT_ACCESS).optional(),
   editorIds: EditorIds.default([]),
 });
+
+/** A new version of a document (rev 8): the file, its preview and a note. */
+export const VersionUpload = z
+  .object({
+    name: FileName,
+    size: Size,
+    contentType: ContentType.default('application/octet-stream'),
+    thumbnail: ThumbUpload.optional(),
+    note: z.string().trim().max(300, 'Keep the note under 300 characters').optional(),
+  })
+  .strict();
+
+/** Bring back an earlier version as the newest one (rev 8). */
+export const VersionRestore = z.object({ restoreFrom: z.number().int().min(1).max(9999) }).strict();
+
+/** A download: the current version, or an earlier one (rev 8). */
+export const DownloadBody = z.object({ v: z.number().int().min(1).max(9999).optional() }).strict();
 
 /** A new name; an empty one goes back to showing the file name. */
 const Rename = z
@@ -444,6 +533,47 @@ export function librarySharing(rec: Pick<FileRecord, 'sharing' | 'sharedWithArti
   };
 }
 
+// ── Versions (rev 8) ───────────────────────────────────────────────────────
+/** The record of the current version, as it goes into the history when replaced. */
+export function asVersion(f: FileRecord): VersionMeta {
+  return {
+    v: currentVersion(f),
+    name: f.name,
+    size: f.size,
+    contentType: f.contentType,
+    ...(f.fileType ? { fileType: f.fileType } : {}),
+    uploadedBy: f.versionUploadedBy ?? f.uploadedBy,
+    createdAt: f.versionCreatedAt ?? f.availableAt ?? f.createdAt,
+    ...(f.versionNote ? { note: f.versionNote } : {}),
+  };
+}
+
+/**
+ * Whether a new version can start now. One at a time; a pending one that
+ * never arrived (over a day old) no longer holds the next one back.
+ */
+export function versionBlocked(
+  f: Pick<FileRecord, 'status' | 'pendingVersion'>,
+  now = Date.now(),
+): string | undefined {
+  if (f.status !== 'available') return 'Wait until this document has finished its malware scan';
+  const p = f.pendingVersion;
+  if (p?.status === 'pending' && now - Date.parse(p.createdAt) < PENDING_TTL_SECONDS * 1000) {
+    return 'A new version is still being checked. Try again in a minute.';
+  }
+  return undefined;
+}
+
+/** The next version's number: after the current one and any that didn't make it. */
+export function nextVersion(f: Pick<FileRecord, 'version' | 'pendingVersion'>): number {
+  return Math.max(currentVersion(f), f.pendingVersion?.v ?? 0) + 1;
+}
+
+/** Keeps the newest `MAX_VERSIONS`; returns the kept list and the ones dropped. */
+export function trimVersions(list: VersionMeta[]): { kept: VersionMeta[]; dropped: VersionMeta[] } {
+  return { kept: list.slice(0, MAX_VERSIONS), dropped: list.slice(MAX_VERSIONS) };
+}
+
 // ── Scan results ──────────────────────────────────────────────────────────
 export type ScanOutcome = { promote: true } | { promote: false; reason: string };
 
@@ -517,6 +647,30 @@ export function publicFile(f: FileRecord & { uploadedBy: string }, viewer: Viewe
     /** What this viewer can do (the API checks again on every change). */
     canEdit: !editAllowed(viewer, f),
     canManage: !manageAllowed(viewer, f),
+    // ── Versions (rev 8); names are filled in by the API ──
+    version: currentVersion(f),
+    versionUploadedBy: f.versionUploadedBy ?? f.uploadedBy,
+    versionCreatedAt: f.versionCreatedAt ?? f.availableAt ?? f.createdAt,
+    versionNote: f.versionNote ?? null,
+    versions: (f.versions ?? []).map((v) => ({
+      v: v.v,
+      name: v.name,
+      size: v.size,
+      fileType: v.fileType ?? guessFileType(v.name, v.contentType),
+      uploadedBy: v.uploadedBy,
+      createdAt: v.createdAt,
+      note: v.note ?? null,
+    })),
+    pendingVersion: f.pendingVersion
+      ? {
+          v: f.pendingVersion.v,
+          name: f.pendingVersion.name,
+          status: f.pendingVersion.status,
+          rejectReason: f.pendingVersion.rejectReason ?? null,
+          restoredFrom: f.pendingVersion.restoredFrom ?? null,
+          createdAt: f.pendingVersion.createdAt,
+        }
+      : null,
     createdAt: f.createdAt,
     availableAt: f.availableAt ?? null,
     asset: f.asset ?? null,

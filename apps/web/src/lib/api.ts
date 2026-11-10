@@ -196,6 +196,8 @@ export interface SubmissionSummary {
   neededBy: string;
   phaseId: string | null;
   fileIds: string[];
+  /** The version of each file as it was sent (rev 8). */
+  fileVersions?: Record<string, number>;
   status: 'open' | 'reviewed';
   createdAt: string;
   changedByBmgAt: string | null;

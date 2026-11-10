@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -12,6 +13,9 @@ import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge
 import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { artistKeyAlias, DataAccessSessions, encryptionContext } from '@bmg/crypto';
 import {
+  archivedKey,
+  asVersion,
+  currentVersion,
   fileSk,
   LIBRARY_PK,
   parseQuarantineKey,
@@ -19,8 +23,10 @@ import {
   scanOutcome,
   storedKey,
   THUMB_MAX_BYTES,
+  trimVersions,
   type FileRecord,
   type QuarantineRef,
+  type ThumbRecord,
 } from '../files/model.ts';
 import { detectFileType } from '../files/type.ts';
 import { artistPk } from '../workspace/model.ts';
@@ -40,6 +46,16 @@ export interface ScanResultEvent {
     s3ObjectDetails?: { bucketName?: string; objectKey?: string };
     scanResultDetails?: { scanResultStatus?: string };
   };
+}
+
+/**
+ * "Restore" on an earlier version (rev 8), from the files API: that version's
+ * bytes (scanned when they were first uploaded) become a new version.
+ */
+export interface RestoreEvent {
+  'detail-type': 'file.restore';
+  source: string;
+  detail: { fileId: string; artistId?: string; library?: boolean; v: number };
 }
 
 const log = (event: string, fields: Record<string, unknown> = {}) =>
@@ -154,7 +170,12 @@ async function exists(client: S3Client, bucket: string, key: string): Promise<bo
  * Anything else is deleted and the record is marked rejected. Safe to run
  * more than once for the same object.
  */
-export async function handler(event: ScanResultEvent): Promise<void> {
+export async function handler(event: ScanResultEvent | RestoreEvent): Promise<void> {
+  if (event['detail-type'] === 'file.restore') return restoreVersion(event as RestoreEvent);
+  return promote(event as ScanResultEvent);
+}
+
+async function promote(event: ScanResultEvent): Promise<void> {
   const quarantine = env('QUARANTINE_BUCKET');
   const bucket = event.detail.s3ObjectDetails?.bucketName;
   const key = event.detail.s3ObjectDetails?.objectKey ?? '';
@@ -175,6 +196,7 @@ export async function handler(event: ScanResultEvent): Promise<void> {
     )
   ).Item as FileRecord | undefined;
   if (ref.part === 'thumb') return promoteThumb(ref, key, rec, event);
+  if (ref.v > 1) return promoteVersion(ref, key, rec, event);
   if (!rec || rec.status !== 'pending') {
     // No record (expired) or already settled: just make sure nothing is left in quarantine.
     await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
@@ -285,16 +307,36 @@ async function saveFileType(ref: QuarantineRef, fileType: ReturnType<typeof dete
   );
 }
 
-async function setThumbStatus(ref: QuarantineRef, status: 'available' | 'rejected') {
+/**
+ * Where a preview's record is (rev 8): the current version's (`thumb`), or
+ * the preview of a new version still being scanned (`pendingVersion.thumb`).
+ */
+function thumbSlot(
+  rec: FileRecord | undefined,
+  v: number,
+): { path: string; thumb: ThumbRecord } | undefined {
+  if (rec?.thumb && (rec.thumb.v ?? 1) === v) return { path: 'thumb', thumb: rec.thumb };
+  if (rec?.pendingVersion?.v === v && rec.pendingVersion.thumb) {
+    return { path: 'pendingVersion.thumb', thumb: rec.pendingVersion.thumb };
+  }
+  return undefined;
+}
+
+async function setThumbStatus(
+  ref: QuarantineRef,
+  status: 'available' | 'rejected',
+  path = 'thumb',
+) {
   try {
     await db.send(
       new UpdateCommand({
         TableName: env('MAIN_TABLE'),
         Key: { PK: pkFor(ref), SK: fileSk(ref.fileId) },
-        UpdateExpression: 'SET thumb.#s = :s',
-        ConditionExpression: 'attribute_exists(thumb)',
+        UpdateExpression: `SET ${path}.#s = :s`,
+        // Only the preview of this version: a newer one may have replaced it meanwhile.
+        ConditionExpression: `attribute_exists(${path})${ref.v > 1 ? ` AND ${path}.v = :v` : ''}`,
         ExpressionAttributeNames: { '#s': 'status' },
-        ExpressionAttributeValues: { ':s': status },
+        ExpressionAttributeValues: { ':s': status, ...(ref.v > 1 ? { ':v': ref.v } : {}) },
       }),
     );
   } catch (err) {
@@ -313,6 +355,7 @@ async function dropThumb(ref: QuarantineRef, rec: FileRecord) {
           ref.fileId,
           ref.scope === 'artist' ? ref.artistId : undefined,
           'thumb',
+          ref.v,
         ),
       }),
     )
@@ -327,13 +370,14 @@ async function dropThumb(ref: QuarantineRef, rec: FileRecord) {
           ref.fileId,
           ref.scope === 'artist' ? ref.artistId : undefined,
           'thumb',
+          ref.v,
         ),
       }),
     );
   } catch {
     /* nothing stored yet */
   }
-  await setThumbStatus(ref, 'rejected');
+  await setThumbStatus(ref, 'rejected', ref.v > 1 ? 'pendingVersion.thumb' : 'thumb');
 }
 
 /** Only these raster formats are kept as previews, and the bytes must agree. */
@@ -364,7 +408,16 @@ async function promoteThumb(
 ): Promise<void> {
   const quarantine = env('QUARANTINE_BUCKET');
   const clear = () => s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
-  if (!rec?.thumb || rec.thumb.status !== 'pending' || rec.status === 'rejected') {
+  const slot = thumbSlot(rec, ref.v);
+  const versionRejected =
+    ref.v > 1 && rec?.pendingVersion?.v === ref.v && rec.pendingVersion.status === 'rejected';
+  if (
+    !rec ||
+    !slot ||
+    slot.thumb.status !== 'pending' ||
+    rec.status === 'rejected' ||
+    versionRejected
+  ) {
     await clear();
     log('files.promote.thumb-ignored', { fileId: ref.fileId });
     return;
@@ -372,7 +425,7 @@ async function promoteThumb(
   const outcome = scanOutcome(event.detail.scanResultDetails?.scanResultStatus);
   if (!outcome.promote) {
     await clear();
-    await setThumbStatus(ref, 'rejected');
+    await setThumbStatus(ref, 'rejected', slot.path);
     log('files.promote.thumb-rejected', { fileId: ref.fileId });
     return;
   }
@@ -385,12 +438,12 @@ async function promoteThumb(
     throw err;
   }
   if (
-    bytes.length !== rec.thumb.size ||
+    bytes.length !== slot.thumb.size ||
     bytes.length > THUMB_MAX_BYTES ||
-    !isPreviewImage(bytes, rec.thumb.contentType)
+    !isPreviewImage(bytes, slot.thumb.contentType)
   ) {
     await clear();
-    await setThumbStatus(ref, 'rejected');
+    await setThumbStatus(ref, 'rejected', slot.path);
     log('files.promote.thumb-invalid', { fileId: ref.fileId });
     return;
   }
@@ -403,14 +456,287 @@ async function promoteThumb(
         ref.fileId,
         ref.scope === 'artist' ? ref.artistId : undefined,
         'thumb',
+        ref.v,
       ),
       Body: bytes,
       ContentLength: bytes.length,
-      ContentType: rec.thumb.contentType,
+      ContentType: slot.thumb.contentType,
       ...dest.sse,
     }),
   );
   await clear();
-  await setThumbStatus(ref, 'available');
+  // The version may have been promoted meanwhile, moving its preview to `thumb`.
+  const now = (
+    await db.send(
+      new GetCommand({
+        TableName: env('MAIN_TABLE'),
+        Key: { PK: pkFor(ref), SK: fileSk(ref.fileId) },
+      }),
+    )
+  ).Item as FileRecord | undefined;
+  await setThumbStatus(ref, 'available', thumbSlot(now, ref.v)?.path ?? slot.path);
   log('files.promote.thumb-available', { fileId: ref.fileId });
+}
+
+/**
+ * A new version of a document has been scanned (rev 8). A clean one replaces
+ * the current bytes: the current version is copied aside first (its
+ * archived key), the new bytes go to the plain key, and the record moves the
+ * current version into the history. Anything else is dropped and the person
+ * who uploaded it is told; the document stays as it was. Safe to run again.
+ */
+async function promoteVersion(
+  ref: QuarantineRef,
+  key: string,
+  rec: FileRecord | undefined,
+  event: ScanResultEvent,
+): Promise<void> {
+  const quarantine = env('QUARANTINE_BUCKET');
+  const pending = rec?.pendingVersion;
+  const artistId = ref.scope === 'artist' ? ref.artistId : undefined;
+  if (!rec || !pending || pending.v !== ref.v || pending.status !== 'pending') {
+    // Already promoted, rejected, or replaced by a newer attempt.
+    await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
+    log('files.promote.version-ignored', { fileId: ref.fileId, v: ref.v });
+    return;
+  }
+  const ids = { fileId: ref.fileId, v: ref.v, ...(artistId ? { artistId } : { library: true }) };
+
+  const reject = async (reason: string) => {
+    await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
+    try {
+      await db.send(
+        new UpdateCommand({
+          TableName: env('MAIN_TABLE'),
+          Key: { PK: pkFor(ref), SK: fileSk(ref.fileId) },
+          UpdateExpression: 'SET pendingVersion.#s = :r, pendingVersion.rejectReason = :why',
+          ConditionExpression: 'pendingVersion.v = :v AND pendingVersion.#s = :p',
+          ExpressionAttributeNames: { '#s': 'status' },
+          ExpressionAttributeValues: {
+            ':r': 'rejected',
+            ':why': reason,
+            ':v': ref.v,
+            ':p': 'pending',
+          },
+        }),
+      );
+    } catch (err) {
+      if ((err as Error).name !== 'ConditionalCheckFailedException') throw err;
+    }
+    if (pending.thumb) await dropThumb(ref, rec);
+    await auditEvent('file.version-rejected', 'success', { ...ids, reason });
+    await events.send(
+      new PutEventsCommand({
+        Entries: [
+          {
+            EventBusName: env('EVENT_BUS'),
+            Source: 'bmg.workspace',
+            DetailType: 'file.rejected',
+            Detail: JSON.stringify({
+              id: randomUUID(),
+              fileId: ref.fileId,
+              ...(artistId ? { artistId } : {}),
+              uploadedBy: pending.uploadedBy,
+              name: `${rec.title || rec.name} (new version)`,
+              reason,
+            }),
+          },
+        ],
+      }),
+    );
+    log('files.promote.version-rejected', ids);
+  };
+
+  const outcome = scanOutcome(event.detail.scanResultDetails?.scanResultStatus);
+  if (!outcome.promote) return reject(outcome.reason);
+
+  let size: number | undefined;
+  try {
+    size = (await s3.send(new HeadObjectCommand({ Bucket: quarantine, Key: key }))).ContentLength;
+  } catch (err) {
+    if ((err as Error).name === 'NotFound') return; // handled by an earlier delivery
+    throw err;
+  }
+  if (size !== pending.size) return reject('The uploaded file didn’t match what was expected');
+
+  const fileType = await detect(quarantine, key, {
+    ...rec,
+    name: pending.name,
+    contentType: pending.contentType,
+  });
+  const dest = await destination(ref, rec);
+  const current = storedKey(ref.scope, ref.fileId, artistId);
+  const was = currentVersion(rec);
+  // Keep the version being replaced (server-side copy, same encryption).
+  await dest.client.send(
+    new CopyObjectCommand({
+      Bucket: dest.bucket,
+      Key: archivedKey(ref.scope, ref.fileId, artistId, was),
+      CopySource: `${dest.bucket}/${encodeURI(current)}`,
+      MetadataDirective: 'COPY',
+      ...dest.sse,
+    }),
+  );
+  const obj = await s3.send(new GetObjectCommand({ Bucket: quarantine, Key: key }));
+  await dest.client.send(
+    new PutObjectCommand({
+      Bucket: dest.bucket,
+      Key: current,
+      Body: obj.Body as Readable,
+      ContentLength: size,
+      ContentType: pending.contentType,
+      ...dest.sse,
+    }),
+  );
+  await s3.send(new DeleteObjectCommand({ Bucket: quarantine, Key: key }));
+  await settleVersion(ref, rec, fileType);
+  await auditEvent('file.available', 'success', { ...ids, kind: fileType?.kind ?? 'unknown' });
+  log('files.promote.version-available', ids);
+}
+
+/** Moves the current version into the history and makes the pending one current. */
+async function settleVersion(
+  ref: QuarantineRef,
+  rec: FileRecord,
+  fileType: ReturnType<typeof detectFileType> | undefined,
+) {
+  const pending = rec.pendingVersion!;
+  const { kept, dropped } = trimVersions([asVersion(rec), ...(rec.versions ?? [])]);
+  const sets = [
+    'version = :v',
+    '#n = :name',
+    'size = :size',
+    'contentType = :ct',
+    'versions = :versions',
+    'versionUploadedBy = :by',
+    'versionCreatedAt = :at',
+  ];
+  const removes = ['pendingVersion'];
+  const values: Record<string, unknown> = {
+    ':v': ref.v,
+    ':name': pending.name,
+    ':size': pending.size,
+    ':ct': pending.contentType,
+    ':versions': kept,
+    ':by': pending.uploadedBy,
+    ':at': new Date().toISOString(),
+    ':pending': 'pending',
+  };
+  if (pending.note) {
+    sets.push('versionNote = :note');
+    values[':note'] = pending.note;
+  } else removes.push('versionNote');
+  if (fileType) {
+    sets.push('fileType = :ft');
+    values[':ft'] = fileType;
+  } else removes.push('fileType');
+  // The new version's preview (if it made one) becomes the document's.
+  if (pending.thumb && pending.thumb.status !== 'rejected') {
+    sets.push('thumb = :thumb');
+    values[':thumb'] = { ...pending.thumb, v: ref.v };
+  } else removes.push('thumb');
+  try {
+    await db.send(
+      new UpdateCommand({
+        TableName: env('MAIN_TABLE'),
+        Key: { PK: pkFor(ref), SK: fileSk(ref.fileId) },
+        UpdateExpression: `SET ${sets.join(', ')} REMOVE ${removes.join(', ')}`,
+        ConditionExpression: 'pendingVersion.v = :v AND pendingVersion.#s = :pending',
+        ExpressionAttributeNames: { '#n': 'name', '#s': 'status' },
+        ExpressionAttributeValues: values,
+      }),
+    );
+  } catch (err) {
+    if ((err as Error).name !== 'ConditionalCheckFailedException') throw err;
+    return;
+  }
+  // Beyond the history limit, the oldest versions' bytes go.
+  if (dropped.length) {
+    const dest = await destination(ref, rec);
+    const artistId = ref.scope === 'artist' ? ref.artistId : undefined;
+    for (const d of dropped) {
+      await dest.client
+        .send(
+          new DeleteObjectCommand({
+            Bucket: dest.bucket,
+            Key: archivedKey(ref.scope, ref.fileId, artistId, d.v),
+          }),
+        )
+        .catch(() => undefined);
+    }
+  }
+}
+
+/**
+ * Brings back an earlier version as a new one (rev 8). The pending version
+ * was recorded by the files API; its bytes are copied server-side from the
+ * earlier version's archived key, so nothing leaves S3 and nothing needs a
+ * second scan.
+ */
+async function restoreVersion(event: RestoreEvent): Promise<void> {
+  const { fileId, artistId, library, v } = event.detail;
+  const ref: QuarantineRef =
+    library || !artistId
+      ? { scope: 'library', fileId, part: 'file', v }
+      : { scope: 'artist', artistId, fileId, part: 'file', v };
+  const rec = (
+    await db.send(
+      new GetCommand({ TableName: env('MAIN_TABLE'), Key: { PK: pkFor(ref), SK: fileSk(fileId) } }),
+    )
+  ).Item as FileRecord | undefined;
+  const pending = rec?.pendingVersion;
+  if (
+    !rec ||
+    !pending ||
+    pending.v !== v ||
+    pending.status !== 'pending' ||
+    !pending.restoredFrom
+  ) {
+    log('files.restore.ignored', { fileId, v });
+    return;
+  }
+  const from = (rec.versions ?? []).find((x) => x.v === pending.restoredFrom);
+  const dest = await destination(ref, rec);
+  const current = storedKey(ref.scope, fileId, artistId);
+  const source = archivedKey(ref.scope, fileId, artistId, pending.restoredFrom);
+  if (!from || !(await exists(dest.client, dest.bucket, source))) {
+    await db.send(
+      new UpdateCommand({
+        TableName: env('MAIN_TABLE'),
+        Key: { PK: pkFor(ref), SK: fileSk(fileId) },
+        UpdateExpression: 'SET pendingVersion.#s = :r, pendingVersion.rejectReason = :why',
+        ConditionExpression: 'pendingVersion.v = :v',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: {
+          ':r': 'rejected',
+          ':why': 'That version is no longer kept',
+          ':v': v,
+        },
+      }),
+    );
+    log('files.restore.missing', { fileId, v });
+    return;
+  }
+  const copy = (from: string, to: string) =>
+    dest.client.send(
+      new CopyObjectCommand({
+        Bucket: dest.bucket,
+        Key: to,
+        CopySource: `${dest.bucket}/${encodeURI(from)}`,
+        MetadataDirective: 'COPY',
+        ...dest.sse,
+      }),
+    );
+  // A retry after the copies but before the record update finds the current
+  // version already archived; copying again is harmless.
+  await copy(current, archivedKey(ref.scope, fileId, artistId, currentVersion(rec)));
+  await copy(source, current);
+  await settleVersion(ref, rec, from.fileType);
+  await auditEvent('file.available', 'success', {
+    fileId,
+    v,
+    restoredFrom: pending.restoredFrom,
+    ...(ref.scope === 'artist' ? { artistId } : { library: true }),
+  });
+  log('files.restore.done', { fileId, v });
 }

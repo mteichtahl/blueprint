@@ -513,20 +513,36 @@ function SubmissionView({
         {sub.note && <p className="mt-4 whitespace-pre-wrap text-sm">{sub.note}</p>}
         {sub.fileIds.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">
-            {sub.fileIds.map((id) => (
-              <Button
-                key={id}
-                variant="ghost"
-                className="border border-border"
-                onClick={() =>
-                  void download(cfg, token, `/artists/${artistId}/files/${id}`).catch((e) =>
-                    setError((e as Error).message),
-                  )
-                }
-              >
-                {fileName(id)}
-              </Button>
-            ))}
+            {sub.fileIds.map((id) => {
+              // The version that was sent stays what was submitted (rev 8).
+              const file = files.find((f) => f.fileId === id);
+              const sent = sub.fileVersions?.[id] ?? 1;
+              const newer = !!file && file.version > sent;
+              const kept = !newer || file.versions.some((v) => v.v === sent);
+              const path = `/artists/${artistId}/files/${id}`;
+              return (
+                <span key={id} className="flex flex-col gap-0.5">
+                  <Button
+                    variant="ghost"
+                    className="border border-border"
+                    disabled={!file || !kept}
+                    onClick={() =>
+                      void download(cfg, token, path, newer ? sent : undefined).catch((e) =>
+                        setError((e as Error).message),
+                      )
+                    }
+                  >
+                    {file ? fileName(id) : 'This file was deleted'}
+                  </Button>
+                  {newer && (
+                    <span className="src">
+                      Version {sent} as sent · a newer version exists
+                      {!kept && ' (this one is no longer kept)'}
+                    </span>
+                  )}
+                </span>
+              );
+            })}
           </div>
         )}
       </Card>

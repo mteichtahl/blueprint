@@ -1077,6 +1077,7 @@ export class ApiStack extends BmgStack {
     route('POST', '/artists/{artistId}/files', files);
     route('GET', '/artists/{artistId}/files/{fileId}', files);
     route('PATCH', '/artists/{artistId}/files/{fileId}', files);
+    route('POST', '/artists/{artistId}/files/{fileId}/versions', files);
     route('PUT', '/artists/{artistId}/files/{fileId}/asset', files);
     route('DELETE', '/artists/{artistId}/files/{fileId}/asset', files);
     route('POST', '/artists/{artistId}/files/{fileId}/download', files);
@@ -1179,6 +1180,7 @@ export class ApiStack extends BmgStack {
     route('POST', '/library/files', files);
     route('GET', '/library/files/{fileId}', files);
     route('PATCH', '/library/files/{fileId}', files);
+    route('POST', '/library/files/{fileId}/versions', files);
     route('POST', '/library/files/{fileId}/download', files);
     route('DELETE', '/library/files/{fileId}', files);
 

@@ -43,6 +43,11 @@ export interface Submission {
   neededBy: string;
   phaseId?: string;
   fileIds: string[];
+  /**
+   * The version of each file when it was sent (rev 8): a later version of the
+   * document doesn't change what was submitted.
+   */
+  fileVersions?: Record<string, number>;
   /** Artist-key ciphertext (AWS Encryption SDK). */
   noteCipher?: Uint8Array;
   feedbackCipher?: Uint8Array;
@@ -153,6 +158,7 @@ export function publicSubmission(s: Submission) {
     neededBy: s.neededBy,
     phaseId: s.phaseId ?? null,
     fileIds: s.fileIds ?? [],
+    fileVersions: s.fileVersions ?? {},
     status: s.status,
     createdAt: s.createdAt,
     changedByBmgAt: s.changedByBmgAt ?? null,

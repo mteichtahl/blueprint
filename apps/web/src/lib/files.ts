@@ -62,10 +62,37 @@ export interface FileItem {
   /** What you can do with it (the API checks again). */
   canEdit: boolean;
   canManage: boolean;
+  /** Versions (rev 8): the current one, and earlier ones newest first. */
+  version: number;
+  versionUploadedBy: string;
+  versionUploadedByName: string;
+  versionCreatedAt: string;
+  versionNote: string | null;
+  versions: FileVersion[];
+  /** A new version being checked, or one that wasn't kept. */
+  pendingVersion: {
+    v: number;
+    name: string;
+    status: 'pending' | 'rejected';
+    rejectReason: string | null;
+    restoredFrom: number | null;
+    createdAt: string;
+  } | null;
   createdAt: string;
   availableAt: string | null;
   /** Set when the file is in the artist's asset library. */
   asset: AssetMeta | null;
+}
+
+export interface FileVersion {
+  v: number;
+  name: string;
+  size: number;
+  fileType: FileTypeInfo;
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: string;
+  note: string | null;
 }
 
 export type EditAccess = 'owner' | 'chosen' | 'everyone';
@@ -161,6 +188,56 @@ export async function uploadFile(
   return res.file;
 }
 
+/**
+ * Uploads a new version of a document (rev 8): the API records it as pending
+ * and returns where to send it; it replaces the document once it's scanned.
+ */
+export async function uploadVersion(
+  cfg: AppConfig,
+  token: string,
+  path: string,
+  file: File,
+  opts: { note?: string; thumbnail?: Blob | null } = {},
+): Promise<FileItem> {
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error('Files are limited to 500 MB');
+  const thumb = opts.thumbnail === undefined ? await makeThumbnail(file) : opts.thumbnail;
+  const usableThumb = thumb && thumb.size <= THUMB_MAX_BYTES ? thumb : null;
+  const note = opts.note?.trim();
+  const res = await api<{
+    file: FileItem;
+    upload: { url: string; fields: Record<string, string> };
+    thumbUpload?: { url: string; fields: Record<string, string> } | null;
+  }>(cfg, token, 'POST', `${path}/versions`, {
+    name: file.name,
+    size: file.size,
+    contentType: file.type || 'application/octet-stream',
+    ...(note ? { note } : {}),
+    ...(usableThumb
+      ? { thumbnail: { size: usableThumb.size, contentType: usableThumb.type } }
+      : {}),
+  });
+  await postToS3(res.upload, file);
+  if (usableThumb && res.thumbUpload) await postToS3(res.thumbUpload, usableThumb).catch(() => {});
+  return res.file;
+}
+
+/** Polls until a new version has been scanned (or restored), or ~3 minutes pass. */
+export async function waitForVersion(
+  cfg: AppConfig,
+  token: string,
+  path: string,
+  v: number,
+): Promise<FileItem | undefined> {
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const f = await api<FileItem>(cfg, token, 'GET', path);
+    if (f.version >= v || f.pendingVersion?.v !== v || f.pendingVersion.status !== 'pending') {
+      return f;
+    }
+  }
+  return undefined;
+}
+
 async function postToS3(target: { url: string; fields: Record<string, string> }, body: Blob) {
   const form = new FormData();
   for (const [k, v] of Object.entries(target.fields)) form.append(k, v);
@@ -248,11 +325,23 @@ export async function waitUntilScanned(
  * Opens a short-lived download link. The tab is opened during the click (so
  * it isn't blocked as a pop-up) and pointed at the link once it arrives.
  */
-export async function download(cfg: AppConfig, token: string, path: string): Promise<void> {
+export async function download(
+  cfg: AppConfig,
+  token: string,
+  path: string,
+  /** An earlier version (rev 8); the current one when left out. */
+  version?: number,
+): Promise<void> {
   const tab = window.open('', '_blank');
   if (tab) tab.opener = null;
   try {
-    const { url } = await api<{ url: string }>(cfg, token, 'POST', `${path}/download`);
+    const { url } = await api<{ url: string }>(
+      cfg,
+      token,
+      'POST',
+      `${path}/download`,
+      version ? { v: version } : undefined,
+    );
     if (tab) tab.location.href = url;
     else window.location.assign(url);
   } catch (err) {

@@ -1,6 +1,14 @@
 import { authorize, type Principal } from '@bmg/authz';
 import { describe, expect, it } from 'vitest';
 import {
+  archivedKey,
+  asVersion,
+  currentVersion,
+  MAX_VERSIONS,
+  nextVersion,
+  trimVersions,
+  versionBlocked,
+  VersionUpload,
   ArtistFilePatch,
   ArtistUpload,
   canBeEditor,
@@ -36,11 +44,18 @@ describe('S3 keys', () => {
   it('round-trips quarantine keys and keeps artists apart', () => {
     const k = quarantineKey('artist', fileId, A);
     expect(k).toBe(`artists/${A}/${fileId}`);
-    expect(parseQuarantineKey(k)).toEqual({ scope: 'artist', artistId: A, fileId, part: 'file' });
+    expect(parseQuarantineKey(k)).toEqual({
+      scope: 'artist',
+      artistId: A,
+      fileId,
+      part: 'file',
+      v: 1,
+    });
     expect(parseQuarantineKey(quarantineKey('library', fileId))).toEqual({
       scope: 'library',
       fileId,
       part: 'file',
+      v: 1,
     });
     expect(storedKey('artist', fileId, A)).toBe(`artists/${A}/files/${fileId}`);
   });
@@ -48,11 +63,18 @@ describe('S3 keys', () => {
   it('keeps a preview next to its file, under the same prefix', () => {
     const k = quarantineKey('artist', fileId, A, 'thumb');
     expect(k).toBe(`artists/${A}/${fileId}.thumb`);
-    expect(parseQuarantineKey(k)).toEqual({ scope: 'artist', artistId: A, fileId, part: 'thumb' });
+    expect(parseQuarantineKey(k)).toEqual({
+      scope: 'artist',
+      artistId: A,
+      fileId,
+      part: 'thumb',
+      v: 1,
+    });
     expect(parseQuarantineKey(`library/${fileId}.thumb`)).toEqual({
       scope: 'library',
       fileId,
       part: 'thumb',
+      v: 1,
     });
     expect(storedKey('artist', fileId, A, 'thumb')).toBe(`artists/${A}/files/${fileId}.thumb`);
     expect(storedKey('library', fileId, undefined, 'thumb')).toBe(`library/${fileId}.thumb`);
@@ -330,5 +352,160 @@ describe('files sent in chat (rev 7)', () => {
     expect(
       ArtistUpload.safeParse({ name: 'a.pdf', size: 1, sharedWithArtistIds: ['bob'] }).success,
     ).toBe(false);
+  });
+});
+
+describe('versions (rev 8)', () => {
+  const base: FileRecord = {
+    fileId,
+    scope: 'artist',
+    artistId: A,
+    name: 'rider-v1.pdf',
+    title: 'Tour rider',
+    size: 100,
+    contentType: 'application/pdf',
+    status: 'available',
+    visibility: 'normal',
+    uploadedBy: 'u-a',
+    uploaderRole: 'artist',
+    createdAt: '2026-11-01T00:00:00Z',
+    availableAt: '2026-11-01T00:01:00Z',
+  };
+
+  it('gives a new version its own quarantine key, preview key and archive key', () => {
+    const k = quarantineKey('artist', fileId, A, 'file', 3);
+    expect(k).toBe(`artists/${A}/${fileId}.v3`);
+    expect(parseQuarantineKey(k)).toEqual({
+      scope: 'artist',
+      artistId: A,
+      fileId,
+      part: 'file',
+      v: 3,
+    });
+    expect(parseQuarantineKey(`library/${fileId}.v12.thumb`)).toEqual({
+      scope: 'library',
+      fileId,
+      part: 'thumb',
+      v: 12,
+    });
+    expect(parseQuarantineKey(`library/${fileId}`)?.v).toBe(1);
+    // Version 1 has no suffix, so ".v1" and ".v0" are not app uploads.
+    expect(parseQuarantineKey(`library/${fileId}.v1`)).toBeUndefined();
+    expect(parseQuarantineKey(`library/${fileId}.v0`)).toBeUndefined();
+    expect(parseQuarantineKey(`library/${fileId}.thumb.v2`)).toBeUndefined();
+    // The current version always lives at the plain key; previews are per version.
+    expect(storedKey('artist', fileId, A, 'file', 4)).toBe(`artists/${A}/files/${fileId}`);
+    expect(storedKey('artist', fileId, A, 'thumb', 4)).toBe(
+      `artists/${A}/files/${fileId}.v4.thumb`,
+    );
+    expect(storedKey('library', fileId, undefined, 'thumb', 1)).toBe(`library/${fileId}.thumb`);
+    expect(archivedKey('library', fileId, undefined, 2)).toBe(`library/${fileId}.v2`);
+  });
+
+  it('numbers versions after the current one and any that did not make it', () => {
+    expect(currentVersion(base)).toBe(1);
+    expect(nextVersion(base)).toBe(2);
+    expect(nextVersion({ version: 3 })).toBe(4);
+    const rejected = {
+      version: 3,
+      pendingVersion: { v: 4, status: 'rejected' } as FileRecord['pendingVersion'],
+    };
+    expect(nextVersion(rejected)).toBe(5);
+  });
+
+  it('takes one new version at a time, and only once the file is ready', () => {
+    const now = Date.parse('2026-11-10T00:00:00Z');
+    expect(versionBlocked(base, now)).toBeUndefined();
+    expect(versionBlocked({ ...base, status: 'pending' }, now)).toMatch(/malware scan/);
+    const pending = {
+      v: 2,
+      name: 'x',
+      size: 1,
+      contentType: 'application/pdf',
+      uploadedBy: 'u-a',
+      status: 'pending' as const,
+    };
+    expect(
+      versionBlocked(
+        { ...base, pendingVersion: { ...pending, createdAt: '2026-11-09T23:59:00Z' } },
+        now,
+      ),
+    ).toMatch(/still being checked/);
+    // One that never arrived no longer holds things up after a day.
+    expect(
+      versionBlocked(
+        { ...base, pendingVersion: { ...pending, createdAt: '2026-11-08T00:00:00Z' } },
+        now,
+      ),
+    ).toBeUndefined();
+    expect(
+      versionBlocked(
+        {
+          ...base,
+          pendingVersion: { ...pending, status: 'rejected', createdAt: '2026-11-09T23:59:00Z' },
+        },
+        now,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('records the replaced version in the history and keeps the newest 50', () => {
+    expect(asVersion(base)).toEqual({
+      v: 1,
+      name: 'rider-v1.pdf',
+      size: 100,
+      contentType: 'application/pdf',
+      uploadedBy: 'u-a',
+      createdAt: '2026-11-01T00:01:00Z',
+    });
+    const list = Array.from({ length: 52 }, (_, i) => ({ ...asVersion(base), v: 52 - i }));
+    const { kept, dropped } = trimVersions(list);
+    expect(kept).toHaveLength(MAX_VERSIONS);
+    expect(dropped.map((d) => d.v)).toEqual([2, 1]);
+  });
+
+  it('accepts a new version with a note, and nothing else', () => {
+    expect(
+      VersionUpload.parse({
+        name: 'rider-v2.pdf',
+        size: 5,
+        contentType: 'application/pdf',
+        note: ' Set times ',
+      }),
+    ).toMatchObject({ note: 'Set times' });
+    expect(VersionUpload.safeParse({ name: 'a.pdf', size: 1, title: 'x' }).success).toBe(false);
+    expect(VersionUpload.safeParse({ name: 'a.pdf', size: 1, note: 'x'.repeat(301) }).success).toBe(
+      false,
+    );
+  });
+
+  it('shows the history and a pending version without any keys', () => {
+    const f: FileRecord = {
+      ...base,
+      name: 'rider-v2.pdf',
+      version: 2,
+      versionUploadedBy: 'u-staff',
+      versionCreatedAt: '2026-11-09T00:00:00Z',
+      versionNote: 'Set times',
+      versions: [asVersion(base)],
+      pendingVersion: {
+        v: 3,
+        name: 'rider-v3.pdf',
+        size: 1,
+        contentType: 'application/pdf',
+        uploadedBy: 'u-a',
+        createdAt: '2026-11-10T00:00:00Z',
+        status: 'pending',
+      },
+    };
+    const shown = publicFile(f, artistA);
+    expect(shown).toMatchObject({
+      version: 2,
+      versionUploadedBy: 'u-staff',
+      versionNote: 'Set times',
+      versions: [{ v: 1, name: 'rider-v1.pdf', fileType: { kind: 'pdf' } }],
+      pendingVersion: { v: 3, status: 'pending', restoredFrom: null },
+    });
+    expect(JSON.stringify(shown)).not.toContain('files/');
   });
 });
