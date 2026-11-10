@@ -302,6 +302,7 @@ export class ApiStack extends BmgStack {
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
     });
     const gigsEvents = fn('Events', 'events', 'artist gigs and Blueprint events');
+    const addressBook = fn('AddressBook', 'address-book', 'shared contacts and venues');
     const prompts = fn('Prompts', 'prompts', 'Settings - AI prompts: drafts, versions, publish');
     // ── Assistant (design 10, F4) ──
     const aiChat = new BmgFunction(this, 'AiChat', {
@@ -649,6 +650,19 @@ export class ApiStack extends BmgStack {
       [main],
     );
     allow(newsroom, 'Regenerate', ['lambda:InvokeFunction'], [props.newsroomDraftArn]);
+    allow(
+      addressBook,
+      'AddressBookItems',
+      [
+        'dynamodb:GetItem',
+        'dynamodb:Query',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
+      ],
+      [main],
+    );
+    putEvents(addressBook);
     putEvents(newsroom);
     allow(me, 'RecordAiChoice', ['dynamodb:UpdateItem'], [main]);
     new Rule(this, 'AiConsentChanges', {
@@ -859,6 +873,7 @@ export class ApiStack extends BmgStack {
       aiActions,
       aiConsent,
       newsroom,
+      addressBook,
     ]) {
       props.platformKey.grant(f, 'kms:Decrypt');
     }
@@ -878,6 +893,7 @@ export class ApiStack extends BmgStack {
       aiConsent,
       me,
       newsroom,
+      addressBook,
     ]) {
       props.platformKey.grant(f, 'kms:Encrypt', 'kms:GenerateDataKey');
     }
@@ -1055,6 +1071,17 @@ export class ApiStack extends BmgStack {
       authorizer,
       requestValidator: validator,
     });
+    // Contacts (and venues): one function under proxy resources, to keep the stack small.
+    for (const root of ['contacts']) {
+      const res = this.api.root.addResource(root);
+      res.addMethod('ANY', integrationFor(addressBook), {
+        authorizer,
+        requestValidator: validator,
+      });
+      res
+        .addResource('{proxy+}')
+        .addMethod('ANY', integrationFor(addressBook), { authorizer, requestValidator: validator });
+    }
     route('GET', '/connectors', connectors);
     route('POST', '/connectors/callback', connectors);
     route('GET', '/connectors/apps', connectors);
