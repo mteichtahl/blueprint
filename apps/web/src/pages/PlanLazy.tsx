@@ -1,3 +1,4 @@
+import { WaveLoader } from '../components/ui.tsx';
 import { lazy, Suspense, type ComponentProps } from 'react';
 
 /**
@@ -8,7 +9,7 @@ const Plan = () => import('./Plan.tsx');
 const LazyPlanTab = lazy(() => Plan().then((m) => ({ default: m.PlanTab })));
 const LazyPlanStages = lazy(() => Plan().then((m) => ({ default: m.PlanStages })));
 
-const loading = <p className="text-sm text-muted-foreground">Loading…</p>;
+const loading = <WaveLoader />;
 
 export function PlanTab(props: ComponentProps<typeof LazyPlanTab>) {
   return (

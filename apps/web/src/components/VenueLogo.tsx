@@ -1,3 +1,4 @@
+import { WaveLoader } from './ui.tsx';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -41,16 +42,7 @@ export function primeLogo(venueId: string, version: string, dataUrl: string) {
 }
 
 export function Spinner({ size = 24, label }: { size?: number; label: string }) {
-  return (
-    <span role="status" className="inline-flex items-center justify-center">
-      <span
-        aria-hidden="true"
-        className="inline-block animate-spin rounded-full border-[3px] border-[rgba(1,25,53,0.15)] border-t-[#011935] motion-reduce:[animation-duration:2.4s]"
-        style={{ width: size, height: size }}
-      />
-      <span className="sr-only">{label}</span>
-    </span>
-  );
+  return <WaveLoader inline size={Math.round(size * 1.4)} label={label} />;
 }
 
 const initialsOf = (name: string) =>

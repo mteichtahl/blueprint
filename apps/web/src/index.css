@@ -2046,3 +2046,30 @@ nav,
 .dark .chk {
   accent-color: #e8726e;
 }
+
+/* Loading: the waveform logo's bars oscillate like a sound wave. */
+.wave-loader {
+  color: #011935;
+}
+.dark .wave-loader {
+  color: #f1f4f7;
+}
+.wave-loader line {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wave-osc 1.1s ease-in-out infinite;
+}
+@keyframes wave-osc {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wave-loader line {
+    animation-duration: 3s;
+  }
+}

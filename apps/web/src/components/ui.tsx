@@ -257,6 +257,66 @@ export function Logo({ light = true, compact = false }: { light?: boolean; compa
   );
 }
 
+/** The nine bars of the waveform logo: x position and full height (centred on y=30). */
+const WAVE_BARS: [number, number][] = [
+  [12, 6],
+  [20, 18],
+  [28, 34],
+  [36, 16],
+  [44, 46],
+  [52, 26],
+  [60, 12],
+  [68, 22],
+  [76, 6],
+];
+
+/**
+ * The loading indicator: the waveform logo with its bars oscillating like a
+ * sound wave. Use instead of "Loading…" text. `label` is read by screen readers.
+ */
+export function WaveLoader({
+  label = 'Loading',
+  size = 56,
+  inline = false,
+  className = '',
+}: {
+  label?: string;
+  size?: number;
+  inline?: boolean;
+  className?: string;
+}) {
+  const Tag = inline ? 'span' : 'div';
+  return (
+    <Tag
+      role="status"
+      aria-live="polite"
+      className={`${inline ? 'inline-flex' : 'flex py-6'} items-center justify-center ${className}`}
+    >
+      <svg
+        className="wave-loader"
+        width={size}
+        height={Math.round((size * 60) / 88)}
+        viewBox="0 0 88 60"
+        aria-hidden="true"
+      >
+        <g stroke="currentColor" strokeWidth="4" strokeLinecap="round">
+          {WAVE_BARS.map(([x, h], i) => (
+            <line
+              key={x}
+              x1={x}
+              x2={x}
+              y1={30 - h / 2}
+              y2={30 + h / 2}
+              style={{ animationDelay: `${i * 0.09 - 1.2}s` }}
+            />
+          ))}
+        </g>
+      </svg>
+      <span className="sr-only">{label}</span>
+    </Tag>
+  );
+}
+
 /** Kept for older screens: the text wordmark. */
 export function Wordmark({ light = false }: { light?: boolean }) {
   return <Logo light={light} />;

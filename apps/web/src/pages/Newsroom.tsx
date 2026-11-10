@@ -12,6 +12,7 @@ import {
   shortDate,
   Tag,
   TextArea,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 /** Newsroom (BMG only): the weekly draft, approval, what goes in and the industry sites. */
@@ -148,7 +149,7 @@ export function Newsroom({
     }
   }
 
-  if (!s) return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!s) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   const d = s.draft;
   const dirty = !!d && !!edit && JSON.stringify(edit) !== JSON.stringify(d.sections);
   const locked = d?.status === 'approved';

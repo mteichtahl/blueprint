@@ -14,6 +14,7 @@ import {
   Select,
   Tag,
   TextArea,
+  WaveLoader,
 } from '../components/ui.tsx';
 import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
 import { VenuePicker } from './Venues.tsx';
@@ -526,7 +527,7 @@ export function GigsTab({
           />
         )}
         {gigs === null ? (
-          <p className="src">Loading…</p>
+          <WaveLoader />
         ) : (
           <GigTable
             gigs={all.filter((g) => matches(g, filter))}
@@ -774,7 +775,7 @@ export function AllGigs({
         />
       )}
       {gigs === null ? (
-        <p className="src">Loading…</p>
+        <WaveLoader />
       ) : (
         <GigTable
           gigs={gigs}
@@ -893,7 +894,7 @@ export function ArtistGigs({
         Plan a gig
       </Button>
       {error && <Notice tone="error">{error}</Notice>}
-      {gigs === null && <p className="src">Loading…</p>}
+      {gigs === null && <WaveLoader />}
       {gigs !== null && shown.length === 0 && (
         <p className="src">
           {view === 'ideas'

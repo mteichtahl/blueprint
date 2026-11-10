@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { Button, Card, Field, Notice, Tag, TextArea, shortDate } from '../components/ui.tsx';
+import {
+  Button,
+  Card,
+  Field,
+  Notice,
+  Tag,
+  TextArea,
+  shortDate,
+  WaveLoader,
+} from '../components/ui.tsx';
 
 /** Settings → AI prompts (design 10.6): drafts, versions, publish and rollback. */
 
@@ -60,7 +69,7 @@ export function Prompts({
     <div className="flex flex-wrap items-start gap-5">
       <Card className="flex-[1_1_260px]" title="Prompts">
         {error && <Notice tone="error">{error}</Notice>}
-        {list === null && !error && <p className="src">Loading…</p>}
+        {list === null && !error && <WaveLoader />}
         <div className="flex flex-col" role="list">
           {list?.map((p) => (
             <button
@@ -170,7 +179,7 @@ function PromptEditor({
       `Version ${version} is live again.`,
     );
 
-  if (!p) return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!p) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   const current = p.draft?.text ?? p.liveText;
   const dirty = text !== current || note !== (p.draft?.note ?? '');
   const used = [...text.matchAll(/\{\{\s*([a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g)].map((m) => m[1]!);

@@ -11,6 +11,7 @@ import {
   Tag,
   TextArea,
   shortDate,
+  WaveLoader,
 } from '../components/ui.tsx';
 import { Thumb, useArtistFiles, useThumbs } from './Assets.tsx';
 
@@ -145,8 +146,7 @@ export function BrandKit({
   }, [cfg, token, artistId]);
   useEffect(() => void load(), [load]);
 
-  if (!kit || !saved)
-    return error ? <Notice tone="error">{error}</Notice> : <p className="src">Loading…</p>;
+  if (!kit || !saved) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
 
   const dirty = JSON.stringify(kit) !== JSON.stringify(saved);
   const badHex = kit.colours.some((c) => !HEX.test(c.hex) || !c.name.trim());
