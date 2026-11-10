@@ -406,7 +406,7 @@ function SubmissionTable({
               {names && (
                 <td>
                   <span className="flex items-center gap-2">
-                    <Avatar name={names[s.artistId] ?? 'Artist'} size={28} />
+                    <Avatar name={names[s.artistId] ?? 'Artist'} artistId={s.artistId} size={28} />
                     {names[s.artistId] ?? 'Artist'}
                   </span>
                 </td>

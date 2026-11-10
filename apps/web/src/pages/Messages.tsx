@@ -304,7 +304,9 @@ function ChatAvatar({ c, size = 48 }: { c: ConversationSummary; size?: number })
         <Icon name="users" size={Math.round(size * 0.44)} />
       </span>
     );
-  return <Avatar name={c.title} size={size} />;
+  // A direct chat is titled with the other person's name: show their picture.
+  const who = c.artists.find((a) => a.displayName === c.title);
+  return <Avatar name={c.title} artistId={who?.artistId} size={size} />;
 }
 
 export function useNarrow(query = '(max-width: 899px)') {
@@ -896,7 +898,7 @@ function NewChat({
         <div className="wa-chips" aria-label="Selected">
           {picked.map((id) => (
             <span key={id} className="wa-chipsel">
-              <Avatar name={name(id)} size={24} />
+              <Avatar name={name(id)} artistId={id} size={24} />
               {firstName(name(id))}
               <button
                 type="button"
@@ -980,7 +982,7 @@ function NewChat({
                 disabled={busy}
                 onClick={() => create({ kind: 'direct', artistId: a.artistId })}
               >
-                <Avatar name={a.displayName} size={48} />
+                <Avatar name={a.displayName} artistId={a.artistId} size={48} />
                 <span className="wa-row-body wa-row-solo">
                   <span className="wa-name">{a.displayName}</span>
                   <span className="wa-sub">Artist</span>
@@ -999,7 +1001,7 @@ function NewChat({
               const on = picked.includes(a.artistId);
               return (
                 <label key={a.artistId} className="wa-row wa-row-check">
-                  <Avatar name={a.displayName} size={48} />
+                  <Avatar name={a.displayName} artistId={a.artistId} size={48} />
                   <span className="wa-row-body wa-row-solo">
                     <span className="wa-name">{a.displayName}</span>
                   </span>
@@ -2342,7 +2344,7 @@ function GroupInfo({
             {addable.length === 0 && <p className="wa-sub">Everyone’s already here.</p>}
             {addable.map((a) => (
               <label key={a.artistId} className="wa-mem">
-                <Avatar name={a.displayName} size={40} />
+                <Avatar name={a.displayName} artistId={a.artistId} size={40} />
                 <span className="flex-1">{a.displayName}</span>
                 <input
                   type="checkbox"
@@ -2394,7 +2396,7 @@ function GroupInfo({
         </div>
         {conv.artists.map((a) => (
           <div key={a.artistId} className="wa-mem">
-            <Avatar name={a.displayName} size={40} />
+            <Avatar name={a.displayName} artistId={a.artistId} size={40} />
             <span className="flex-1">
               <b className="block">
                 {a.displayName}
@@ -2507,7 +2509,11 @@ function ContactInfo({
   return (
     <InfoShell title="Contact info" onClose={onClose}>
       <div className="wa-sec wa-sec-hero">
-        <Avatar name={conv.title} size={96} />
+        <Avatar
+          name={conv.title}
+          artistId={conv.artists.find((a) => a.displayName === conv.title)?.artistId}
+          size={96}
+        />
         <h3 className="wa-hero-name">{conv.title}</h3>
         <span className="wa-sub">
           {lastSeenText(conv.lastSeen) || (other ? 'Artist' : 'Blueprint Music Group')}

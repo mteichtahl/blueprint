@@ -264,7 +264,7 @@ function DocumentDetail({
       <dl className="flex flex-col">
         <Row label="Owner">
           <span className="flex items-center gap-2.5">
-            <Avatar name={f.ownerName} />
+            <Avatar name={f.ownerName} userSub={f.ownerId} />
             <span>
               <b className="block">
                 {f.ownerName}
@@ -972,7 +972,7 @@ function EditDocument({
                                 checked={editors.has(p.sub)}
                                 onChange={() => setEditors((s) => toggle(s, p.sub))}
                               />
-                              <Avatar name={p.displayName} />
+                              <Avatar name={p.displayName} userSub={p.sub} />
                               <span>
                                 <b className="block">{p.displayName}</b>
                                 {p.jobTitle && <span className="src block">{p.jobTitle}</span>}
