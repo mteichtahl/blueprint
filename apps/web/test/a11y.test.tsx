@@ -141,6 +141,47 @@ function answer(method: string, path: string): [number, unknown] {
     [/^\/artists\/[^/]+\/todos$/, { todos: [todo] }],
     [/^\/todos$/, { todos: [todo] }],
     [/^\/artists\/[^/]+\/files$/, { files: [file] }],
+    // Folders (rev 10).
+    [
+      /^\/(library|artists\/[^/]+)\/folders$/,
+      {
+        root: { level: 'manage' },
+        folders: [
+          {
+            folderId: 'fold000000001',
+            name: 'Contracts',
+            parentId: null,
+            sharedWithMe: false,
+            path: [],
+            level: 'manage',
+            customAccess: true,
+            ownerId: 'u1',
+            ownerName: 'Kyra Teichtahl',
+            ownedByMe: true,
+            createdAt: '2026-11-10T00:00:00Z',
+            updatedAt: '2026-11-10T00:00:00Z',
+          },
+        ],
+      },
+    ],
+    [
+      /^\/(library|artists\/[^/]+)\/folders\/access$/,
+      {
+        item: { kind: 'folder', id: 'fold000000001', name: 'Contracts' },
+        level: 'manage',
+        canManage: true,
+        legacySharing: false,
+        inherit: true,
+        entries: [
+          { key: 'g:artists', label: 'All artists', level: 'none', source: { kind: 'here' } },
+          { key: 'g:team', label: 'Blueprint team', level: 'edit', source: { kind: 'default' } },
+        ],
+        candidates: [
+          { key: 'g:team', label: 'Blueprint team', detail: 'Group' },
+          { key: 'p:u2', label: 'Sam Lee', detail: 'Events coordinator', sub: 'u2' },
+        ],
+      },
+    ],
     [
       /^\/artists\/[^/]+\/files\/[^/]+$/,
       {
@@ -637,6 +678,26 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     await settle();
     await openWorkspace('Assets');
     expect(screen.getByRole('complementary', { name: 'Asset details' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+});
+
+describe('WCAG 2.2 AA (axe-core): folders (rev 10)', () => {
+  it('BMG: the library shows folders, and a folder’s Access panel', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Document library/ })[0]!);
+    await settle();
+    expect(screen.getByRole('navigation', { name: 'Folder path' })).toBeTruthy();
+    expect(screen.getAllByText('Contracts').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /New folder/ })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'More for Contracts' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Access' }));
+    await settle();
+    expect(screen.getByRole('dialog', { name: /Access · Contracts/ })).toBeTruthy();
+    expect(screen.getByText('Set here')).toBeTruthy();
+    expect(screen.getByLabelText('Access for All artists')).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 });

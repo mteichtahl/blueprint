@@ -15,6 +15,8 @@ import {
 } from '../lib/files.ts';
 import { makeThumbnail } from '../lib/thumbnail.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
+import { AccessPanel, CustomAccess, MoveDialog, useFolders } from '../components/Folders.tsx';
+import { foldersBase } from '../lib/folders.ts';
 import {
   Avatar,
   Button,
@@ -174,6 +176,8 @@ export function DocumentPage(props: DocumentPageProps) {
       onEdit={() => setEditing(true)}
       onChanged={(next) => {
         if (next) doc.setFile(next);
+        // Access or folder changes (rev 10) come back without the file: reload it.
+        else void doc.load();
         props.onChanged();
       }}
     />
@@ -211,6 +215,20 @@ function DocumentDetail({
 }) {
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
   const path = `${collection}/${f.fileId}`;
+  // Folders (rev 10): where it is, who has access, and moving it.
+  const base = foldersBase(collection);
+  const folders = useFolders(cfg, token, base);
+  const [panel, setPanel] = useState<'access' | 'move' | null>(null);
+  const folder = f.folderId
+    ? folders.list?.folders.find((x) => x.folderId === f.folderId)
+    : undefined;
+  const where = !f.folderId
+    ? 'Top of the library'
+    : folder
+      ? [...folder.path.map((p) => p?.name ?? '…'), folder.name].join(' › ')
+      : folders.list
+        ? 'A folder shared with you'
+        : '…';
   return (
     <Card
       title={<h2 className="t text-[19px]">Document</h2>}
@@ -260,7 +278,41 @@ function DocumentDetail({
             Edit
           </Button>
         )}
+        <Button variant="ghost" onClick={() => setPanel('access')}>
+          <Icon name="users" size={16} />
+          Access
+        </Button>
+        {f.canMove && (
+          <Button variant="ghost" onClick={() => setPanel('move')}>
+            <Icon name="folder" size={16} />
+            Move to…
+          </Button>
+        )}
       </div>
+      {panel === 'access' && (
+        <AccessPanel
+          cfg={cfg}
+          token={token}
+          base={base}
+          item={{ kind: 'file', id: f.fileId }}
+          onClose={() => setPanel(null)}
+          onSaved={onChanged}
+        />
+      )}
+      {panel === 'move' && (
+        <MoveDialog
+          cfg={cfg}
+          token={token}
+          base={base}
+          rootLabel="Library"
+          items={[{ kind: 'file', id: f.fileId }]}
+          onClose={() => setPanel(null)}
+          onMoved={() => {
+            onChanged();
+            void folders.load();
+          }}
+        />
+      )}
       <dl className="flex flex-col">
         <Row label="Owner">
           <span className="flex items-center gap-2.5">
@@ -273,6 +325,9 @@ function DocumentDetail({
               {f.ownerJobTitle && <span className="src block">{f.ownerJobTitle}</span>}
             </span>
           </span>
+        </Row>
+        <Row label="Folder">
+          {where} {f.customAccess && <CustomAccess />}
         </Row>
         <Row label="Uploaded">{shortDate(f.createdAt)}</Row>
         <Row label="Version">
