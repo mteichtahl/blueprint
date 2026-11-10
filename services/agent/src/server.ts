@@ -127,8 +127,11 @@ export const server = createServer((req, res) => {
       send(res, 200, await runTurn(parsed.data));
     } catch (err) {
       // Prompts and replies are never logged (design 10.5); AWS errors add their status and message.
-      console.error(JSON.stringify({ level: 'error', ...describeError(err) }));
-      send(res, 500, { error: 'The assistant hit a problem. Try again.' });
+      const failure = describeError(err);
+      console.error(JSON.stringify({ level: 'error', ...failure }));
+      // A 200 with the reason: AgentCore turns a 500 into an opaque
+      // RuntimeClientError, so the API couldn't say what went wrong.
+      send(res, 200, { failure });
     } finally {
       busy = false;
     }
