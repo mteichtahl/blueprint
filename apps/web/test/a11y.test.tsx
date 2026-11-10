@@ -21,6 +21,9 @@ const cfg: AppConfig = {
   apiBase: '/v1',
 };
 const ARTIST = 'art_chloepoli000';
+/** Chloe's profile picture (1px PNG), from GET /avatars. */
+const CHLOE_PIC =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 const now = '2026-11-10T00:00:00.000Z';
 const artist = {
   artistId: ARTIST,
@@ -136,6 +139,7 @@ function answer(method: string, path: string): [number, unknown] {
   if (method !== 'GET') return [200, {}];
   const routes: [RegExp, unknown][] = [
     [/^\/artists$/, { artists: [artist] }],
+    [/^\/avatars$/, { artists: { [ARTIST]: CHLOE_PIC }, users: {} }],
     [/^\/artists\/[^/]+$/, artist],
     [/^\/artists\/[^/]+\/plan$/, plan],
     [/^\/artists\/[^/]+\/todos$/, { todos: [todo] }],
@@ -713,6 +717,24 @@ describe('WCAG 2.2 AA (axe-core): Access & permissions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add team member' }));
     await settle();
     expect(screen.getByRole('form', { name: 'Add team member' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+});
+
+describe('profile pictures', () => {
+  it("shows an artist's profile picture instead of initials wherever they appear", async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    // Sidebar and Studio HQ show Chloe's picture once it's fetched.
+    expect(document.querySelectorAll(`img.av[src="${CHLOE_PIC}"]`).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    // Her workspace header too, with no "CP" initials left anywhere.
+    const header = document.querySelector('header.page-head')!;
+    expect(header.querySelector(`img.av[src="${CHLOE_PIC}"]`)).toBeTruthy();
+    expect([...document.querySelectorAll('span.av')].some((e) => e.textContent === 'CP')).toBe(
+      false,
+    );
     expect(await violations()).toEqual([]);
   });
 });

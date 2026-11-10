@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAvatarSrc } from './avatars.tsx';
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -170,14 +171,22 @@ export function Avatar({
   size = 40,
   className = '',
   src,
+  artistId,
+  userSub,
 }: {
   name: string;
   size?: number;
   className?: string;
   /** A profile picture (data URL); the initials show when there isn't one. */
   src?: string | null | undefined;
+  /** Whose avatar it is: their profile picture shows when they have one. */
+  artistId?: string | null | undefined;
+  userSub?: string | null | undefined;
 }) {
   const tone = AVATAR_TONES[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % 3];
+  const ofUser = useAvatarSrc('users', src ? null : userSub);
+  const ofArtist = useAvatarSrc('artists', src || ofUser ? null : artistId);
+  src = src || ofUser || ofArtist;
   if (src) {
     return (
       <img

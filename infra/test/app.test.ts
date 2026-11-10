@@ -454,8 +454,8 @@ describe('environment API', () => {
     const methods = prod!.findResources('AWS::ApiGateway::Method');
     const routed = Object.values(methods).filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
     // Rev 10: the seven library file routes became one /library/{proxy+} (which
-    // also serves folders), plus two for artist folders: 117 - 7 + 1 + 2.
-    expect(routed.length).toBe(113);
+    // also serves folders), plus two for artist folders: 118 - 7 + 1 + 2.
+    expect(routed.length).toBe(114);
     for (const m of routed) expect(m.Properties.AuthorizationType).toBe('CUSTOM');
   });
 

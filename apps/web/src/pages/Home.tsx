@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AvatarProvider, useOwnAvatar } from '../components/avatars.tsx';
 import {
   api,
   ApiError,
@@ -76,7 +77,11 @@ export interface HomeProps {
 
 /** BMG staff get the desktop app; artists get the phone app (screens doc). */
 export function Home(props: HomeProps) {
-  return props.me.role === 'artist' ? <ArtistApp {...props} /> : <BmgApp {...props} />;
+  return (
+    <AvatarProvider cfg={props.cfg} token={props.token}>
+      {props.me.role === 'artist' ? <ArtistApp {...props} /> : <BmgApp {...props} />}
+    </AvatarProvider>
+  );
 }
 
 function greeting(): string {
@@ -90,6 +95,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const [jobTitle, setJobTitle] = useState(me.jobTitle ?? '');
   const [avatar, setAvatar] = useState(me.avatar ?? null);
+  useOwnAvatar(me.sub, me.artistId, avatar);
   // Back from a vendor's sign-in page: open Connectors to finish connecting.
   const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
@@ -146,6 +152,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           id: `artist:${a.artistId}`,
           label: a.displayName,
           avatar: a.displayName,
+          avatarArtistId: a.artistId,
           badge: reviewsFor(a.artistId) || undefined,
         })),
         {
@@ -575,7 +582,7 @@ function StudioHq({
                 className="tile gap-2 rounded-[10px] p-3 text-left hover:shadow-md"
               >
                 <span className="flex items-center gap-3">
-                  <Avatar name={a.displayName} />
+                  <Avatar name={a.displayName} artistId={a.artistId} />
                   <span className="min-w-0 flex-1">
                     <b className="block">{a.displayName}</b>
                     <span className="src">
@@ -609,7 +616,10 @@ function StudioHq({
               {c.type === 'announcement' ? (
                 <span className="av bg-[#E6E9ED] text-[11px] text-[#011935]">ALL</span>
               ) : (
-                <Avatar name={c.title} />
+                <Avatar
+                  name={c.title}
+                  artistId={c.artists.find((x) => x.displayName === c.title)?.artistId}
+                />
               )}
               <span className="min-w-0 flex-1">
                 <b className="block">{c.title}</b>
@@ -701,7 +711,11 @@ function StudioHq({
                       </td>
                       <td>
                         <span className="flex items-center gap-2">
-                          <Avatar name={names[s.artistId] ?? 'Artist'} size={28} />
+                          <Avatar
+                            name={names[s.artistId] ?? 'Artist'}
+                            artistId={s.artistId}
+                            size={28}
+                          />
                           {names[s.artistId] ?? 'Artist'}
                         </span>
                       </td>
@@ -797,7 +811,7 @@ function ArtistsPage({
               cards={artists.map((a) => (
                 <RowCard
                   key={a.artistId}
-                  lead={<Avatar name={a.displayName} size={36} />}
+                  lead={<Avatar name={a.displayName} artistId={a.artistId} size={36} />}
                   title={a.displayName}
                   status={
                     <Tag tone={a.status === 'active' ? 'n' : 's'}>{a.status || 'Invited'}</Tag>
@@ -837,7 +851,7 @@ function ArtistsPage({
                   <tr key={a.artistId}>
                     <td>
                       <span className="flex items-center gap-3">
-                        <Avatar name={a.displayName} size={32} />
+                        <Avatar name={a.displayName} artistId={a.artistId} size={32} />
                         <b>{a.displayName}</b>
                       </span>
                     </td>
@@ -987,6 +1001,7 @@ type ArtistView =
 function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const [avatar, setAvatar] = useState(me.avatar ?? null);
+  useOwnAvatar(me.sub, me.artistId, avatar);
   const [asking, setAsking] = useState(false);
   // A document opened from Home shows its page in the library (rev 8).
   const [libraryFile, setLibraryFile] = useState<string | null>(null);

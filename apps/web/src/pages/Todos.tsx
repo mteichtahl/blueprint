@@ -548,7 +548,7 @@ function TodoRows({
             {artistName && (
               <td>
                 <span className="flex items-center gap-2">
-                  <Avatar name={artistName(t.artistId)} size={28} />
+                  <Avatar name={artistName(t.artistId)} artistId={t.artistId} size={28} />
                   {artistName(t.artistId)}
                 </span>
               </td>
