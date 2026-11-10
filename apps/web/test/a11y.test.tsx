@@ -49,6 +49,11 @@ const todo = {
 const file = {
   fileId: 'file000000001',
   name: 'press-shot.jpg',
+  title: 'Press shot',
+  displayName: 'Press shot',
+  fileType: { kind: 'image', label: 'JPEG image', ext: 'jpg', mime: 'image/jpeg', detected: true },
+  hasThumbnail: false,
+  thumbnailUrl: null,
   size: 2_400_000,
   contentType: 'image/jpeg',
   status: 'available',
@@ -314,7 +319,7 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     ['stats', /^My stats/],
     ['connectors', /^Connect Instagram/],
     ['submit', /^Upload music or lyrics/],
-    ['profile', 'Profile & preferences'],
+    ['profile', /Profile & preferences$/],
   ] as const)('artist phone: %s', async (_view, name) => {
     await phone();
     await click(name);

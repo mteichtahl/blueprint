@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Avatar, Icon, Logo, type IconName } from './ui.tsx';
+import { Avatar, Icon, initials, Logo, type IconName } from './ui.tsx';
 
 // ── Appearance (Light / Dark / System), from the sidebar or Profile ──────────
 export type Theme = 'light' | 'dark' | 'system';
@@ -318,7 +318,14 @@ export function BmgShell({
           <div className="ml-auto flex items-center gap-2.5">
             {bell}
             {topActions}
-            <button type="button" aria-label="Profile & preferences" onClick={onProfile}>
+            <button
+              type="button"
+              // The initials are what's on screen, so they lead the name (WCAG 2.5.3).
+              aria-label={
+                avatar ? 'Profile & preferences' : `${initials(userName)}, Profile & preferences`
+              }
+              onClick={onProfile}
+            >
               <Avatar name={userName} src={avatar} size={36} className="!bg-cta !text-white" />
             </button>
           </div>

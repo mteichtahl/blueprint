@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { download, formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
+import {
+  download,
+  fileTypeOf,
+  formatSize,
+  uploadFile,
+  waitUntilScanned,
+  type FileItem,
+} from '../lib/files.ts';
+import { makeThumbnail } from '../lib/thumbnail.ts';
+import { FileThumb } from '../components/FileThumb.tsx';
 import {
   Button,
   Card,
   Chips,
   DataTable,
+  Field,
   Icon,
   Notice,
   shortDate,
@@ -43,7 +53,13 @@ function useFiles(cfg: AppConfig, token: string, collection: string) {
   return { files, error, setError, load };
 }
 
-/** Pick a file, upload it, then wait for the malware scan. */
+/**
+ * Pick a file, name it, upload it, then wait for the malware scan. A preview
+ * is drawn as soon as the file is picked and uploaded with it.
+ *
+ * Shown as a card beside the list on wider screens, and as its own page on a
+ * phone (`asPage`), reached from the library's "Upload document" button.
+ */
 function UploadBox({
   cfg,
   token,
@@ -52,6 +68,8 @@ function UploadBox({
   children,
   onDone,
   title = 'Upload',
+  asPage = false,
+  onBack,
 }: {
   cfg: AppConfig;
   token: string;
@@ -61,18 +79,63 @@ function UploadBox({
   children?: React.ReactNode;
   onDone: () => void;
   title?: string;
+  /** Full-page layout (phone), with a way back to the library. */
+  asPage?: boolean;
+  onBack?: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [name, setName] = useState('');
+  // undefined: still drawing it; null: no preview for this file.
+  const [thumb, setThumb] = useState<Blob | null | undefined>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const making = useRef<Promise<Blob | null> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!thumb) {
+      setThumbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(thumb);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [thumb]);
+
+  function pick(f: File | null) {
+    setFile(f);
+    setResult(null);
+    setName('');
+    if (!f) {
+      setThumb(null);
+      making.current = null;
+      return;
+    }
+    setThumb(undefined);
+    const p = makeThumbnail(f);
+    making.current = p;
+    void p.then((b) => {
+      if (making.current === p) setThumb(b);
+    });
+  }
+
+  function reset() {
+    pick(null);
+    if (input.current) input.current.value = '';
+  }
 
   async function go() {
     if (!file) return;
     setResult(null);
+    const shown = name.trim() || file.name;
     try {
       setBusy('Uploading…');
-      const created = await uploadFile(cfg, token, collection, file, options());
+      const preview = thumb === undefined ? await making.current : thumb;
+      const created = await uploadFile(cfg, token, collection, file, options(), {
+        title: name,
+        thumbnail: preview ?? null,
+      });
       onDone();
       setBusy('Checking for malware…');
       const settled = await waitUntilScanned(cfg, token, `${collection}/${created.fileId}`);
@@ -83,14 +146,13 @@ function UploadBox({
               text: 'Uploaded. The scan is taking a while; the file appears when it’s done.',
             }
           : settled.status === 'available'
-            ? { tone: 'success', text: `${file.name} is ready.` }
+            ? { tone: 'success', text: `${shown} is ready.` }
             : {
                 tone: 'error',
-                text: `${file.name} was not kept: ${settled.rejectReason ?? 'it failed the scan'}.`,
+                text: `${shown} was not kept: ${settled.rejectReason ?? 'it failed the scan'}.`,
               },
       );
-      setFile(null);
-      if (input.current) input.current.value = '';
+      reset();
     } catch (e) {
       setResult({ tone: 'error', text: (e as Error).message });
     } finally {
@@ -99,27 +161,85 @@ function UploadBox({
     }
   }
 
-  return (
-    <Card title={title}>
+  const type = file ? fileTypeOf(file) : null;
+  const body = (
+    <>
       <label className="flex min-h-[96px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-[10px] border border-dashed border-[#9AA4B0] bg-background px-4 py-4 text-center">
-        <Icon name="upload" size={22} />
-        <b className="text-[15px]">{file ? file.name : 'Choose a file'}</b>
-        <span className="src">
-          {file ? formatSize(file.size) : 'Up to 500 MB · scanned for malware first'}
-        </span>
+        {file && type ? (
+          <span className="flex w-full items-center gap-3 text-left">
+            <FileThumb
+              src={thumbUrl}
+              kind={type.kind}
+              ext={type.ext}
+              label={type.label}
+              size={64}
+              loading={thumb === undefined}
+            />
+            <span className="min-w-0 flex-1">
+              <b className="line-clamp-2 block text-[15px] [overflow-wrap:anywhere]">{file.name}</b>
+              <span className="src">
+                {type.label} · {formatSize(file.size)}
+              </span>
+              <span className="src block underline">Choose a different file</span>
+            </span>
+          </span>
+        ) : (
+          <>
+            <Icon name="upload" size={22} />
+            <b className="text-[15px]">Choose a file</b>
+            <span className="src">Up to 500 MB · scanned for malware first</span>
+          </>
+        )}
         <input
           ref={input}
           type="file"
           className="sr-only"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          onChange={(e) => pick(e.target.files?.[0] ?? null)}
         />
       </label>
+      <Field
+        label="Name"
+        value={name}
+        maxLength={200}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={file ? file.name : 'e.g. Tour rider 2027'}
+        hint="Shown in lists instead of the file name. Leave blank to use the file name."
+      />
       {children}
       <Button variant="cta" disabled={!file || !!busy} onClick={() => void go()}>
         {busy ?? 'Upload'}
       </Button>
       {result && <Notice tone={result.tone}>{result.text}</Notice>}
+    </>
+  );
+
+  if (!asPage) return <Card title={title}>{body}</Card>;
+  return (
+    <Card
+      title="Upload document"
+      action={
+        <Button size="sm" variant="ghost" onClick={onBack} disabled={!!busy}>
+          ← Library
+        </Button>
+      }
+    >
+      {body}
+      {result?.tone === 'success' && (
+        <Button variant="navy" onClick={onBack}>
+          Back to library
+        </Button>
+      )}
     </Card>
+  );
+}
+
+/** The phone's way into the upload page. */
+function UploadDocumentButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button variant="cta" className="w-full" onClick={onClick}>
+      <Icon name="upload" size={16} />
+      Upload document
+    </Button>
   );
 }
 
@@ -177,7 +297,7 @@ function DeleteButton({ f, onDelete }: { f: FileItem; onDelete: (f: FileItem) =>
       size="sm"
       variant={confirm ? 'cta' : 'ghost'}
       disabled={busy}
-      aria-label={confirm ? `Confirm delete ${f.name}` : `Delete ${f.name}`}
+      aria-label={confirm ? `Confirm delete ${f.displayName}` : `Delete ${f.displayName}`}
       onClick={async (e) => {
         e.stopPropagation();
         if (!confirm) return setConfirm(true);
@@ -196,6 +316,90 @@ function DeleteButton({ f, onDelete }: { f: FileItem; onDelete: (f: FileItem) =>
   );
 }
 
+/** A file's preview, or its type's tile. */
+function Thumb({ f, size }: { f: FileItem; size: number }) {
+  return (
+    <FileThumb
+      src={f.thumbnailUrl}
+      kind={f.fileType.kind}
+      ext={f.fileType.ext}
+      label={f.fileType.label}
+      size={size}
+    />
+  );
+}
+
+function RenameButton({ f, onClick }: { f: FileItem; onClick: () => void }) {
+  return (
+    <Button size="sm" variant="ghost" aria-label={`Rename ${f.displayName}`} onClick={onClick}>
+      <Icon name="pencil" size={15} />
+      <span className="max-sm:sr-only">Rename</span>
+    </Button>
+  );
+}
+
+/**
+ * Rename in place: the name the file shows in lists. Blank goes back to the
+ * file name; Enter saves, Escape cancels.
+ */
+function RenameForm({
+  f,
+  onSave,
+  onCancel,
+}: {
+  f: FileItem;
+  onSave: (title: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(f.title ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(value.trim());
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <form
+      className="flex min-w-0 flex-1 flex-col gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+    >
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-bold">Name</span>
+        <input
+          className="min-h-11 w-full rounded-lg border border-input bg-white px-3 text-base shadow-xs"
+          value={value}
+          maxLength={200}
+          placeholder={f.name}
+          autoFocus
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onCancel();
+          }}
+        />
+      </label>
+      <span className="src">Leave blank to show the file name ({f.name}).</span>
+      {error && <Notice tone="error">{error}</Notice>}
+      <span className="flex gap-2">
+        <Button size="sm" variant="cta" type="submit" disabled={busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+        <Button size="sm" variant="ghost" type="button" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+      </span>
+    </form>
+  );
+}
+
 function FileTable({
   files,
   empty,
@@ -203,6 +407,8 @@ function FileTable({
   onOpen,
   onDelete,
   canDelete = () => false,
+  onRename,
+  canRename = () => false,
   compact = false,
 }: {
   files: FileItem[] | null;
@@ -211,44 +417,77 @@ function FileTable({
   onOpen: (f: FileItem) => void;
   onDelete?: (f: FileItem) => Promise<void>;
   canDelete?: (f: FileItem) => boolean;
+  /** Save a new name ('' shows the file name again). */
+  onRename?: (f: FileItem, title: string) => Promise<void>;
+  canRename?: (f: FileItem) => boolean;
   /** Phone layout: a list of rows instead of a table. */
   compact?: boolean;
 }) {
   // The phone list is used for the artist app and on any phone-width screen.
   const phone = usePhone();
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const rename = (f: FileItem) => async (title: string) => {
+    await onRename!(f, title);
+    setRenaming(null);
+  };
+  const renamable = (f: FileItem) => !!onRename && canRename(f);
   if (!files) return <WaveLoader />;
   if (files.length === 0) return <p className="src pb-5">{empty}</p>;
   if (compact || phone) {
     return (
       <div className="flex flex-col gap-1.5">
-        {files.map((f) => (
-          <div
-            key={f.fileId}
-            className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
-          >
-            <button
-              type="button"
-              disabled={f.status !== 'available'}
-              onClick={() => onOpen(f)}
-              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        {files.map((f) =>
+          renaming === f.fileId ? (
+            <div
+              key={f.fileId}
+              className="flex items-start gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
             >
-              <span className="appsq !bg-secondary !text-foreground">
-                <Icon name="file" size={14} strokeWidth={2.4} />
-              </span>
+              <Thumb f={f} size={44} />
+              <RenameForm f={f} onSave={rename(f)} onCancel={() => setRenaming(null)} />
+            </div>
+          ) : (
+            // The name is the open button; the details line (which can hold its
+            // own controls, like "Shared with") sits beside it, not inside it.
+            <div
+              key={f.fileId}
+              className="flex min-h-[52px] items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs"
+            >
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-hidden="true"
+                disabled={f.status !== 'available'}
+                onClick={() => onOpen(f)}
+                className="flex-none"
+              >
+                <Thumb f={f} size={44} />
+              </button>
               <span className="min-w-0 flex-1">
-                <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.name}</b>
+                <button
+                  type="button"
+                  disabled={f.status !== 'available'}
+                  onClick={() => onOpen(f)}
+                  className="block w-full text-left"
+                >
+                  <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.displayName}</b>
+                </button>
                 <span className="src">
-                  {formatSize(f.size)} · {date(f.createdAt)}
+                  {f.fileType.label} · {formatSize(f.size)} · {date(f.createdAt)}
                   {columns.map((c) => (
                     <span key={c.label}> · {c.cell(f)}</span>
                   ))}
                 </span>
+                <StatusBadge f={f} />
               </span>
-              <StatusBadge f={f} />
-            </button>
-            {onDelete && canDelete(f) && <DeleteButton f={f} onDelete={onDelete} />}
-          </div>
-        ))}
+              {(renamable(f) || (onDelete && canDelete(f))) && (
+                <span className="flex flex-none flex-col items-end gap-1.5">
+                  {renamable(f) && <RenameButton f={f} onClick={() => setRenaming(f.fileId)} />}
+                  {onDelete && canDelete(f) && <DeleteButton f={f} onDelete={onDelete} />}
+                </span>
+              )}
+            </div>
+          ),
+        )}
       </div>
     );
   }
@@ -257,6 +496,7 @@ function FileTable({
       <thead>
         <tr>
           <th scope="col">Name</th>
+          <th scope="col">Type</th>
           <th scope="col">Size</th>
           {columns.map((c) => (
             <th key={c.label} scope="col">
@@ -272,13 +512,19 @@ function FileTable({
           <tr key={f.fileId}>
             <td>
               <span className="flex items-center gap-3">
-                <span className="appsq !bg-secondary !text-foreground">
-                  <Icon name="file" size={14} strokeWidth={2.4} />
-                </span>
-                <b>{f.name}</b>
+                <Thumb f={f} size={40} />
+                {renaming === f.fileId ? (
+                  <RenameForm f={f} onSave={rename(f)} onCancel={() => setRenaming(null)} />
+                ) : (
+                  <span className="min-w-0">
+                    <b className="block">{f.displayName}</b>
+                    {f.title && <span className="src block">{f.name}</span>}
+                  </span>
+                )}
                 <StatusBadge f={f} />
               </span>
             </td>
+            <td className="src">{f.fileType.label}</td>
             <td className="src">{formatSize(f.size)}</td>
             {columns.map((c) => (
               <td key={c.label}>{c.cell(f)}</td>
@@ -294,6 +540,11 @@ function FileTable({
                 <Icon name="download" size={15} />
                 Open
               </Button>
+              {renamable(f) && renaming !== f.fileId && (
+                <span className="ml-2 inline-block">
+                  <RenameButton f={f} onClick={() => setRenaming(f.fileId)} />
+                </span>
+              )}
               {onDelete && canDelete(f) && (
                 <span className="ml-2 inline-block">
                   <DeleteButton f={f} onDelete={onDelete} />
@@ -329,6 +580,9 @@ export function ArtistFiles({
   const { files, error, setError, load } = useFiles(cfg, token, collection);
   const [visibility, setVisibility] = useState('normal');
   const [filter, setFilter] = useState<ArtistFilter>('all');
+  // Phones get an "Upload document" button that opens the upload page.
+  const phone = usePhone();
+  const [uploading, setUploading] = useState(false);
 
   async function setShared(f: FileItem, shared: boolean) {
     try {
@@ -358,6 +612,13 @@ export function ArtistFiles({
     isBmg
       ? f.uploaderRole !== 'artist' && (isAdmin || f.uploadedByMe)
       : f.uploaderRole === 'artist' && f.uploadedByMe;
+  // Same rule as the API: the artist renames their own uploads; Blueprint renames Blueprint's.
+  const canRename = (f: FileItem) =>
+    isBmg ? f.uploaderRole !== 'artist' : f.uploaderRole === 'artist' && f.uploadedByMe;
+  const rename = async (f: FileItem, title: string) => {
+    await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
+    await load();
+  };
 
   const upload = (
     <UploadBox
@@ -367,6 +628,8 @@ export function ArtistFiles({
       title={isBmg ? 'Upload & share' : 'Upload'}
       options={() => ({ visibility })}
       onDone={() => void load()}
+      asPage={phone}
+      onBack={() => setUploading(false)}
     >
       <Select
         label="Who can see it"
@@ -411,10 +674,11 @@ export function ArtistFiles({
     },
   ];
 
+  if (phone && uploading) return upload;
   if (!isBmg) {
     return (
       <div className="flex flex-col gap-3">
-        {upload}
+        {phone ? <UploadDocumentButton onClick={() => setUploading(true)} /> : upload}
         {error && <Notice tone="error">{error}</Notice>}
         <div className="eyebrow pt-2 text-muted-foreground">My uploads and files</div>
         <FileTable
@@ -423,6 +687,8 @@ export function ArtistFiles({
           onOpen={open}
           onDelete={remove}
           canDelete={canDelete}
+          onRename={rename}
+          canRename={canRename}
           columns={[{ label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] }]}
           compact
         />
@@ -436,6 +702,7 @@ export function ArtistFiles({
         title="Files"
         action={<span className="src">{files?.length ?? 0} files</span>}
       >
+        {phone && <UploadDocumentButton onClick={() => setUploading(true)} />}
         <Chips
           label="Quick filters"
           value={filter}
@@ -449,10 +716,12 @@ export function ArtistFiles({
           onOpen={open}
           onDelete={remove}
           canDelete={canDelete}
+          onRename={rename}
+          canRename={canRename}
           columns={columns}
         />
       </Card>
-      <div className="flex-[1_1_300px]">{upload}</div>
+      {!phone && <div className="flex-[1_1_300px]">{upload}</div>}
     </div>
   );
 }
@@ -497,6 +766,8 @@ export function Library({
   >('all');
   const [editing, setEditing] = useState<FileItem | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
+  const phone = usePhone();
+  const [uploading, setUploading] = useState(false);
 
   const open = (f: FileItem) =>
     void download(cfg, token, `${collection}/${f.fileId}`).catch((e) =>
@@ -527,6 +798,33 @@ export function Library({
     );
   }
 
+  const uploadBox = (
+    <UploadBox
+      cfg={cfg}
+      token={token}
+      collection={collection}
+      title="Upload & share"
+      options={() => ({ sharing })}
+      onDone={() => void load()}
+      asPage={phone}
+      onBack={() => setUploading(false)}
+    >
+      <Select
+        label="Share with"
+        value={sharing}
+        onChange={setSharing}
+        options={[
+          { value: 'bmg-only', label: 'Nobody yet (BMG only)' },
+          { value: 'all-artists', label: 'All artists' },
+        ]}
+      />
+      <span className="src">
+        To share with chosen artists, upload first, then pick them under “Shared with”.
+      </span>
+    </UploadBox>
+  );
+  if (phone && uploading) return uploadBox;
+
   const visible =
     files &&
     files.filter((f) => libraryFilter === 'all' || (f.sharing ?? 'bmg-only') === libraryFilter);
@@ -537,6 +835,7 @@ export function Library({
         title="All files"
         action={<span className="src">{files?.length ?? 0} files</span>}
       >
+        {phone && <UploadDocumentButton onClick={() => setUploading(true)} />}
         <Chips
           label="Quick filters"
           value={libraryFilter}
@@ -555,6 +854,11 @@ export function Library({
           onOpen={open}
           onDelete={remove}
           canDelete={(f) => isAdmin || f.uploadedByMe}
+          onRename={async (f, title) => {
+            await api(cfg, token, 'PATCH', `${collection}/${f.fileId}`, { title });
+            await load();
+          }}
+          canRename={() => true}
           columns={[
             {
               label: 'Shared with',
@@ -575,27 +879,7 @@ export function Library({
         />
       </Card>
       <div className="flex flex-[1_1_300px] flex-col gap-5">
-        <UploadBox
-          cfg={cfg}
-          token={token}
-          collection={collection}
-          title="Upload & share"
-          options={() => ({ sharing })}
-          onDone={() => void load()}
-        >
-          <Select
-            label="Share with"
-            value={sharing}
-            onChange={setSharing}
-            options={[
-              { value: 'bmg-only', label: 'Nobody yet (BMG only)' },
-              { value: 'all-artists', label: 'All artists' },
-            ]}
-          />
-          <span className="src">
-            To share with chosen artists, upload first, then pick them under “Shared with”.
-          </span>
-        </UploadBox>
+        {!phone && uploadBox}
         {editing && (
           <ShareDialog
             file={editing}
@@ -638,7 +922,7 @@ function ShareDialog({
       return n;
     });
   return (
-    <Card title={`Share “${file.name}”`}>
+    <Card title={`Share “${file.displayName}”`}>
       <div className="space-y-3 text-sm">
         {(['bmg-only', 'all-artists', 'selected'] as const).map((s) => (
           <label key={s} className="flex items-center gap-2">

@@ -31,7 +31,7 @@ import {
   Chips,
   DataTable,
   Field,
-  Icon,
+  initials,
   Notice,
   PageHeader,
   RowCard,
@@ -57,6 +57,7 @@ import { Prompts } from './Prompts.tsx';
 import { Newsroom } from './Newsroom.tsx';
 import { AllGigs, ArtistGigs } from './Gigs.tsx';
 import { ArtistWorkspace } from './Workspace.tsx';
+import { FileThumb } from '../components/FileThumb.tsx';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
   'bmg-admin': 'BMG admin',
@@ -709,10 +710,14 @@ function StudioHq({
           {files.length === 0 && <p className="src">The library is empty.</p>}
           {files.slice(0, 4).map((f) => (
             <div key={f.fileId} className="li">
-              <span className="appsq !bg-secondary !text-foreground">
-                <Icon name="file" size={14} strokeWidth={2.4} />
-              </span>
-              <span className="flex-1 truncate">{f.name}</span>
+              <FileThumb
+                src={f.thumbnailUrl}
+                kind={f.fileType.kind}
+                ext={f.fileType.ext}
+                label={f.fileType.label}
+                size={32}
+              />
+              <span className="flex-1 truncate">{f.displayName}</span>
               <span className="src">
                 {f.sharing === 'all-artists'
                   ? 'All artists'
@@ -1050,7 +1055,11 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                 />
                 <button
                   type="button"
-                  aria-label="Profile & preferences"
+                  aria-label={
+                    avatar
+                      ? 'Profile & preferences'
+                      : `${initials(userName)}, Profile & preferences`
+                  }
                   onClick={() => setView('profile')}
                 >
                   <Avatar name={userName} src={avatar} size={34} className="!bg-cta !text-white" />
@@ -1318,8 +1327,14 @@ function ArtistHome({
         {shared.length === 0 && <p className="src">Nothing shared yet.</p>}
         {shared.slice(0, 3).map((f) => (
           <div key={f.fileId} className="flex items-center gap-3 text-[15px]">
-            <Tag tone="s">{(f.name.split('.').pop() ?? 'File').slice(0, 4).toUpperCase()}</Tag>
-            <span className="truncate">{f.name}</span>
+            <FileThumb
+              src={f.thumbnailUrl}
+              kind={f.fileType.kind}
+              ext={f.fileType.ext}
+              label={f.fileType.label}
+              size={32}
+            />
+            <span className="truncate">{f.displayName}</span>
           </div>
         ))}
       </section>
