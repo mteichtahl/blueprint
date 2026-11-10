@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -532,6 +532,69 @@ export function RowCard({
         <span className="flex flex-none items-center gap-1.5 self-center">{actions}</span>
       )}
     </li>
+  );
+}
+
+/**
+ * A full-screen panel for phones: a navy header with Back, then the content
+ * scrolling on its own. Editing in a panel keeps the list put underneath, so
+ * closing it lands you back where you were. Escape and Back close it; focus
+ * moves into the panel and returns to whatever opened it.
+ */
+export function PhonePanel({
+  title,
+  aside,
+  onClose,
+  children,
+}: {
+  title: string;
+  /** Small text on the right of the header ("From Blueprint"). */
+  aside?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const scroll = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    ref.current?.focus();
+    return () => {
+      document.body.style.overflow = scroll;
+      opener?.focus?.();
+    };
+  }, []);
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 flex flex-col bg-background outline-none"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
+      <header className="bp flex min-h-14 flex-none items-center gap-2 px-2 pt-[env(safe-area-inset-top)] text-[#F1F4F7] shadow-[0_2px_10px_rgba(1,25,53,.18)]">
+        <button
+          type="button"
+          aria-label="Back"
+          className="flex size-11 flex-none items-center justify-center"
+          onClick={onClose}
+        >
+          <Icon name="back" />
+        </button>
+        <h2 className="t min-w-0 flex-1 truncate text-[19px] text-white">{title}</h2>
+        {aside && <span className="flex-none pr-3 text-[13px] text-[#F1F4F7]/80">{aside}</span>}
+      </header>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+        {children}
+      </div>
+    </div>
   );
 }
 

@@ -571,4 +571,36 @@ describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
     expect(screen.getAllByRole('list', { name: 'To-dos' }).length).toBeGreaterThan(0);
     expect(await violations()).toEqual([]);
   });
+
+  it('BMG phone: editing a to-do opens its own panel', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'To-do' }));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: /Edit "Book rehearsal"/ }));
+    await settle();
+    expect(screen.getByRole('dialog', { name: 'Edit to-do' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist phone: to-dos are cards and edit opens in a panel', async () => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    const tabs = screen.getAllByRole('button', { name: /^To-do/ });
+    fireEvent.click(tabs[tabs.length - 1]!);
+    await settle();
+    const list = screen.getByRole('list', { name: 'From Blueprint' });
+    expect(list.querySelectorAll('li').length).toBe(1);
+    expect(screen.queryByRole('dialog', { name: 'Edit to-do' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Edit "Book rehearsal"/ }));
+    await settle();
+    const panel = screen.getByRole('dialog', { name: 'Edit to-do' });
+    expect(panel.querySelector('input[value="Book rehearsal"]')).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await settle();
+    expect(screen.queryByRole('dialog', { name: 'Edit to-do' })).toBeNull();
+  });
 });

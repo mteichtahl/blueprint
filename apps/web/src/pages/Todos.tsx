@@ -19,11 +19,13 @@ import {
   Field,
   Icon,
   Notice,
+  PhonePanel,
   RowCard,
   Select,
   shortDate,
   Tag,
   TextArea,
+  usePhone,
   WaveLoader,
 } from '../components/ui.tsx';
 
@@ -146,6 +148,7 @@ function TodoEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const note = notifyNote(todo, isBmg);
+  const phone = usePhone();
 
   async function save() {
     setBusy(true);
@@ -173,16 +176,8 @@ function TodoEditor({
     }
   }
 
-  return (
-    <section
-      className="card gap-3 border-[#9AA4B0]"
-      aria-label={`Edit "${todo.title}"`}
-      onKeyDown={(e) => e.key === 'Escape' && onClose()}
-    >
-      <div className="card-hd">
-        <h3 className="t text-[17px]">Edit to-do</h3>
-        <span className="src ml-auto">{SOURCE_LABEL[todo.source]}</span>
-      </div>
+  const fields = (
+    <>
       <Field
         label="To-do"
         value={title}
@@ -223,6 +218,33 @@ function TodoEditor({
           Cancel
         </Button>
       </div>
+    </>
+  );
+
+  // Phones: the editor gets its own full-screen panel over the list.
+  if (phone)
+    return (
+      <PhonePanel title="Edit to-do" aside={SOURCE_LABEL[todo.source]} onClose={onClose}>
+        <section className="card gap-3" aria-label={`Edit "${todo.title}"`}>
+          {fields}
+        </section>
+        <section className="card gap-3" aria-label="Conversation">
+          <TodoThread cfg={cfg} token={token} todo={todo} isBmg={isBmg} ruled={false} />
+        </section>
+      </PhonePanel>
+    );
+
+  return (
+    <section
+      className="card gap-3 border-[#9AA4B0]"
+      aria-label={`Edit "${todo.title}"`}
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+    >
+      <div className="card-hd">
+        <h3 className="t text-[17px]">Edit to-do</h3>
+        <span className="src ml-auto">{SOURCE_LABEL[todo.source]}</span>
+      </div>
+      {fields}
       <TodoThread cfg={cfg} token={token} todo={todo} isBmg={isBmg} />
     </section>
   );
@@ -258,11 +280,14 @@ function TodoThread({
   token,
   todo,
   isBmg,
+  ruled = true,
 }: {
   cfg: AppConfig;
   token: string;
   todo: Todo;
   isBmg: boolean;
+  /** A line above it, when it sits under the edit form in the same card. */
+  ruled?: boolean;
 }) {
   const base = `/artists/${todo.artistId}/todos/${todo.todoId}/comments`;
   const [thread, setThread] = useState<ThreadItem[] | null>(null);
@@ -316,7 +341,7 @@ function TodoThread({
   );
 
   return (
-    <div className="flex flex-col gap-2 border-t border-input pt-3">
+    <div className={`flex flex-col gap-2 ${ruled ? 'border-t border-input pt-3' : ''}`}>
       <div className="flex items-center gap-2">
         <h4 className="t text-[15px]">Conversation</h4>
         <span className="src ml-auto">{who}</span>
@@ -585,7 +610,6 @@ export function ArtistTodos({
         error={error}
         onToggle={toggle}
         onEdit={ed.open}
-        editing={ed.editing?.todoId ?? null}
         editor={editor}
         saved={ed.saved}
         add={
@@ -653,13 +677,15 @@ function useAllCounts(cfg: AppConfig, token: string, artistId: string, trigger: 
   return counts;
 }
 
-/** The artist's phone To-do: Blueprint's and feedback to-dos first, then their own. */
+/**
+ * The artist's phone To-do: Blueprint's and feedback to-dos first, then their
+ * own, each as a card. Tapping a card opens the editor in its own panel.
+ */
 function PhoneTodos({
   todos,
   error,
   onToggle,
   onEdit,
-  editing,
   editor,
   saved,
   add,
@@ -668,7 +694,6 @@ function PhoneTodos({
   error: string | null;
   onToggle: (t: Todo) => void;
   onEdit: (t: Todo) => void;
-  editing: string | null;
   editor: React.ReactNode;
   saved: string | null;
   add: React.ReactNode;
@@ -676,14 +701,13 @@ function PhoneTodos({
   if (!todos) return <WaveLoader />;
   const fromBmg = todos.filter((t) => t.source !== 'artist');
   const own = todos.filter((t) => t.source === 'artist');
-  const item = (t: Todo, coral: boolean) =>
-    editing === t.todoId ? (
-      <div key={t.todoId}>{editor}</div>
-    ) : (
-      <div
-        key={t.todoId}
-        className={`flex min-h-[52px] flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[10px] border border-input bg-card px-3 py-2.5 shadow-xs ${coral ? 'border-l-[3px] border-l-accent' : ''}`}
-      >
+  const overdue = (t: Todo) => !t.done && !!t.due && t.due < today();
+  const card = (t: Todo) => (
+    <RowCard
+      key={t.todoId}
+      accent={t.source !== 'artist' || overdue(t)}
+      muted={t.done}
+      lead={
         <input
           className="chk"
           type="checkbox"
@@ -691,33 +715,40 @@ function PhoneTodos({
           aria-label={`Mark "${t.title}" done`}
           onChange={() => onToggle(t)}
         />
-        <button
-          type="button"
-          className="min-w-[min(11rem,100%)] flex-1 text-left"
-          onClick={() => onEdit(t)}
-        >
-          <b className={`block ${t.done ? 'text-muted-foreground line-through' : ''}`}>{t.title}</b>
-          <span className="src">
-            {t.source === 'feedback' ? 'From your feedback' : t.source === 'bmg' ? 'Blueprint' : ''}
-            {t.notes ? `${t.source !== 'artist' ? ' · ' : ''}${t.notes}` : ''}
-          </span>
-        </button>
-        {t.due && <DueTag t={t} className="ml-auto justify-end" />}
-      </div>
-    );
+      }
+      title={t.title}
+      sub={
+        [
+          t.source === 'feedback' ? 'From your feedback' : t.source === 'bmg' ? 'Blueprint' : '',
+          t.notes,
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined
+      }
+      tags={t.due || t.commentCount ? <DueTag t={t} /> : undefined}
+      onOpen={() => onEdit(t)}
+      openLabel={`Edit "${t.title}"`}
+    />
+  );
+  const list = (label: string, items: Todo[]) => (
+    <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label={label}>
+      {items.map(card)}
+    </ul>
+  );
   return (
     <div className="flex flex-col gap-1.5">
       {error && <Notice tone="error">{error}</Notice>}
       {saved && <Notice tone="success">{saved}</Notice>}
       <div className="eyebrow py-1.5 text-muted-foreground">From Blueprint</div>
       {fromBmg.length ? (
-        fromBmg.map((t) => item(t, true))
+        list('From Blueprint', fromBmg)
       ) : (
         <p className="src">Nothing from Blueprint right now.</p>
       )}
       <div className="eyebrow pt-2.5 pb-1.5 text-muted-foreground">My own</div>
-      {own.map((t) => item(t, false))}
+      {own.length ? list('My own', own) : <p className="src">Nothing of your own yet.</p>}
       <div className="mt-1.5">{add}</div>
+      {editor}
     </div>
   );
 }
