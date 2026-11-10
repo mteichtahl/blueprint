@@ -349,6 +349,7 @@ Spec: `claude/BMG_Rev10_Folders_and_Permissions.md` in the BMG App project. Thes
   - belongs to someone else, under the rev 8 rules.
 
   Files stay recoverable as before. The folder rows themselves aren't kept.
+
 - **Routes:**
   - The library's seven file routes are now one `/library/{proxy+}`, mapped back to the same templates inside the files function (`files/library-route.ts`). It also serves `/library/folders`.
   - Artists' folders are `/artists/{artistId}/folders` and `/{proxy+}`.

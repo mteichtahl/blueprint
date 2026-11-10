@@ -429,6 +429,12 @@ export async function folderRoutes(
           .map((key) => ({
             key,
             label: label(key),
+            /** The person behind it, for "Check someone's access". */
+            sub: key.startsWith('p:')
+              ? key.slice(2)
+              : key.startsWith('a:')
+                ? all.find((p) => p.artistId === key.slice(2))?.sub
+                : undefined,
             detail: key.startsWith('g:')
               ? 'Group'
               : key.startsWith('a:')
