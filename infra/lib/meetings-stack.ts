@@ -112,6 +112,9 @@ export class MeetingsStack extends BmgStack {
         QUARANTINE_KEY_ARN: props.quarantineKey.keyArn,
         WORK_BUCKET: this.workBucket.bucketName,
         WORK_KEY_ARN: this.workKey.keyArn,
+        // Summaries and answers; plan suggestions use the assistant's model.
+        SUMMARY_MODEL: cfg.ai.summaryModelProfile,
+        ASSISTANT_MODEL: cfg.ai.assistantModelProfile,
       },
     });
     const fn = this.worker;
@@ -164,6 +167,16 @@ export class MeetingsStack extends BmgStack {
     // The AWS AI services opt-out (blueprint ai opt-out): checked before every job.
     allow('ReadAiOptOut', ['organizations:DescribeEffectivePolicy'], ['*']);
     allow('PublishEvents', ['events:PutEvents'], [props.bus.eventBusArn]);
+    // Claude through the Australia-only profiles (Sydney and Melbourne), as the newsroom does.
+    const home = cfg.account.homeRegion;
+    const models = [cfg.ai.summaryModelProfile, cfg.ai.assistantModelProfile].flatMap((profile) => [
+      `arn:aws:bedrock:${home}:${this.account}:inference-profile/${profile}`,
+      ...['ap-southeast-2', 'ap-southeast-4'].map(
+        (r) => `arn:aws:bedrock:${r}::foundation-model/${profile.replace(/^au\./, '')}`,
+      ),
+    ]);
+    allow('MeetingModels', ['bedrock:InvokeModel'], models);
+    // Prompts (PROMPT#…) and plans are read with GetItem, already allowed above.
 
     // ── The meetings API (Blueprint only), routed by the API stack ──
     this.api = new BmgFunction(this, 'Meetings', {
@@ -237,11 +250,12 @@ export class MeetingsStack extends BmgStack {
         maxEventAge: Duration.hours(2),
       });
     new Rule(this, 'RecordingsSettled', {
-      description: 'A meeting recording passed (or failed) the malware scan; a retry was asked for',
+      description:
+        'A meeting recording passed (or failed) the malware scan; a retry, summary, answer or plan suggestions were asked for',
       eventBus: props.bus,
       eventPattern: {
         source: ['bmg.audit', 'bmg.meetings'],
-        detailType: ['file.available', 'file.rejected', 'meeting.transcribe'],
+        detailType: ['file.available', 'file.rejected', 'meeting.transcribe', 'meeting.ai'],
       },
       targets: [target()],
     });

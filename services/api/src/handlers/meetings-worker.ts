@@ -15,9 +15,29 @@ import {
   TranscribeClient,
   type MediaFormat,
 } from '@aws-sdk/client-transcribe';
+import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import { DataAccessSessions } from '@bmg/crypto';
+import { render } from '@bmg/prompts';
 import { AI_OPT_OUT_POLICY_TYPE, optedOutOf } from '@bmg/config/ai-opt-out';
-import { aiStates } from '../ai/prompts.ts';
+import { aiStates, livePrompt } from '../ai/prompts.ts';
+import {
+  ANSWER_REPLY_SHAPE,
+  answerFrom,
+  jsonIn,
+  MAX_ANSWERS,
+  MAX_SUMMARIES,
+  promptVars,
+  SUMMARY_REPLY_SHAPE,
+  summaryFrom,
+  type AiJob,
+} from '../meetings/ai.ts';
+import {
+  PLAN_REPLY_SHAPE,
+  planForPrompt,
+  PlanReply,
+  reviewChanges,
+} from '../meetings/plan-changes.ts';
+import { loadPlan } from '../workspace/plan-store.ts';
 import { storedKey, type FileRecord } from '../files/model.ts';
 import { env } from '../lib.ts';
 import {
@@ -34,11 +54,12 @@ import {
 import {
   loadMeeting,
   loadMeetingFile,
+  mutateContent,
   readContent,
   updateMeeting,
   writeContent,
 } from '../meetings/store.ts';
-import { refreshNote } from '../meetings/note.ts';
+import { artistName, refreshNote } from '../meetings/note.ts';
 
 /**
  * The meetings worker (rev 11): turns a meeting's recording into a
@@ -63,6 +84,7 @@ const events = new EventBridgeClient({});
 // Organizations is a global service, served from us-east-1.
 const orgs = new OrganizationsClient({ region: 'us-east-1' });
 const sessions = new DataAccessSessions();
+const bedrock = new BedrockRuntimeClient({});
 
 const log = (event: string, fields: Record<string, unknown> = {}) =>
   console.log(JSON.stringify({ level: 'info', event, ...fields }));
@@ -75,8 +97,8 @@ type WorkerEvent =
     }
   | {
       source: 'bmg.meetings';
-      'detail-type': 'meeting.transcribe';
-      detail: { meetingId?: string; artistId?: string };
+      'detail-type': 'meeting.transcribe' | 'meeting.ai';
+      detail: { meetingId?: string; artistId?: string; requestId?: string };
     }
   | {
       source: 'aws.transcribe';
@@ -92,6 +114,9 @@ export async function handler(event: WorkerEvent): Promise<void> {
     const { meetingId, artistId } = event.detail;
     if (!meetingId) return;
     const space: MeetingSpace = artistId ? { kind: 'artist', artistId } : { kind: 'library' };
+    if (event['detail-type'] === 'meeting.ai') {
+      return runAi(space, meetingId, event.detail.requestId ?? '');
+    }
     return start(await loadMeeting(space, meetingId));
   }
   // A file settled: is it a meeting's recording?
@@ -330,4 +355,135 @@ async function finish(job: string, status: string | undefined): Promise<void> {
   await cleanUp(m, ref.attempt, job);
   await processed(ready, 'ready');
   log('meetings.ready', { meetingId: m.meetingId, segments: segments.length });
+}
+
+// ── Summaries, answers and plan suggestions (rev 11, spec 5.2 and 6) ──
+async function converse(modelId: string, prompt: string, maxTokens: number): Promise<string> {
+  const res = await bedrock.send(
+    new ConverseCommand({
+      modelId,
+      messages: [{ role: 'user', content: [{ text: prompt }] }],
+      // No temperature: Claude 5.5 models reject sampling parameters.
+      inferenceConfig: { maxTokens },
+    }),
+  );
+  return res.output?.message?.content?.map((c) => c.text ?? '').join('') ?? '';
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+async function runAi(space: MeetingSpace, meetingId: string, requestId: string): Promise<void> {
+  let m: Meeting;
+  try {
+    m = await loadMeeting(space, meetingId);
+  } catch {
+    return;
+  }
+  const job = m.aiJob;
+  if (!job || job.requestId !== requestId || job.status !== 'working') return;
+  const role = m.createdByRole;
+  const fail = async (error: string) => {
+    const failed: AiJob = { ...job, status: 'failed', error };
+    await updateMeeting(m, { aiJob: failed });
+    log('meetings.ai-failed', { meetingId, task: job.task });
+  };
+
+  // AI choices are checked again here: someone may have turned AI off since.
+  const involved = artistsInvolved(m);
+  const states = involved.length ? await aiStates(involved) : {};
+  if (involved.some((id) => !states[id])) {
+    return fail('An artist in this meeting has turned off AI assistance.');
+  }
+
+  try {
+    const content = await readContent(m, role);
+    const vars = promptVars(m, content, {
+      artistName: await artistName(m.artistId),
+      today: today(),
+    });
+    const meta = { createdAt: new Date().toISOString(), createdBy: job.requestedBy };
+
+    if (job.task === 'quick' || job.task === 'full') {
+      const prompt = `${render(await livePrompt(`meetings.summary.${job.task}`), vars)}\n\n${SUMMARY_REPLY_SHAPE[job.task]}`;
+      const summary = summaryFrom(
+        jsonIn(await converse(env('SUMMARY_MODEL'), prompt, 4000)),
+        content,
+        {
+          ...meta,
+          id: requestId,
+          kind: job.task,
+        },
+      );
+      if (!summary) return fail('The summary didn’t come back right. Try again.');
+      const saved = await mutateContent(
+        space,
+        meetingId,
+        role,
+        (c) => ({ ...c, summaries: [...(c.summaries ?? []), summary].slice(-MAX_SUMMARIES) }),
+        {},
+        ['aiJob'],
+      );
+      // The latest summary goes to the top of the meeting note in the Library.
+      await refreshNote(saved.meeting, role, { content: saved.content, note: 'New summary' }).catch(
+        (err) => log('meetings.note-failed', { meetingId, error: (err as Error).name }),
+      );
+    } else if (job.task === 'ask') {
+      const question = content.pending?.requestId === requestId ? content.pending.question : '';
+      if (!question) return fail('The question went missing. Ask it again.');
+      const prompt = `${render(await livePrompt('meetings.ask'), { ...vars, question })}\n\n${ANSWER_REPLY_SHAPE}`;
+      const answer = answerFrom(
+        jsonIn(await converse(env('SUMMARY_MODEL'), prompt, 1500)),
+        content,
+        {
+          ...meta,
+          id: requestId,
+          question,
+        },
+      );
+      if (!answer) return fail('The answer didn’t come back right. Try again.');
+      await mutateContent(
+        space,
+        meetingId,
+        role,
+        (c) => {
+          const next = { ...c, answers: [...(c.answers ?? []), answer].slice(-MAX_ANSWERS) };
+          delete next.pending;
+          return next;
+        },
+        {},
+        ['aiJob'],
+      );
+    } else {
+      if (!m.artistId) return fail('Only a meeting about an artist can change a plan.');
+      const plan = await loadPlan(m.artistId);
+      if (!plan) return fail('This artist doesn’t have a plan yet.');
+      const prompt = `${render(await livePrompt('meetings.plan_update'), { ...vars, plan: planForPrompt(plan) })}\n\n${PLAN_REPLY_SHAPE}`;
+      const reply = PlanReply.safeParse(
+        jsonIn(await converse(env('ASSISTANT_MODEL'), prompt, 8000)),
+      );
+      if (!reply.success) return fail('The suggestions didn’t come back right. Try again.');
+      const suggestions = reviewChanges(plan, reply.data.changes);
+      await mutateContent(
+        space,
+        meetingId,
+        role,
+        (c) => ({
+          ...c,
+          suggestions: {
+            setId: requestId,
+            ...meta,
+            basePlanVersion: plan.version,
+            suggestions,
+            ...(suggestions.length ? {} : { none: true }),
+          },
+        }),
+        {},
+        ['aiJob'],
+      );
+    }
+    log('meetings.ai-done', { meetingId, task: job.task });
+  } catch (err) {
+    log('meetings.ai-error', { meetingId, task: job.task, error: (err as Error).name });
+    await fail('That didn’t work this time. Try again in a minute.');
+  }
 }

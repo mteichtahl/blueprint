@@ -90,11 +90,21 @@ export type DomainEvent =
       createdBy: string;
       title: string;
       outcome: 'ready' | 'failed' | 'no-ai' | 'off';
+    }
+  | {
+      /** Blueprint updated (or undid an update to) an artist's plan from a meeting (rev 11). */
+      type: 'plan.updated';
+      artistId: string;
+      undo?: boolean;
+      /** What changed, in plain words (plan titles and dates, never the meeting). */
+      lines: string[];
+      more: number;
     };
 
 export interface Draft {
   /** In-app and email category; preferences can turn email off per category later. */
-  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector' | 'todo' | 'meeting';
+  kind:
+    'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector' | 'todo' | 'meeting' | 'plan';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
@@ -271,6 +281,18 @@ export function plan(
         },
       };
     }
+    case 'plan.updated': {
+      const list = e.lines.map((l) => `• ${l}`).join('\n');
+      return {
+        to: artistsOf([e.artistId]),
+        draft: {
+          kind: 'plan',
+          title: e.undo ? 'Blueprint undid a plan update' : 'Blueprint updated your plan',
+          body: `${list}${e.more ? `\n+ ${e.more} more change${e.more === 1 ? '' : 's'}` : ''}`,
+          link: 'plan',
+        },
+      };
+    }
   }
 }
 
@@ -324,6 +346,7 @@ const EYEBROW: Record<Draft['kind'], string> = {
   connector: 'Connectors',
   todo: 'To-do',
   meeting: 'Meeting notes',
+  plan: 'Your plan',
 };
 
 /** The notification as a BMG-branded email (the shared layout in `@bmg/email`). */

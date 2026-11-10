@@ -61,14 +61,12 @@ import {
   type TodoComment,
 } from '../workspace/model.ts';
 import {
-  changedBy,
   PLAN_LOG_PREFIX,
   planChanges,
-  planLogSk,
   publicChange,
   type PlanChange,
-  type PlanChangeKind,
 } from '../workspace/plan-history.ts';
+import { changeEntry, planConflict, savePlan } from '../workspace/plan-store.ts';
 import {
   audit,
   authContext,
@@ -85,42 +83,6 @@ const table = () => env('MAIN_TABLE');
 const today = () => new Date().toISOString().slice(0, 10);
 const events = new EventBridgeClient({});
 const scheduler = new SchedulerClient({});
-
-/** A plan save lost the race (the plan's version check failed inside the transaction). */
-function planConflict(err: unknown): boolean {
-  const e = err as { name?: string; CancellationReasons?: { Code?: string }[] };
-  return (
-    e.name === 'ConditionalCheckFailedException' ||
-    (e.name === 'TransactionCanceledException' &&
-      (e.CancellationReasons ?? []).some((r) => r.Code === 'ConditionalCheckFailed'))
-  );
-}
-
-/** One plan history entry, ready to write next to the plan. */
-async function changeEntry(
-  principal: Principal,
-  artistId: string,
-  c: { version: number; at: string; kind: PlanChangeKind; changes: string[] },
-) {
-  const profile = await db.send(
-    // The person's profile (USER#<sub>, see me.ts) holds their job title.
-    new GetCommand({ TableName: table(), Key: { PK: `USER#${principal.sub}`, SK: 'PROFILE' } }),
-  );
-  const entry: PlanChange = {
-    changeId: newId(),
-    artistId,
-    ...c,
-    bySub: principal.sub,
-    byRole: principal.role,
-    byName: changedBy(profile.Item?.jobTitle),
-  };
-  return {
-    PK: artistPk(artistId),
-    SK: planLogSk(c.at, entry.changeId),
-    type: 'planChange',
-    ...entry,
-  };
-}
 
 /** Domain events for notifications (design 7.3); ids only, no content. */
 async function domainEvent(type: string, detail: Record<string, unknown>) {
@@ -551,48 +513,9 @@ export const handler = handle(async (event) => {
       if ((current?.version ?? 0) !== body.version) {
         throw new HttpError(409, 'Someone else changed this plan. Reload and try again.');
       }
-      const at = new Date().toISOString();
-      const next = { ...body, version: body.version + 1, updatedAt: at };
-      const changes = planChanges(current, next);
-      const log = changes.length
-        ? await changeEntry(principal, artistId, {
-            version: next.version,
-            at,
-            kind: current ? 'edited' : 'created',
-            changes,
-          })
-        : undefined;
-      try {
-        await db.send(
-          new TransactWriteCommand({
-            TransactItems: [
-              {
-                Put: {
-                  TableName: table(),
-                  Item: {
-                    ...key,
-                    type: 'plan',
-                    artistId,
-                    ...next,
-                    updatedBy: principal.sub,
-                  },
-                  ConditionExpression:
-                    body.version === 0 ? 'attribute_not_exists(PK)' : 'version = :v',
-                  ...(body.version === 0
-                    ? {}
-                    : { ExpressionAttributeValues: { ':v': body.version } }),
-                },
-              },
-              ...(log ? [{ Put: { TableName: table(), Item: log } }] : []),
-            ],
-          }),
-        );
-      } catch (err) {
-        if (planConflict(err)) {
-          throw new HttpError(409, 'Someone else changed this plan. Reload and try again.');
-        }
-        throw err;
-      }
+      const content = { outcome: body.outcome, measures: body.measures, phases: body.phases };
+      const saved = await savePlan({ principal, artistId, current, content, kind: 'edited' });
+      const next = { ...content, version: saved.version };
       return json(200, { version: next.version, gaps: alignmentGaps(next) });
     }
 

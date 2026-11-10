@@ -98,6 +98,42 @@ vi.mock('../src/lib.ts', async (orig) => {
         case 'DeleteCommand':
           items.delete(key(i.Key));
           return {};
+        case 'BatchGetCommand': {
+          const req = (
+            cmd.input as { RequestItems: Record<string, { Keys: { PK: string; SK: string }[] }> }
+          ).RequestItems;
+          const [table, { Keys }] = Object.entries(req)[0]!;
+          return {
+            Responses: { [table]: Keys.map((k) => items.get(key(k))).filter(Boolean) },
+          };
+        }
+        case 'TransactWriteCommand': {
+          const tx = (
+            cmd.input as {
+              TransactItems: {
+                Put: {
+                  Item: Record<string, unknown> & { PK: string; SK: string };
+                  ConditionExpression?: string;
+                  ExpressionAttributeValues?: Record<string, unknown>;
+                };
+              }[];
+            }
+          ).TransactItems;
+          for (const { Put } of tx) {
+            const cur = items.get(key(Put.Item));
+            if (Put.ConditionExpression === 'attribute_not_exists(PK)' && cur) throw cond();
+            if (
+              Put.ConditionExpression === 'version = :v' &&
+              cur?.version !== Put.ExpressionAttributeValues?.[':v']
+            )
+              throw Object.assign(new Error('tx'), {
+                name: 'TransactionCanceledException',
+                CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+              });
+          }
+          for (const { Put } of tx) items.set(key(Put.Item), structuredClone(Put.Item));
+          return {};
+        }
         case 'UpdateCommand': {
           const it = items.get(key(i.Key));
           const names = i.ExpressionAttributeNames ?? {};
@@ -106,6 +142,12 @@ vi.mock('../src/lib.ts', async (orig) => {
             if (i.ConditionExpression?.includes('attribute_exists(PK)')) throw cond();
             // Counters and the like.
             return { Attributes: {} };
+          }
+          // One AI job at a time (requestAi's condition).
+          if (i.ConditionExpression?.includes('aiJob.#st <> :working')) {
+            const job = it.aiJob as { status: string; requestedAt: string } | undefined;
+            if (job && job.status === 'working' && job.requestedAt >= String(vals[':stale']))
+              throw cond();
           }
           // `#eN = :eN` conditions (updateMeeting's expect).
           for (const m of (i.ConditionExpression ?? '').matchAll(/(#e\d+) = (:e\d+)/g)) {
@@ -335,5 +377,221 @@ describe('the recording', () => {
     expect(parse(await upload(artist, id)).status).toBe(404);
     expect(parse(await upload(otherStaff, id)).status).toBe(403);
     expect(parse(await upload(staff, id, 'application/pdf')).status).toBe(400);
+  });
+});
+
+describe('summaries and plan suggestions', () => {
+  const PLAN = {
+    outcome: 'Release a debut album.',
+    measures: [{ id: 'M1', label: '1,000 listeners' }],
+    phases: [
+      {
+        id: 'p1',
+        name: 'Album release',
+        goal: '',
+        start: '2026-11-01',
+        end: '2026-12-12',
+        milestones: [{ id: 'm1', title: 'Master the EP', done: false, measures: [] }],
+      },
+    ],
+  };
+
+  async function readyMeeting(aiOn = true) {
+    items.set(`ARTIST#${ARTIST}|AI`, { PK: `ARTIST#${ARTIST}`, SK: 'AI', aiOptIn: aiOn });
+    items.set(`ARTIST#${ARTIST}|PLAN`, {
+      PK: `ARTIST#${ARTIST}`,
+      SK: 'PLAN',
+      ...structuredClone(PLAN),
+      version: 3,
+      updatedAt: '2026-11-01T00:00:00Z',
+    });
+    const id = ((await start()).meeting as { meetingId: string }).meetingId;
+    const k = `ARTIST#${ARTIST}|MEETING#${id}`;
+    items.set(k, { ...items.get(k)!, status: 'ready', contentVersion: 1 });
+    const suggestion = (n: number, change: Record<string, unknown>, where: string) => ({
+      id: `c${n}`,
+      change: { reason: 'Agreed', refs: [0], ...change },
+      where,
+      before: '',
+      after: '',
+      checkThis: false,
+      status: 'waiting',
+    });
+    objects.set(
+      `artist_bucket/artists/${ARTIST}/meetings/${id}/content-1.json`,
+      JSON.stringify({
+        notes: '',
+        markers: [],
+        speakers: {},
+        segments: [{ id: 0, speaker: 'spk_0', start: 1, end: 2, text: 'Push the EP to January.' }],
+        suggestions: {
+          setId: 's1',
+          createdAt: '2026-11-11T00:00:00Z',
+          createdBy: staff.sub,
+          basePlanVersion: 3,
+          suggestions: [
+            suggestion(
+              1,
+              { kind: 'stage.dates', phaseId: 'p1', end: '2027-01-30' },
+              'Album release',
+            ),
+            suggestion(
+              2,
+              { kind: 'milestone.done', phaseId: 'p1', milestoneId: 'm1', done: true },
+              'x',
+            ),
+          ],
+        },
+      }),
+    );
+    return id;
+  }
+
+  const plan = () => items.get(`ARTIST#${ARTIST}|PLAN`)!;
+  const history = () =>
+    [...items.values()].filter((x) => String(x.SK).startsWith('PLANLOG#')) as {
+      kind: string;
+      changes: string[];
+    }[];
+
+  it('won’t start AI work for an artist who turned AI off', async () => {
+    const id = await readyMeeting(false);
+    const r = parse(await req(staff, 'POST', `${ARTIST}/${id}/ai`, { task: 'quick' }));
+    expect(r.status).toBe(409);
+    expect(String(r.detail)).toMatch(/turned off AI/);
+  });
+
+  it('runs one AI job at a time and keeps the question off the event bus', async () => {
+    const id = await readyMeeting();
+    const r = parse(
+      await req(staff, 'POST', `${ARTIST}/${id}/ai`, { task: 'ask', question: 'When is the EP?' }),
+    );
+    expect(r.status).toBe(202);
+    const m = items.get(`ARTIST#${ARTIST}|MEETING#${id}`)!;
+    expect((m.aiJob as { status: string }).status).toBe('working');
+    expect(JSON.stringify(m)).not.toContain('When is the EP');
+    expect(parse(await req(staff, 'POST', `${ARTIST}/${id}/ai`, { task: 'quick' })).status).toBe(
+      409,
+    );
+  });
+
+  it('updates the plan with the accepted changes, in one save with a history entry', async () => {
+    const id = await readyMeeting();
+    // Nothing accepted yet.
+    expect(parse(await req(staff, 'POST', `${ARTIST}/${id}/plan-update`, {})).status).toBe(400);
+    const reviewed = parse(
+      await req(staff, 'PATCH', `${ARTIST}/${id}/suggestions`, {
+        contentVersion: 1,
+        updates: [
+          { id: 'c2', status: 'accepted' },
+          { id: 'c1', status: 'rejected' },
+        ],
+      }),
+    );
+    expect(reviewed.status).toBe(200);
+    const done = parse(
+      await req(staff, 'POST', `${ARTIST}/${id}/plan-update`, { notifyArtist: true }),
+    );
+    expect(done.status).toBe(200);
+    expect(plan().version).toBe(4);
+    const phases = plan().phases as typeof PLAN.phases;
+    expect(phases[0]!.milestones[0]!.done).toBe(true);
+    expect(phases[0]!.end).toBe('2026-12-12'); // rejected
+    const entry = history().at(-1)!;
+    expect(entry.kind).toBe('meeting');
+    expect(entry.changes[0]).toBe('From the meeting “Meeting with Chloe Poli”');
+    // It can't be applied twice, and the meeting can't be deleted while it can be undone.
+    expect(parse(await req(staff, 'POST', `${ARTIST}/${id}/plan-update`, {})).status).toBe(409);
+    expect(parse(await req(admin, 'DELETE', `${ARTIST}/${id}`)).status).toBe(409);
+  });
+
+  it('undoes the update while the plan is unchanged, and not after', async () => {
+    const id = await readyMeeting();
+    await req(staff, 'PATCH', `${ARTIST}/${id}/suggestions`, {
+      contentVersion: 1,
+      updates: [{ id: 'c2', status: 'accepted' }],
+    });
+    await req(staff, 'POST', `${ARTIST}/${id}/plan-update`, {});
+    const undone = parse(await req(staff, 'POST', `${ARTIST}/${id}/plan-update/undo`, {}));
+    expect(undone.status).toBe(200);
+    expect(plan().version).toBe(5);
+    expect((plan().phases as typeof PLAN.phases)[0]!.milestones[0]!.done).toBe(false);
+    expect(history().at(-1)!.kind).toBe('undone');
+    expect(parse(await req(staff, 'POST', `${ARTIST}/${id}/plan-update/undo`, {})).status).toBe(
+      409,
+    );
+    // Deleting is allowed again.
+    expect(parse(await req(admin, 'DELETE', `${ARTIST}/${id}`)).status).toBe(200);
+  });
+
+  it('won’t undo once someone has changed the plan since', async () => {
+    const id = await readyMeeting();
+    await req(staff, 'PATCH', `${ARTIST}/${id}/suggestions`, {
+      contentVersion: 1,
+      updates: [{ id: 'c2', status: 'accepted' }],
+    });
+    await req(staff, 'POST', `${ARTIST}/${id}/plan-update`, {});
+    items.set(`ARTIST#${ARTIST}|PLAN`, { ...plan(), version: (plan().version as number) + 1 });
+    const r = parse(await req(staff, 'POST', `${ARTIST}/${id}/plan-update/undo`, {}));
+    expect(r.status).toBe(409);
+    expect(String(r.detail)).toMatch(/changed since/);
+  });
+
+  it('sends changes that no longer fit back for another look, and saves nothing', async () => {
+    const id = await readyMeeting();
+    await req(staff, 'PATCH', `${ARTIST}/${id}/suggestions`, {
+      contentVersion: 1,
+      updates: [{ id: 'c2', status: 'accepted' }],
+    });
+    // The milestone was removed in the plan editor meanwhile.
+    const p = plan();
+    (p.phases as typeof PLAN.phases)[0]!.milestones = [];
+    items.set(`ARTIST#${ARTIST}|PLAN`, p);
+    const r = parse(await req(staff, 'POST', `${ARTIST}/${id}/plan-update`, {}));
+    expect(r.status).toBe(409);
+    expect(plan().version).toBe(3);
+    const read = parse(await req(staff, 'GET', `${ARTIST}/${id}`));
+    const c2 = (
+      read.content as {
+        suggestions: { suggestions: { id: string; status: string; stale?: boolean }[] };
+      }
+    ).suggestions.suggestions.find((s) => s.id === 'c2')!;
+    expect(c2).toMatchObject({ status: 'waiting', stale: true });
+  });
+
+  it('lets staff edit a suggestion, checked against the real plan', async () => {
+    const id = await readyMeeting();
+    const ok = parse(
+      await req(staff, 'PATCH', `${ARTIST}/${id}/suggestions`, {
+        contentVersion: 1,
+        updates: [{ id: 'c1', change: { end: '2027-01-15', kind: 'stage.remove' } }],
+      }),
+    );
+    expect(ok.status).toBe(200);
+    const c1 = (
+      ok.suggestions as {
+        suggestions: {
+          id: string;
+          status: string;
+          edited?: boolean;
+          after: string;
+          change: { kind: string };
+        }[];
+      }
+    ).suggestions[0]!;
+    // The kind can't be changed by an edit.
+    expect(c1).toMatchObject({
+      status: 'accepted',
+      edited: true,
+      after: '1 Nov 2026 – 15 Jan 2027',
+    });
+    expect(c1.change.kind).toBe('stage.dates');
+    const noop = parse(
+      await req(staff, 'PATCH', `${ARTIST}/${id}/suggestions`, {
+        contentVersion: 2,
+        updates: [{ id: 'c1', change: { end: '2026-12-12' } }],
+      }),
+    );
+    expect(noop.status).toBe(400);
   });
 });
