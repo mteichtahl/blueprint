@@ -422,7 +422,19 @@ function PhaseSection({
               aria-label={`Milestone "${m.title}" done`}
               onChange={() => onTick(mi)}
             />
-            <span className={m.done ? 'text-muted-foreground line-through' : ''}>{m.title}</span>
+            {editing ? (
+              <MilestoneTitle
+                title={m.title}
+                onChange={(title) =>
+                  edit((ph) => {
+                    ph.milestones[mi] = { ...ph.milestones[mi]!, title };
+                    return ph;
+                  })
+                }
+              />
+            ) : (
+              <span className={m.done ? 'text-muted-foreground line-through' : ''}>{m.title}</span>
+            )}
             <span className="ml-auto flex gap-1">
               {MEASURES.map((id) =>
                 editing ? (
@@ -501,6 +513,27 @@ function PhaseSection({
         </>
       )}
     </Card>
+  );
+}
+
+/**
+ * Edit a milestone's name in place (rev 7). An empty name isn't kept: the
+ * field goes back to the last name on blur.
+ */
+function MilestoneTitle({ title, onChange }: { title: string; onChange: (t: string) => void }) {
+  const [v, setV] = useState(title);
+  return (
+    <input
+      aria-label={`Milestone name: ${title}`}
+      className="min-h-9 min-w-0 flex-1 rounded-md border border-input bg-white px-2 text-[15px]"
+      maxLength={200}
+      value={v}
+      onChange={(e) => {
+        setV(e.target.value);
+        if (e.target.value.trim()) onChange(e.target.value.trim());
+      }}
+      onBlur={() => !v.trim() && setV(title)}
+    />
   );
 }
 
