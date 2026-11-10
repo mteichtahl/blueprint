@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Button, Notice } from './ui.tsx';
 
 /**
- * Tickets sold, total takings and costs, with profit worked out (rev 7).
+ * Tickets sold, takings (tickets and door, plus merchandise) and costs, with
+ * profit worked out (rev 7).
  * Costs start with the preset rows; any row can be deleted and more added.
  * All amounts are cents (AUD).
  */
@@ -15,6 +16,9 @@ export const PRESET_COSTS = [
   'Support band',
   'Backing band',
 ] as const;
+/** Gigs also start with a Merchandise cost (stock, printing), set against merch sales. */
+export const GIG_PRESET_COSTS = [...PRESET_COSTS, 'Merchandise'] as const;
+const MERCH = 'Merchandise';
 
 export interface CostRow {
   id: string;
@@ -23,14 +27,18 @@ export interface CostRow {
 }
 export interface MoneyFigures {
   ticketsSold: number;
+  /** Ticket and door takings. */
   takingsCents: number;
+  /** Merchandise sold at the gig (missing on figures saved before it existed). */
+  merchTakingsCents?: number;
   costs: CostRow[];
 }
 
 export const defaultMoney = (): MoneyFigures => ({
   ticketsSold: 0,
   takingsCents: 0,
-  costs: PRESET_COSTS.map((label, i) => ({ id: `p${i + 1}`, label, amountCents: 0 })),
+  merchTakingsCents: 0,
+  costs: GIG_PRESET_COSTS.map((label, i) => ({ id: `p${i + 1}`, label, amountCents: 0 })),
 });
 
 /** "$1,250" or "$1,250.50"; losses as "−$300". */
@@ -52,13 +60,28 @@ export function toCents(text: string): number | null {
 }
 const fromCents = (c: number) => (c ? (c / 100).toFixed(c % 100 ? 2 : 0) : '');
 
+/** Same sums as the API's moneySummary. */
 export function summary(m: MoneyFigures) {
+  const merch = m.merchTakingsCents ?? 0;
   const costsCents = m.costs.reduce((n, c) => n + c.amountCents, 0);
+  const merchCostCents = m.costs
+    .filter((c) => c.label.toLowerCase() === MERCH.toLowerCase())
+    .reduce((n, c) => n + c.amountCents, 0);
+  const totalTakingsCents = m.takingsCents + merch;
   return {
     costsCents,
-    profitCents: m.takingsCents - costsCents,
+    merchCostCents,
+    totalTakingsCents,
+    profitCents: totalTakingsCents - costsCents,
+    merchProfitCents: merch - merchCostCents,
     perTicketCents: m.ticketsSold > 0 ? Math.round(m.takingsCents / m.ticketsSold) : null,
   };
+}
+
+/** Figures saved before merchandise existed get its cost row (at $0) when opened. */
+function withMerchRow(m: MoneyFigures): MoneyFigures {
+  if (m.merchTakingsCents !== undefined || m.costs.some((c) => c.label === MERCH)) return m;
+  return { ...m, costs: [...m.costs, { id: newRowId(), label: MERCH, amountCents: 0 }] };
 }
 
 let rowSeq = 0;
@@ -77,9 +100,10 @@ export function MoneyEditor({
   onSave: (m: MoneyFigures) => Promise<void>;
   canEdit?: boolean;
 }) {
-  const start = value ?? defaultMoney();
+  const start = value ? withMerchRow(value) : defaultMoney();
   const [tickets, setTickets] = useState(start.ticketsSold ? String(start.ticketsSold) : '');
   const [takings, setTakings] = useState(fromCents(start.takingsCents));
+  const [merch, setMerch] = useState(fromCents(start.merchTakingsCents ?? 0));
   const [rows, setRows] = useState(
     start.costs.map((c) => ({ id: c.id, label: c.label, amount: fromCents(c.amountCents) })),
   );
@@ -89,14 +113,17 @@ export function MoneyEditor({
   const ticketsN =
     tickets.trim() === '' ? 0 : /^\d+$/.test(tickets.trim()) ? Number(tickets) : null;
   const takingsC = toCents(takings);
+  const merchC = toCents(merch);
   const costCents = rows.map((r) => toCents(r.amount));
-  const bad = ticketsN === null || takingsC === null || costCents.some((c) => c === null);
+  const bad =
+    ticketsN === null || takingsC === null || merchC === null || costCents.some((c) => c === null);
   const missingLabel = rows.some((r) => !r.label.trim());
   const figures: MoneyFigures | null = bad
     ? null
     : {
         ticketsSold: ticketsN!,
         takingsCents: takingsC!,
+        merchTakingsCents: merchC!,
         costs: rows.map((r, i) => ({
           id: r.id,
           label: r.label.trim(),
@@ -122,32 +149,47 @@ export function MoneyEditor({
   return (
     <div className="flex flex-col gap-3">
       {note && <Notice tone={note.tone}>{note.text}</Notice>}
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[15px] font-bold">Tickets sold</span>
-          <input
-            className={cell}
-            inputMode="numeric"
-            disabled={!canEdit}
-            value={tickets}
-            placeholder="0"
-            aria-invalid={ticketsN === null}
-            onChange={(e) => setTickets(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[15px] font-bold">Total event takings ($)</span>
-          <input
-            className={cell}
-            inputMode="decimal"
-            disabled={!canEdit}
-            value={takings}
-            placeholder="0"
-            aria-invalid={takingsC === null}
-            onChange={(e) => setTakings(e.target.value)}
-          />
-        </label>
-      </div>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[15px] font-bold">Tickets sold</span>
+        <input
+          className={`${cell} max-w-[12rem]`}
+          inputMode="numeric"
+          disabled={!canEdit}
+          value={tickets}
+          placeholder="0"
+          aria-invalid={ticketsN === null}
+          onChange={(e) => setTickets(e.target.value)}
+        />
+      </label>
+      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+        <legend className="mb-1 text-[15px] font-bold">Takings</legend>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="src">Tickets and door ($)</span>
+            <input
+              className={cell}
+              inputMode="decimal"
+              disabled={!canEdit}
+              value={takings}
+              placeholder="0"
+              aria-invalid={takingsC === null}
+              onChange={(e) => setTakings(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="src">Merchandise sales ($)</span>
+            <input
+              className={cell}
+              inputMode="decimal"
+              disabled={!canEdit}
+              value={merch}
+              placeholder="0"
+              aria-invalid={merchC === null}
+              onChange={(e) => setMerch(e.target.value)}
+            />
+          </label>
+        </div>
+      </fieldset>
       <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
         <legend className="mb-1 text-[15px] font-bold">Costs</legend>
         {rows.length === 0 && <p className="src m-0">No costs. Add one below.</p>}
@@ -196,18 +238,20 @@ export function MoneyEditor({
             >
               + Add a cost
             </Button>
-            {PRESET_COSTS.some((p) => !rows.some((r) => r.label === p)) && (
+            {GIG_PRESET_COSTS.some((p) => !rows.some((r) => r.label === p)) && (
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() =>
                   setRows([
                     ...rows,
-                    ...PRESET_COSTS.filter((p) => !rows.some((r) => r.label === p)).map((p) => ({
-                      id: newRowId(),
-                      label: p,
-                      amount: '',
-                    })),
+                    ...GIG_PRESET_COSTS.filter((p) => !rows.some((r) => r.label === p)).map(
+                      (p) => ({
+                        id: newRowId(),
+                        label: p,
+                        amount: '',
+                      }),
+                    ),
                   ])
                 }
               >
@@ -218,8 +262,12 @@ export function MoneyEditor({
         )}
       </fieldset>
       <dl className="m-0 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 rounded-lg bg-secondary p-3 text-[15px]">
+        <dt className="src">Tickets and door</dt>
+        <dd className="src m-0 text-right">{takingsC === null ? '—' : aud(takingsC)}</dd>
+        <dt className="src">Merchandise</dt>
+        <dd className="src m-0 text-right">{merchC === null ? '—' : aud(merchC)}</dd>
         <dt>Total takings</dt>
-        <dd className="m-0 text-right">{takingsC === null ? '—' : aud(takingsC)}</dd>
+        <dd className="m-0 text-right">{sum ? aud(sum.totalTakingsCents) : '—'}</dd>
         <dt>Total costs</dt>
         <dd className="m-0 text-right">{sum ? aud(sum.costsCents) : '—'}</dd>
         <dt className="font-bold">Profit</dt>
@@ -229,9 +277,19 @@ export function MoneyEditor({
           {sum ? aud(sum.profitCents) : '—'}
           {sum && sum.profitCents < 0 && ' (loss)'}
         </dd>
+        {sum && (merchC || sum.merchCostCents) ? (
+          <>
+            <dt className="src">Merchandise profit (sales − merch cost)</dt>
+            <dd
+              className={`src m-0 text-right ${sum.merchProfitCents < 0 ? 'text-[#8E2F2C]' : ''}`}
+            >
+              {aud(sum.merchProfitCents)}
+            </dd>
+          </>
+        ) : null}
         {sum?.perTicketCents != null && (
           <>
-            <dt className="src">Takings per ticket</dt>
+            <dt className="src">Ticket takings per ticket</dt>
             <dd className="src m-0 text-right">{aud(sum.perTicketCents)}</dd>
           </>
         )}

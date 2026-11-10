@@ -213,7 +213,29 @@ describe('money: tickets, takings, costs and profit', () => {
       'Content',
       'Support band',
       'Backing band',
+      'Merchandise',
     ]);
+  });
+
+  it('adds merchandise sales to takings and its cost to costs', () => {
+    const m = Money.parse({
+      ticketsSold: 100,
+      takingsCents: 200000,
+      merchTakingsCents: 60000,
+      costs: [
+        { id: 'p1', label: 'Venue', amountCents: 50000 },
+        { id: 'p7', label: 'Merchandise', amountCents: 25000 },
+      ],
+    });
+    expect(moneySummary(m)).toEqual({
+      costsCents: 75000,
+      totalTakingsCents: 260000,
+      profitCents: 185000,
+      merchProfitCents: 35000,
+      perTicketCents: 2000,
+    });
+    // Figures saved before merchandise existed still read (no merch sales).
+    expect(Money.parse({ takingsCents: 1000 }).merchTakingsCents).toBe(0);
   });
 
   it('works out profit (and losses)', () => {
@@ -227,7 +249,9 @@ describe('money: tickets, takings, costs and profit', () => {
     });
     expect(moneySummary(m)).toEqual({
       costsCents: 110000,
+      totalTakingsCents: 240000,
       profitCents: 130000,
+      merchProfitCents: 0,
       perTicketCents: 2000,
     });
     expect(moneySummary({ ticketsSold: 0, takingsCents: 0, costs: m.costs }).profitCents).toBe(
@@ -253,6 +277,7 @@ describe('money: tickets, takings, costs and profit', () => {
     expect(GigPatch.parse({ money: { ticketsSold: 3 } }).money).toEqual({
       ticketsSold: 3,
       takingsCents: 0,
+      merchTakingsCents: 0,
       costs: [],
     });
   });
