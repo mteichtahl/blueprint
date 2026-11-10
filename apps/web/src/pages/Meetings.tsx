@@ -123,6 +123,8 @@ export function RecorderProvider({ cfg, token, children }: Props & { children: R
   const meetingRef = useRef<Meeting | null>(null);
   const mime = useRef('');
   const stopped = useRef<(() => void) | null>(null);
+  /** Pieces still being written to the device; stopping waits for them. */
+  const saving = useRef(new Set<Promise<unknown>>());
 
   const keepAwake = useCallback(async () => {
     try {
@@ -247,18 +249,22 @@ export function RecorderProvider({ cfg, token, children }: Props & { children: R
       recorder.ondataavailable = (e) => {
         if (!e.data.size) return;
         const n = seq.current++;
-        void saveChunk(m.meetingId, n, e.data).then(() =>
-          saveSession({
-            meetingId: m.meetingId,
-            space: m.space,
-            artistId: m.artistId,
-            title: m.title,
-            startedAt: m.startedAt,
-            mimeType: mime.current,
-            elapsed: elapsed.current,
-            updatedAt: new Date().toISOString(),
-          }),
-        );
+        const write: Promise<unknown> = saveChunk(m.meetingId, n, e.data)
+          .then(() =>
+            saveSession({
+              meetingId: m.meetingId,
+              space: m.space,
+              artistId: m.artistId,
+              title: m.title,
+              startedAt: m.startedAt,
+              mimeType: mime.current,
+              elapsed: elapsed.current,
+              updatedAt: new Date().toISOString(),
+            }),
+          )
+          .catch(() => undefined)
+          .finally(() => saving.current.delete(write));
+        saving.current.add(write);
       };
       recorder.onstop = () => stopped.current?.();
       // A phone call or the screen locking can take the microphone away.
@@ -322,8 +328,9 @@ export function RecorderProvider({ cfg, token, children }: Props & { children: R
       if (r.state === 'inactive') resolve();
       else r.stop();
     });
-    // The last piece is written as the recorder stops; give it a moment to land.
-    await new Promise((res) => setTimeout(res, 300));
+    // The last piece arrives as the recorder stops; wait until every piece is on the device.
+    await new Promise((res) => setTimeout(res, 50));
+    await Promise.all([...saving.current]);
     cleanUp();
     return upload(m);
   }, [cleanUp, upload]);

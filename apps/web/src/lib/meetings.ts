@@ -221,6 +221,23 @@ export const patchMeeting = (
 /** The recording's type as the upload is pinned to it: `audio/webm`, not `audio/webm;codecs=opus`. */
 export const baseType = (t: string) => t.toLowerCase().split(';')[0]!.trim();
 
+/** Some browsers give no type for audio files (often .m4a); go by the extension then. */
+export function typeFromName(name: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase() ?? '';
+  const types: Record<string, string> = {
+    m4a: 'audio/mp4',
+    aac: 'audio/aac',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    flac: 'audio/flac',
+    ogg: 'audio/ogg',
+    oga: 'audio/ogg',
+    webm: 'audio/webm',
+    mp4: 'video/mp4',
+  };
+  return types[ext] ?? 'audio/webm';
+}
+
 /** Sends the meeting's recording through the files API (scanned and filed like any upload). */
 export async function uploadRecording(
   cfg: AppConfig,
@@ -231,7 +248,7 @@ export async function uploadRecording(
   durationSec?: number,
 ) {
   const collection = m.artistId ? `/artists/${m.artistId}/files` : '/library/files';
-  const contentType = baseType(blob.type || 'audio/webm');
+  const contentType = baseType(blob.type || typeFromName(name));
   const res = await api<{ upload: { url: string; fields: Record<string, string> } }>(
     cfg,
     token,
