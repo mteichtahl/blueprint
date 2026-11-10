@@ -163,9 +163,10 @@ export function BrandKit({
     setSaving(true);
     setError(null);
     try {
-      const body: Partial<Kit> = { ...kit };
-      delete body.updatedAt;
-      delete body.updatedByName;
+      // Send only the editable fields. The API's schema is strict, and the kit
+      // it returns also carries metadata (updatedAt, updatedBy, updatedByName).
+      const { version, logos, logoRules, colours, fonts, voice, socials, imagery } = kit;
+      const body = { version, logos, logoRules, colours, fonts, voice, socials, imagery };
       const next = await api<Kit>(cfg, token, 'PUT', `/artists/${artistId}/brand-kit`, body);
       setSaved(next);
       setKit(next);
