@@ -319,3 +319,38 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 
 - **Takings have two parts:** tickets and door (`takingsCents`, as before) and merchandise sales (`merchTakingsCents`, new, defaults to 0). Total takings is their sum, and profit is total takings minus all costs. "Takings per ticket" counts ticket takings only.
 - **Costs gain a Merchandise preset** (stock, printing) for gigs only; events keep their own presets. Figures saved before this get a $0 Merchandise row when opened. When there's merch, the summary also shows merchandise profit (sales minus the Merchandise cost).
+
+## Notes: Folders and folder permissions (rev 10, 10 Nov 2026)
+
+Spec: `claude/BMG_Rev10_Folders_and_Permissions.md` in the BMG App project. These are the places the build departs from it, and why.
+
+- **No ancestor lists.** A space (Blueprint's library, or one artist's Library) holds few enough folders to read in one query, so access is worked out in memory by following parent links (`files/folders.ts`).
+  - A move is one write per moved item: no background job, and no window where paths are stale.
+  - The 2,000-level test resolves in well under 150 ms.
+  - Revisit if a space passes about 5,000 folders.
+- **Folder rows:** `PK` is the space (`ORG#library` or `ARTIST#…`), `SK` is `FOLDER#<id>`. Files gain `folderId`, `grants` and `inherit`. No new index: "Shared with me" is worked out from the same folder list.
+- **Files from before rev 10 keep their rev 8 sharing** until they're put in a folder or given a setting.
+  - When a library file is moved into a folder, its old sharing becomes its own setting ("all artists" → All artists can view; chosen artists → each of them can view). Nobody gains or loses access by the move alone.
+  - "Share with" on such a file is refused; it uses Access instead.
+- **In an artist's Library, the artist always has Can manage, and only Blueprint can be named.** "BMG only" stays a per-file choice. Blueprint's default there is Can edit, which is today's right to add and change files, not the spec's Can view.
+- **When the artist closes a folder to Blueprint:**
+  - The API refuses Blueprint, including the file's owner and admins.
+  - Those files leave the knowledge base on the next sync. Every access change and move re-syncs the files it touches.
+  - Those files can't be sent for review.
+  - KMS-level privacy stays the per-file "Only me (private)" choice at upload. Re-encrypting files when folder access changes (spec 3.5) isn't built.
+- **Who can do what with files:**
+  - Rev 8 locks still apply: Can edit on a folder doesn't unlock a locked document.
+  - Deleting a file is still the owner's call (or an admin's, for Blueprint's own documents).
+  - Moving a file needs Can manage, or the rev 8 right to manage it.
+  - New uploads into a folder take the folder's access (edit access "everyone who can see it", unless chosen otherwise).
+- **Deleting a folder** deletes everything inside it. The delete is refused if anything inside:
+  - is in use outside chat;
+  - can't be seen by the person deleting;
+  - belongs to someone else, under the rev 8 rules.
+
+  Files stay recoverable as before. The folder rows themselves aren't kept.
+- **Routes:**
+  - The library's seven file routes are now one `/library/{proxy+}`, mapped back to the same templates inside the files function (`files/library-route.ts`). It also serves `/library/folders`.
+  - Artists' folders are `/artists/{artistId}/folders` and `/{proxy+}`.
+  - This keeps the API stack under its 460-resource guardrail: 113 methods, down from 117.
+- **Not built yet:** Copy to…, Download as ZIP, "new access" notifications, and drag and drop between the tree and the table. Moves use Move to….

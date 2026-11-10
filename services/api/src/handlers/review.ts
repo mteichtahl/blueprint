@@ -32,7 +32,10 @@ import {
   type Submission,
   type SubmissionStatus,
 } from '../review/model.ts';
-import { fileSk } from '../files/model.ts';
+import { fileSk, type FileRecord } from '../files/model.ts';
+import { hiddenFromBlueprint } from '../files/access.ts';
+import { loadFolders } from '../files/folder-store.ts';
+import { folderManaged, folderMap } from '../files/folders.ts';
 import {
   artistPk,
   newId,
@@ -134,10 +137,20 @@ async function checkFiles(artistId: string, fileIds: string[]): Promise<Record<s
       },
     }),
   );
-  const found = res.Responses?.[table()] ?? [];
-  const ok = found.filter((f) => f.status === 'available' && f.visibility !== 'private');
+  const found = (res.Responses?.[table()] ?? []) as FileRecord[];
+  // Blueprint must be able to open what's sent for review: not private, and
+  // not in a folder the artist has closed to Blueprint (rev 10).
+  const map = found.some(folderManaged)
+    ? folderMap(await loadFolders(artistPk(artistId)))
+    : new Map<string, never>();
+  const ok = found.filter(
+    (f) => f.status === 'available' && f.visibility !== 'private' && !hiddenFromBlueprint(f, map),
+  );
   if (ok.length !== new Set(fileIds).size) {
-    throw new HttpError(400, 'Attach files from your library that are ready and not private');
+    throw new HttpError(
+      400,
+      'Attach files from your library that are ready and that Blueprint can open (not private)',
+    );
   }
   return Object.fromEntries(ok.map((f) => [String(f.fileId), Number(f.version ?? 1)]));
 }

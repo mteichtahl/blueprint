@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { authorize, type Action, type Principal } from '@bmg/authz';
+import { authorize, type Principal } from '@bmg/authz';
 import { DataAccessSessions, isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import type { z } from 'zod';
@@ -35,7 +35,6 @@ import {
   LIBRARY_PK,
   LibraryPatch,
   LibraryUpload,
-  librarySharing,
   manageAllowed,
   ownerOf,
   PENDING_TTL_SECONDS,
@@ -47,6 +46,11 @@ import {
   type FileRecord,
 } from '../files/model.ts';
 import { namesFor, people, type Person } from '../files/people.ts';
+import { can, fileAccess, folderAccess } from '../files/access.ts';
+import { folderManaged, folderMap, type FolderMap, type Level } from '../files/folders.ts';
+import { folderRoutes } from '../files/folder-routes.ts';
+import { loadFolders } from '../files/folder-store.ts';
+import { libraryRoute } from '../files/library-route.ts';
 import { usesOf } from '../files/usage.ts';
 import { BRAND_SK } from '../brand/model.ts';
 import { artistPk, newId } from '../workspace/model.ts';
@@ -80,13 +84,60 @@ function fileIdParam(event: APIGatewayProxyEvent): string {
   return id;
 }
 
-function canArtistFile(principal: Principal, action: Action, artistId: string, f?: FileRecord) {
-  return authorize(principal, action, {
-    kind: 'artist-data',
-    artistId,
-    visibility: f?.visibility ?? 'normal',
-    sharedWithArtistIds: f?.sharedWithArtistIds ?? [],
-  });
+/** Whether someone can read or change anything in an artist's workspace at all. */
+function canArtistSpace(principal: Principal, action: 'read' | 'write', artistId: string) {
+  return authorize(principal, action, { kind: 'artist-data', artistId, visibility: 'normal' });
+}
+
+// ── Folders (rev 10) ──────────────────────────────────────────────────────
+/** Folders are read once per request and space. */
+let folderCache = new Map<string, Promise<FolderMap>>();
+function foldersOf(pk: string): Promise<FolderMap> {
+  let m = folderCache.get(pk);
+  if (!m) {
+    m = loadFolders(pk).then(folderMap);
+    folderCache.set(pk, m);
+  }
+  return m;
+}
+const NO_FOLDERS: FolderMap = new Map();
+const mapFor = (f: Stored) => (folderManaged(f) ? foldersOf(f.PK) : Promise.resolve(NO_FOLDERS));
+
+const REFUSED: Record<Level, string> = {
+  none: 'You don’t have access to this file',
+  view: 'You can open this file but not change it',
+  edit: 'You can’t change who can open this file',
+  manage: '',
+};
+
+/** Refuses unless the person has at least `min` on the file. */
+async function needFile(principal: Principal, f: Stored, min: Exclude<Level, 'none'>) {
+  const a = fileAccess(principal, f, await mapFor(f));
+  if (!can(a, min))
+    throw new HttpError(
+      403,
+      REFUSED[a.level === 'none' ? 'none' : min === 'manage' ? 'edit' : 'view'],
+    );
+  return a;
+}
+
+/** An upload into a folder: the folder must exist and the person must be able to add to it. */
+async function uploadFolder(
+  principal: Principal,
+  pk: string,
+  space: Parameters<typeof folderAccess>[3],
+  id?: string,
+) {
+  if (!id) return undefined;
+  const map = await foldersOf(pk);
+  const folder = map.get(id);
+  if (!folder || !can(folderAccess(principal, folder, map, space), 'view')) {
+    throw new HttpError(404, 'No such folder');
+  }
+  if (!can(folderAccess(principal, folder, map, space), 'edit')) {
+    throw new HttpError(403, 'You can open this folder but not add to it');
+  }
+  return folder;
 }
 
 function ensure(d: { allow: boolean; reason: string }) {
@@ -241,8 +292,13 @@ async function withThumbnails(principal: Principal, files: Stored[]) {
     files.map(async (f) => {
       const owner = names.get(ownerOf(f).sub);
       const shown = publicFile(f, principal);
+      // Folder access (rev 10) narrows what rev 8 allows; the API checks again.
+      const level = fileAccess(principal, f, await mapFor(f)).level;
       return {
         ...shown,
+        level,
+        canEdit: shown.canEdit && can({ level, why: { kind: 'default' } }, 'edit'),
+        canMove: level === 'manage' || shown.canManage,
         versionUploadedByName: nameOf(shown.versionUploadedBy),
         versions: shown.versions.map((v) => ({ ...v, uploadedByName: nameOf(v.uploadedBy) })),
         ownerName: owner?.displayName ?? (ownerOf(f).role === 'artist' ? 'Artist' : 'Blueprint'),
@@ -699,23 +755,45 @@ async function removeThumb(principal: Principal, f: Stored) {
   );
 }
 
+/** What the folder routes need from here (rev 10). */
+const deps = { removeFile };
+export type FolderDeps = typeof deps;
+
 /**
  * Files: upload (to quarantine), list, rename-free metadata, sharing, and
  * short-lived download links. The malware scan and the move to the real
  * bucket happen in files-promote, after GuardDuty reports.
  */
-export const handler = handle(async (event) => {
+export const handler = handle(async (raw) => {
+  const event = libraryRoute(raw);
   const principal = await principalFor(authContext(event));
   const route = `${event.httpMethod} ${event.resource}`;
   const show = (f: FileRecord) => publicFile(f, principal);
+  folderCache = new Map();
+
+  // Folders (rev 10): one proxy route per space.
+  if (event.resource.startsWith('/library/folders')) {
+    return folderRoutes(principal, event, { space: { kind: 'library' }, pk: LIBRARY_PK }, deps);
+  }
+  if (event.resource.startsWith('/artists/{artistId}/folders')) {
+    const artistId = artistIdParam(event);
+    ensure(canArtistSpace(principal, 'read', artistId));
+    return folderRoutes(
+      principal,
+      event,
+      { space: { kind: 'artist', artistId }, pk: artistPk(artistId) },
+      deps,
+    );
+  }
 
   switch (route) {
     // ── Artist workspace files ──
     case 'GET /artists/{artistId}/files': {
       const artistId = artistIdParam(event);
-      ensure(canArtistFile(principal, 'read', artistId));
-      const visible = (await list(artistPk(artistId))).filter(
-        (f) => canArtistFile(principal, 'read', artistId, f).allow,
+      ensure(canArtistSpace(principal, 'read', artistId));
+      const map = await foldersOf(artistPk(artistId));
+      const visible = (await list(artistPk(artistId))).filter((f) =>
+        can(fileAccess(principal, f, folderManaged(f) ? map : NO_FOLDERS), 'view'),
       );
       const [shown, used] = await Promise.all([
         withThumbnails(principal, visible),
@@ -729,8 +807,14 @@ export const handler = handle(async (event) => {
 
     case 'POST /artists/{artistId}/files': {
       const artistId = artistIdParam(event);
-      ensure(canArtistFile(principal, 'write', artistId));
+      ensure(canArtistSpace(principal, 'write', artistId));
       const body = parseBody(event, ArtistUpload);
+      const folder = await uploadFolder(
+        principal,
+        artistPk(artistId),
+        { kind: 'artist', artistId },
+        body.folderId,
+      );
       if (!visibilityAllowed(principal.role, body.visibility)) {
         throw new HttpError(
           403,
@@ -767,10 +851,12 @@ export const handler = handle(async (event) => {
           : {}),
         uploadedBy: principal.sub,
         uploaderRole: principal.role,
+        // In a folder, a new file takes the folder's access (rev 10).
+        ...(folder ? { folderId: folder.folderId } : {}),
         editAccess:
           body.visibility === 'private'
             ? 'owner'
-            : (body.editAccess ?? defaultEditAccess('artist')),
+            : (body.editAccess ?? (folder ? 'everyone' : defaultEditAccess('artist'))),
         createdAt: new Date().toISOString(),
       };
       if (rec.editAccess === 'chosen') {
@@ -791,14 +877,14 @@ export const handler = handle(async (event) => {
     case 'GET /artists/{artistId}/files/{fileId}': {
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
-      ensure(canArtistFile(principal, 'read', artistId, f));
+      await needFile(principal, f, 'view');
       return json(200, await single(principal, event, f));
     }
 
     case 'PATCH /artists/{artistId}/files/{fileId}': {
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
-      ensure(canArtistFile(principal, 'write', artistId, f));
+      await needFile(principal, f, 'edit');
       const patch = parseBody(event, ArtistFilePatch);
       const now = new Date().toISOString();
       const sets = ['updatedAt = :at', 'updatedBy = :by'];
@@ -873,7 +959,7 @@ export const handler = handle(async (event) => {
     case 'POST /artists/{artistId}/files/{fileId}/versions': {
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
-      ensure(canArtistFile(principal, 'write', artistId, f));
+      await needFile(principal, f, 'edit');
       return versions(principal, event, f);
     }
 
@@ -882,7 +968,7 @@ export const handler = handle(async (event) => {
       // The artist and Blueprint can both do this (design: assets are shared work).
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
-      ensure(canArtistFile(principal, 'write', artistId, f));
+      await needFile(principal, f, 'edit');
       const asset = {
         ...parseBody(event, AssetMetaSchema),
         updatedBy: principal.sub,
@@ -909,7 +995,7 @@ export const handler = handle(async (event) => {
       // Take a file out of the asset library (the file itself stays).
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
-      ensure(canArtistFile(principal, 'write', artistId, f));
+      await needFile(principal, f, 'edit');
       await db.send(
         new UpdateCommand({
           TableName: table(),
@@ -926,7 +1012,7 @@ export const handler = handle(async (event) => {
     case 'POST /artists/{artistId}/files/{fileId}/download': {
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
-      ensure(canArtistFile(principal, 'read', artistId, f));
+      await needFile(principal, f, 'view');
       if (f.status !== 'available') throw new HttpError(409, 'This file isn’t available yet');
       const v = downloadVersion(event);
       const url =
@@ -944,7 +1030,7 @@ export const handler = handle(async (event) => {
     case 'DELETE /artists/{artistId}/files/{fileId}': {
       const artistId = artistIdParam(event);
       const f = await load(artistPk(artistId), fileIdParam(event));
-      ensure(canArtistFile(principal, 'write', artistId, f));
+      await needFile(principal, f, 'edit');
       const refused = deleteAllowed(principal, f);
       if (refused) throw new HttpError(403, refused);
       // In use anywhere other than chat: remove it from there first (rev 8).
@@ -957,8 +1043,9 @@ export const handler = handle(async (event) => {
 
     // ── BMG document library ──
     case 'GET /library/files': {
+      const map = await foldersOf(LIBRARY_PK);
       const visible = (await list(LIBRARY_PK))
-        .filter((f) => authorize(principal, 'read', librarySharing(f)).allow)
+        .filter((f) => can(fileAccess(principal, f, folderManaged(f) ? map : NO_FOLDERS), 'view'))
         // Artists only see files once they are ready, and never who else they're shared with.
         .filter((f) => principal.role !== 'artist' || f.status === 'available');
       const files = (await withThumbnails(principal, visible)).map((f) =>
@@ -970,6 +1057,7 @@ export const handler = handle(async (event) => {
     case 'POST /library/files': {
       ensure(authorize(principal, 'write', { kind: 'org-shared', visibility: 'bmg-only' }));
       const body = parseBody(event, LibraryUpload);
+      const folder = await uploadFolder(principal, LIBRARY_PK, { kind: 'library' }, body.folderId);
       const fileId = newId();
       const rec: FileRecord = {
         fileId,
@@ -984,6 +1072,8 @@ export const handler = handle(async (event) => {
         sharedWithArtistIds: body.sharing === 'selected' ? body.sharedWithArtistIds : [],
         uploadedBy: principal.sub,
         uploaderRole: principal.role,
+        // In a folder, the folder decides who can see it (rev 10).
+        ...(folder ? { folderId: folder.folderId } : {}),
         editAccess: body.editAccess ?? defaultEditAccess('library'),
         createdAt: new Date().toISOString(),
       };
@@ -1008,13 +1098,13 @@ export const handler = handle(async (event) => {
 
     case 'GET /library/files/{fileId}': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
-      ensure(authorize(principal, 'read', librarySharing(f)));
+      await needFile(principal, f, 'view');
       return json(200, await single(principal, event, f));
     }
 
     case 'PATCH /library/files/{fileId}': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
-      ensure(authorize(principal, 'write', librarySharing(f)));
+      await needFile(principal, f, 'edit');
       const patch = parseBody(event, LibraryPatch);
       if (patch.title !== undefined) {
         const refused = editAllowed(principal, f);
@@ -1023,6 +1113,12 @@ export const handler = handle(async (event) => {
       if (patch.sharing !== undefined) {
         const refused = manageAllowed(principal, f);
         if (refused) throw new HttpError(403, refused);
+        if (folderManaged(f)) {
+          throw new HttpError(
+            409,
+            'This document’s access is set in Access (rev 10), not Share with',
+          );
+        }
       }
       const owned = await ownerChanges(principal, f, patch);
       const sets = ['updatedAt = :at', 'updatedBy = :by'];
@@ -1086,13 +1182,13 @@ export const handler = handle(async (event) => {
 
     case 'POST /library/files/{fileId}/versions': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
-      ensure(authorize(principal, 'write', librarySharing(f)));
+      await needFile(principal, f, 'edit');
       return versions(principal, event, f);
     }
 
     case 'POST /library/files/{fileId}/download': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
-      ensure(authorize(principal, 'read', librarySharing(f)));
+      await needFile(principal, f, 'view');
       if (f.status !== 'available') throw new HttpError(409, 'This file isn’t available yet');
       const v = downloadVersion(event);
       const url =
@@ -1109,7 +1205,7 @@ export const handler = handle(async (event) => {
 
     case 'DELETE /library/files/{fileId}': {
       const f = await load(LIBRARY_PK, fileIdParam(event));
-      ensure(authorize(principal, 'write', librarySharing(f)));
+      await needFile(principal, f, 'edit');
       const refused = deleteAllowed(principal, f);
       if (refused) throw new HttpError(403, refused);
       const inUse = inUseMessage((await usesOf(principal, f)).all);

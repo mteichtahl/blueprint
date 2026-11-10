@@ -26,6 +26,9 @@ import {
   kbName,
   type KbRecord,
 } from './kb.ts';
+import { hiddenFromBlueprint } from '../files/access.ts';
+import { loadFolders } from '../files/folder-store.ts';
+import { folderManaged, folderMap, type FolderMap } from '../files/folders.ts';
 
 /**
  * Creating, filling and deleting knowledge bases (design 10.3, 10.4).
@@ -194,12 +197,27 @@ async function readFile(f: FileRecord): Promise<Uint8Array> {
   return obj.Body!.transformToByteArray();
 }
 
+/** Folders are read once a minute per artist while syncing. */
+const folderMemo = new Map<string, { at: number; map: Promise<FolderMap> }>();
+async function hiddenByFolders(f: FileRecord): Promise<boolean> {
+  if (f.scope !== 'artist' || !folderManaged(f)) return false;
+  const pk = `ARTIST#${f.artistId}`;
+  let m = folderMemo.get(pk);
+  if (!m || Date.now() - m.at > 60_000) {
+    m = { at: Date.now(), map: loadFolders(pk).then(folderMap) };
+    folderMemo.set(pk, m);
+  }
+  return hiddenFromBlueprint(f, await m.map);
+}
+
 /** Adds, refreshes or removes one file in its owner's knowledge base. */
 export async function syncFile(
   f: FileRecord,
   rec: KbRecord,
 ): Promise<'ingested' | 'removed' | 'skipped'> {
-  const decision = ingestDecision(f);
+  // An artist can take Blueprint's access to a folder away (rev 10): those
+  // files are kept out of the knowledge base, like private ones.
+  const decision = ingestDecision((await hiddenByFolders(f)) ? { ...f, visibility: 'private' } : f);
   const id = { dataSourceType: 'CUSTOM' as const, custom: { id: f.fileId } };
   if (!decision.ingest) {
     await bedrock
