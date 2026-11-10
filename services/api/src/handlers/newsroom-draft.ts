@@ -232,7 +232,8 @@ export async function handler(): Promise<
         new ConverseCommand({
           modelId: env('SUMMARY_MODEL'),
           messages: [{ role: 'user', content: [{ text: `${prompt}\n\n${MODEL_OUTPUT}` }] }],
-          inferenceConfig: { maxTokens: 2000, temperature: 0.4 },
+          // No temperature: Claude 5.5 models reject sampling parameters.
+          inferenceConfig: { maxTokens: 8000 },
         }),
       );
       const text = res.output?.message?.content?.map((c) => c.text ?? '').join('') ?? '';

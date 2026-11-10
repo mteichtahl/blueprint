@@ -36,8 +36,9 @@ function agentFor(inv: Invocation): Agent {
     model: new BedrockModel({
       region: process.env.AWS_REGION ?? 'ap-southeast-2',
       modelId: MODEL_ID,
-      maxTokens: 2048,
-      temperature: 0.3,
+      // Claude 5.5 models reject temperature/top_p/top_k (400): steer with the prompt.
+      // Adaptive thinking is always on, so leave room for it as well as the reply.
+      maxTokens: 8192,
       ...(GUARDRAIL_ID
         ? {
             guardrailConfig: {
@@ -103,11 +104,29 @@ function send(res: ServerResponse, status: number, body: unknown) {
  * never prompt or reply text. Anything else is logged by type only.
  */
 export function describeError(err: unknown): Record<string, unknown> {
-  const e = err as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
-  const out: Record<string, unknown> = { error: e?.name ?? 'Error' };
-  if (e?.$metadata) {
-    out.status = e.$metadata.httpStatusCode;
-    out.detail = String(e.message ?? '').slice(0, 300);
+  type E = {
+    name?: string;
+    message?: string;
+    cause?: unknown;
+    $metadata?: { httpStatusCode?: number };
+  };
+  // Model errors from the agent library wrap the real cause (often a Bedrock
+  // error); report the innermost AWS error, or the innermost error's type.
+  const chain: E[] = [];
+  for (let e = err as E | undefined; e && chain.length < 5; e = e.cause as E | undefined) {
+    chain.push(e);
+  }
+  const aws = chain.find((e) => e.$metadata);
+  const root = aws ?? chain.at(-1) ?? {};
+  const out: Record<string, unknown> = {
+    error: chain.map((e) => e.name ?? 'Error').join(' ← '),
+  };
+  if (aws) {
+    out.status = aws.$metadata?.httpStatusCode;
+    out.detail = String(aws.message ?? '').slice(0, 300);
+  } else if (chain.length > 1 || root.name === 'ModelError') {
+    // The library's own messages ("Stream ended without completing a message").
+    out.detail = String(root.message ?? '').slice(0, 200);
   }
   return out;
 }
