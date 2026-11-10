@@ -192,7 +192,7 @@ export function Insights({
                 </figure>
                 {w.topPages && w.topPages.length > 0 && (
                   <div className="flex-[1_1_260px]">
-                    <DataTable>
+                    <DataTable fit>
                       <thead>
                         <tr>
                           <th scope="col">Top pages</th>
@@ -212,7 +212,7 @@ export function Insights({
                 )}
                 {w.sources && w.sources.length > 0 && (
                   <div className="flex-[1_1_200px]">
-                    <DataTable>
+                    <DataTable fit>
                       <thead>
                         <tr>
                           <th scope="col">Traffic from</th>
@@ -337,7 +337,7 @@ export function ArtistStats({
       </div>
       <Sparkline values={a.series} color="#D9534F" label={`${name} followers over ${range} days`} />
       {a.split.length > 0 || a.spotifyListeners !== undefined ? (
-        <DataTable>
+        <DataTable fit>
           <thead>
             <tr>
               <th scope="col">Platform</th>

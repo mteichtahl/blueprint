@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { Button, Card, Chips, DataTable, Field, Notice, Tag, TextArea } from '../components/ui.tsx';
+import {
+  Button,
+  Card,
+  Chips,
+  DataTable,
+  Field,
+  Notice,
+  RowCard,
+  Tag,
+  TextArea,
+} from '../components/ui.tsx';
 import { ContactPicker, type Contact } from './Contacts.tsx';
 import {
   LogoTile,
@@ -698,33 +708,18 @@ export function Venues({
           {q || backline || minCapacity ? 'No venues match.' : 'No venues yet. Add the first one.'}
         </p>
       ) : compact ? (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {venues.map((v) => (
-            <li key={v.venueId}>
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-lg border border-input bg-card p-3 text-left"
-                onClick={() => setOpen(v)}
-              >
-                <VenueLogo cfg={cfg} token={token} venue={v} size={40} />
-                <span className="flex min-w-0 flex-col items-start">
-                  <b>{v.name}</b>
-                  <span className="src">
-                    {[
-                      v.suburb,
-                      v.capacity ? `cap. ${v.capacity}` : '',
-                      v.backline ? 'backline' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </span>
-                </span>
-              </button>
-            </li>
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Venues">
+          {venueCards(venues, setOpen, (v) => (
+            <VenueLogo cfg={cfg} token={token} venue={v} size={40} />
           ))}
         </ul>
       ) : (
-        <DataTable>
+        <DataTable
+          label="Venues"
+          cards={venueCards(venues, setOpen, (v) => (
+            <VenueLogo cfg={cfg} token={token} venue={v} size={40} />
+          ))}
+        >
           <thead>
             <tr>
               <th scope="col">Venue</th>
@@ -762,6 +757,33 @@ export function Venues({
       )}
     </Card>
   );
+}
+
+/** Venues as phone cards: name, suburb and capacity, backline, who to talk to. */
+function venueCards(
+  venues: Venue[],
+  open: (v: Venue) => void,
+  logo: (v: Venue) => React.ReactNode,
+) {
+  return venues.map((v) => (
+    <RowCard
+      key={v.venueId}
+      lead={logo(v)}
+      title={v.name}
+      status={v.archived ? <Tag>Archived</Tag> : undefined}
+      sub={[v.suburb, v.capacity ? `Capacity ${v.capacity}` : ''].filter(Boolean).join(' · ')}
+      tags={
+        <>
+          {v.backline && <Tag tone="n">Backline</Tag>}
+          {v.booker?.name && <span className="src">Booker: {v.booker.name}</span>}
+          {!v.booker?.name && v.manager?.name && (
+            <span className="src">Manager: {v.manager.name}</span>
+          )}
+        </>
+      }
+      onOpen={() => open(v)}
+    />
+  ));
 }
 
 /** Pick a venue from the main list, or add it on the spot (gigs and events). */

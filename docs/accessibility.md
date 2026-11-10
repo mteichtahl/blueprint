@@ -33,6 +33,7 @@
 - **2.5.7 Dragging:** nothing needs dragging yet. When the Gantt timeline (change plan WP4) arrives, it must keep the date-picker alternative already planned.
 - **1.4.10 Reflow:** the layouts are responsive from 320px (phone app, collapsible desktop sidebar), with no fixed-height text containers, and nothing scrolls the page sideways (checked at 320, 375 and 414px in Chrome).
 - **1.4.4 Resize text: a deliberate exception on phones.** At Blueprint's request, pinch and double-tap zoom are turned off on phones and in the installed app, so it behaves like a native app (`user-scalable=no`, `touch-action: pan-x pan-y`, and Safari's gesture events cancelled in `lib/noZoom.ts`). This fails 1.4.4 as axe's `meta-viewport` rule reads it. What's left for people who need larger text: browser zoom on desktop is unaffected, and the layouts reflow without loss down to 320px. iOS doesn't apply its system text size to web text. To restore zoom, remove `maximum-scale=1, user-scalable=no` from `index.html`, the `touch-action` rule in `index.css` and the `preventZoom()` call in `main.tsx`.
+- **1.4.11 Non-text contrast (dark mode):** a toggle's track is coral when on and a grey track with an outline when off, both at least 5:1 against the dark cards. Tick boxes are coral when ticked, and progress fills are light.
 - **3.1.1 Language:** `<html lang="en-AU">`.
 - **1.3.1 Structure:** landmarks on every screen (main, navigation, complementary), labelled form fields, and tables with headers.
 

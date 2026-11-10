@@ -19,6 +19,7 @@ import {
   Field,
   Icon,
   Notice,
+  RowCard,
   shortDate,
   Tag,
 } from '../components/ui.tsx';
@@ -351,7 +352,33 @@ function SubmissionTable({
   if (subs.length === 0) return <p className="src pb-5">{empty}</p>;
   return (
     <>
-      <DataTable>
+      <DataTable
+        label="Submissions"
+        cards={subs.map((s) => (
+          <RowCard
+            key={s.submissionId}
+            title={s.title}
+            status={<PriorityBadge p={s.priority} />}
+            sub={[
+              names ? (names[s.artistId] ?? 'Artist') : '',
+              TYPE_LABEL[s.type],
+              s.fileIds.length
+                ? `${s.fileIds.length} file${s.fileIds.length === 1 ? '' : 's'}`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+            tags={
+              <span className="src">
+                {s.status === 'open'
+                  ? `Needed by ${date(s.neededBy)}`
+                  : `Reviewed ${date(s.reviewedAt!)}`}
+              </span>
+            }
+            onOpen={() => onOpen(s)}
+          />
+        ))}
+      >
         <thead>
           <tr>
             <th scope="col">Upload</th>

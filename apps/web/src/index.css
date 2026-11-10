@@ -695,7 +695,12 @@ html {
 .dark .ibtn {
   color: #f1f4f7;
 }
-.dark .bar > div[style*='#011935'] {
+/* Progress bars: the default navy fill turns light on dark cards. (React writes
+   the inline colour as rgb(), so match a data attribute, not the style text.) */
+.dark .bar {
+  background: #2a3d57;
+}
+.dark .bar > div[data-ink] {
   background: #f1f4f7 !important;
 }
 .dark input,
@@ -1998,4 +2003,46 @@ nav,
   html {
     scroll-padding-top: calc(72px + env(safe-area-inset-top));
   }
+}
+
+/* Two-column tables on phones: the full width, label wrapping, number on the right. */
+.dt.dt-fit {
+  width: 100%;
+  table-layout: fixed;
+}
+.dt.dt-fit td,
+.dt.dt-fit th {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dt.dt-fit td:last-child,
+.dt.dt-fit th:last-child {
+  width: 38%;
+  text-align: right;
+}
+
+/* Dark mode: toggles and tick boxes must show their state. The generic
+   `.dark input` background above would otherwise paint "on" and "off" the
+   same navy. Off is a grey track with an outline; on is coral with the knob
+   moved right (both at least 3:1 against the dark cards). */
+.dark .switch {
+  background-color: #33445c;
+  box-shadow: inset 0 0 0 1px #8494aa;
+}
+.dark .switch::after {
+  background: #c7ced6;
+  box-shadow: none;
+}
+.dark .switch:checked {
+  background-color: #e8726e;
+  box-shadow: none;
+}
+.dark .switch:checked::after {
+  background: #ffffff;
+}
+.dark .switch:disabled {
+  opacity: 0.55;
+}
+.dark .chk {
+  accent-color: #e8726e;
 }

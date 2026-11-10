@@ -28,12 +28,13 @@ import {
   Bar,
   Button,
   Card,
-  DataTable,
   Chips,
+  DataTable,
   Field,
   Icon,
   Notice,
   PageHeader,
+  RowCard,
   shortDate,
   Tag,
 } from '../components/ui.tsx';
@@ -641,7 +642,20 @@ function StudioHq({
             <p className="src pb-5">Nothing waiting for review.</p>
           ) : (
             <>
-              <DataTable>
+              <DataTable
+                label="Waiting for review"
+                cards={openReviews.slice(0, 5).map((s) => (
+                  <RowCard
+                    key={s.submissionId}
+                    title={s.title}
+                    status={
+                      <Tag tone={PRIORITY_TAG[s.priority][0]}>{PRIORITY_TAG[s.priority][1]}</Tag>
+                    }
+                    sub={`${names[s.artistId] ?? 'Artist'} · Needed by ${shortDate(s.neededBy)}`}
+                    onOpen={() => onNavigate('review')}
+                  />
+                ))}
+              >
                 <thead>
                   <tr>
                     <th scope="col">Upload</th>
@@ -741,7 +755,36 @@ function ArtistsPage({
           {artists.length === 0 ? (
             <p className="src pb-5">No artists yet.</p>
           ) : (
-            <DataTable>
+            <DataTable
+              label="Artists"
+              cards={artists.map((a) => (
+                <RowCard
+                  key={a.artistId}
+                  lead={<Avatar name={a.displayName} size={36} />}
+                  title={a.displayName}
+                  status={
+                    <Tag tone={a.status === 'active' ? 'n' : 's'}>{a.status || 'Invited'}</Tag>
+                  }
+                  sub={`Joined ${shortDate(a.createdAt)}`}
+                  tags={
+                    <>
+                      <Tag tone={a.termsAcceptedAt ? 'n' : 's'}>
+                        {a.termsAcceptedAt ? 'Terms accepted' : 'Terms not yet'}
+                      </Tag>
+                      <Tag tone={a.aiOptIn ? 'n' : 's'}>
+                        {a.aiOptIn === true
+                          ? 'AI on'
+                          : a.aiOptIn === false
+                            ? 'AI off'
+                            : 'AI not chosen'}
+                      </Tag>
+                    </>
+                  }
+                  onOpen={() => onOpen(a.artistId)}
+                  openLabel={`Open ${a.displayName}'s workspace`}
+                />
+              ))}
+            >
               <thead>
                 <tr>
                   <th scope="col">Artist</th>

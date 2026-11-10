@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { Bar, Button, Card, DataTable, Field, Notice, PageHeader, Tag } from '../components/ui.tsx';
+import {
+  Bar,
+  Button,
+  Card,
+  DataTable,
+  Field,
+  Notice,
+  PageHeader,
+  RowCard,
+  Tag,
+} from '../components/ui.tsx';
 import { aud, PRESET_COSTS } from '../components/Money.tsx';
 import { VenuePicker, type Venue } from './Venues.tsx';
 import { ContactPicker } from './Contacts.tsx';
@@ -541,7 +551,27 @@ function EventDetail({
           {d.guests.length === 0 ? (
             <p className="src">No guests yet.</p>
           ) : (
-            <DataTable>
+            <DataTable
+              label="Guests"
+              cards={d.guests.map((g) => (
+                <RowCard
+                  key={g.itemId}
+                  title={String(g.name)}
+                  sub={[String(g.type || ''), g.fromOutreach ? 'From the outreach list' : '']
+                    .filter(Boolean)
+                    .join(' · ')}
+                  tags={
+                    <StatusSelect
+                      label={`Status for ${String(g.name)}`}
+                      value={g.status as keyof typeof GUEST_TAG}
+                      tags={GUEST_TAG}
+                      onChange={(v) => void patchRow('guests', g.itemId, { status: v })}
+                    />
+                  }
+                  actions={<RemoveButton onClick={() => void removeRow('guests', g.itemId)} />}
+                />
+              ))}
+            >
               <thead>
                 <tr>
                   <th scope="col">Guest</th>
@@ -760,7 +790,38 @@ function EventDetail({
               }
             />
           )}
-          <DataTable>
+          <DataTable
+            label="Budget"
+            cards={
+              <>
+                {d.budget.map((b) => (
+                  <RowCard
+                    key={b.itemId}
+                    title={String(b.item)}
+                    sub={b.inKind ? 'In-kind' : `Budget ${money(Number(b.budgetCents))}`}
+                    tags={
+                      <SpentInput
+                        label={`Spent on ${String(b.item)}`}
+                        cents={Number(b.spentCents)}
+                        onSave={(c) => void patchRow('budget', b.itemId, { spentCents: c })}
+                      />
+                    }
+                    actions={<RemoveButton onClick={() => void removeRow('budget', b.itemId)} />}
+                  />
+                ))}
+                <RowCard
+                  title="Total"
+                  sub={`Budget ${money(s.budgetCents)} · Spent ${money(s.spentCents)}`}
+                  status={
+                    <b className={s.profitCents < 0 ? 'text-[#8E2F2C]' : ''}>
+                      {aud(s.profitCents)}
+                      {s.profitCents < 0 ? ' loss' : ' profit'}
+                    </b>
+                  }
+                />
+              </>
+            }
+          >
             <thead>
               <tr>
                 <th scope="col">Cost</th>

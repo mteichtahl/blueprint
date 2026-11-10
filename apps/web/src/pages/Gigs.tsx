@@ -7,8 +7,10 @@ import {
   Card,
   Chips,
   DataTable,
+  DateBlock,
   Field,
   Notice,
+  RowCard,
   Select,
   Tag,
   TextArea,
@@ -631,7 +633,34 @@ function GigTable({
 }) {
   if (gigs.length === 0) return <p className="src">{empty}</p>;
   return (
-    <DataTable>
+    <DataTable
+      label="Gigs"
+      cards={gigs.map((g) => {
+        const [tone, label] = STATUS[g.status];
+        const helpOpen = g.help?.status === 'open';
+        const who = names?.[g.artistId] ?? artistName ?? 'Artist';
+        return (
+          <RowCard
+            key={g.gigId}
+            accent={helpOpen}
+            muted={isPast(g)}
+            lead={<DateBlock date={g.date} />}
+            title={g.title}
+            status={<Tag tone={tone}>{label}</Tag>}
+            sub={[names ? who : '', g.startTime ? timeRange(g.startTime, g.endTime) : '', g.venue]
+              .filter(Boolean)
+              .join(' · ')}
+            tags={
+              <>
+                {helpOpen && <Tag tone="k">{helpLabel(g)}</Tag>}
+                {g.checklist.length > 0 && <Tag tone="s">Checklist {done(g)}</Tag>}
+              </>
+            }
+            onOpen={() => onOpen(g.gigId, g.artistId)}
+          />
+        );
+      })}
+    >
       <thead>
         <tr>
           <th scope="col">Date</th>

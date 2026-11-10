@@ -284,7 +284,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Entries say what changed in plain words** (`workspace/plan-history.ts`): outcome, success measures, stages added, removed, renamed, re-dated or reordered, and milestones added, removed, moved, renamed, ticked, re-dated or re-linked. Very large saves are capped at 40 lines.
 - **Who:** staff have no names in the app, so an entry shows "Blueprint", or "Blueprint · <job title>" when the person set one. The person's id is stored but not returned.
 - **Artists and Blueprint both see the history** (`GET /artists/{id}/plan/history`, the plan's History tab), and the PDF ends with it as a timeline, oldest first. History starts with this release; earlier saves weren't recorded.
-- **The PDF header uses the official white-on-navy logo** from `/brand/bmg-logo-white-on-navy.png` (the file the emails use), placed as supplied in the navy band. It is never redrawn; if the file isn't deployed, the PDF falls back to the text wordmark. The footer carries "© <year> Blueprint Music Group. All rights reserved."
+- **The PDF header uses the official white-on-navy logo** from `/brand/bmg-logo-white-on-navy.png` (the file the emails use), placed as supplied in the navy band. It is never redrawn. The official file was added on 10 Nov 2026 (`apps/web/public/brand/`), which also gives the emails their logo; if it ever fails to load, the PDF falls back to the text wordmark. The footer carries "© <year> Blueprint Music Group. All rights reserved."
 
 ## Notes: Phone and installed-app layout (10 Nov 2026)
 
@@ -301,3 +301,16 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - No rubber-band bounce or pull-to-refresh; no tap delay; app chrome isn't selectable.
 - **The phone menu is a proper dialog:** a close button, Escape, focus moved in and back out, Tab kept inside, the page behind locked, a slide-in that respects reduced motion, and it closes itself when the screen widens to desktop.
 - **The layout check is a Chrome harness** (the app with long sample data, at 320, 375 and 414px). It isn't in CI, because CI runners have no browser.
+
+## Notes: Tables on phones, dark-mode toggles (10 Nov 2026)
+
+- **No table scrolls sideways on a phone.** Below 640px, each table shows its rows as cards (`RowCard`, passed to `DataTable` as `cards`). A card has up to three lines: the title with a status on the right, the key context, then a few tags. Everything else moves to the detail view.
+  - Tapping a card opens the row, as the table's row or Edit button did.
+  - Controls that act at once sit outside that tap area: a to-do's tick box, call and email on contacts, a newsroom site's on/off, Remind on connectors, Remove.
+  - Tablets and desktop keep the real tables. The cards are a real list (`ul`, named), checked by axe in `a11y.test.tsx`.
+- **Two-column tables (Insights)** stay tables on phones, fitted to the width (`fit`), with long labels wrapping.
+- **The document library** uses its existing phone list on any phone-width screen, with file names on up to two lines.
+- **Dark mode: toggles and tick boxes show their state.** The generic `.dark input` background had painted "on" and "off" the same navy.
+  - Off is a grey track with an outline; on is coral with the knob to the right. Both are at least 5:1 against the dark cards.
+  - Tick boxes use coral.
+  - Progress bars are light on dark cards. The old rule matched the inline colour as text, which never matched because React writes it as `rgb()`.
