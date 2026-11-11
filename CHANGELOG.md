@@ -26,6 +26,15 @@ The assistant has moved to the top bar and is now called Ask BMG.
 - It has a new icon: a speech bubble with a spark. Artists see the same name
   and icon on their floating button.
 
+## 1.3.1 — 2026-11-11
+
+The top of the app on a phone is one solid navy.
+
+### Fixed
+
+- On a phone, the strip behind the clock and battery at the very top no longer
+  fades from grey to navy; it is the same solid navy as the header.
+
 ## 1.3.0 — 2026-11-11
 
 Overview is back at the top of the phone menu.
