@@ -2148,6 +2148,33 @@ nav,
   }
 }
 
+/* Phones: the strip behind the status bar is one solid navy, never a fade.
+   Safari (iOS 26) tints the status bar from the page background and fades it
+   into the content underneath, which showed as a grey-to-navy gradient above
+   the header. The page's own background is navy on phones (the body keeps the
+   light background and fills the screen), and a fixed navy strip covers the
+   safe area so the status bar reads as part of the header. */
+@media (max-width: 1023px) {
+  html {
+    background: #011935;
+  }
+  body {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: env(safe-area-inset-top);
+    background: #011935;
+    z-index: 60;
+    pointer-events: none;
+  }
+}
+
 /* Two-column tables on phones: the full width, label wrapping, number on the right. */
 .dt.dt-fit {
   width: 100%;
