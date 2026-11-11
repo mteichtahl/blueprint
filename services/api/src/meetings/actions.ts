@@ -223,12 +223,23 @@ export async function reviewSuggestions(
 // ── Updating the plan ─────────────────────────────────────────────────────
 export const PlanUpdateBody = z.object({ notifyArtist: z.boolean().default(true) }).strict();
 
-async function tellArtist(artistId: string, lines: string[], undo = false) {
+/**
+ * Tells the artist (unless staff chose not to) and the plan owner (rev 12)
+ * what changed. The person who made the change isn't told.
+ */
+async function tellArtist(
+  artistId: string,
+  lines: string[],
+  bySub: string,
+  { undo = false, artist = true }: { undo?: boolean; artist?: boolean } = {},
+) {
   await put('bmg.workspace', 'plan.updated', {
     artistId,
     undo,
     lines: lines.slice(0, 5),
     more: Math.max(0, lines.length - 5),
+    bySub,
+    ...(artist ? {} : { skipArtist: true }),
   });
 }
 
@@ -296,7 +307,7 @@ export async function updatePlan(
     again.suggestions = set;
     await writeContent(fresh, again, role, { undoUntil, suggestionsWaiting: 0 });
   }
-  if (body.notifyArtist) await tellArtist(m.artistId, saved.changes);
+  await tellArtist(m.artistId, saved.changes, principal.sub, { artist: body.notifyArtist });
   return { planVersion: saved.version, changes: saved.changes, undoUntil };
 }
 
@@ -327,7 +338,7 @@ export async function undoPlanUpdate(m: Meeting, principal: Principal) {
   });
   applied.undoneAt = saved.at;
   await writeContent(m, content, role, {}, ['undoUntil']);
-  await tellArtist(m.artistId, saved.changes, true);
+  await tellArtist(m.artistId, saved.changes, principal.sub, { undo: true });
   return { planVersion: saved.version };
 }
 

@@ -82,6 +82,18 @@ async function contactFromUserPool(
   return undefined;
 }
 
+/**
+ * Where Blueprint hears about an artist's to-do changes (rev 12): the person
+ * looking after the to-do (the plan owner), else the shared address.
+ */
+async function bmgAddress(sub: string | undefined): Promise<string> {
+  if (sub && /^[0-9a-f-]{36}$/.test(sub)) {
+    const profile = await get<{ email?: string }>(`USER#${sub}`, 'PROFILE');
+    if (profile?.email) return profile.email;
+  }
+  return env('BMG_NOTIFY_ADDRESS');
+}
+
 /** Ids only in logs: no emails, names or titles. */
 function log(event: string, fields: Record<string, string | number | boolean>) {
   console.log(JSON.stringify({ level: 'info', event, ...fields }));
@@ -117,13 +129,16 @@ export const handler = async (event: EventBridgeEvent<string, Detail>): Promise<
       : undefined;
 
   let decision: Decision;
+  let bmgOwnerSub: string | undefined;
   switch (event['detail-type']) {
     case 'todo.updated': {
       const e = d as unknown as TodoUpdated;
+      const item = await todo(e.todoId);
+      bmgOwnerSub = item?.bmgOwnerSub;
       decision = onTodoUpdated(
         ctx,
         { ...e, changedFields: Array.isArray(e.changedFields) ? e.changedFields : [] },
-        await todo(e.todoId),
+        item,
         artistName,
       );
       break;
@@ -152,7 +167,7 @@ export const handler = async (event: EventBridgeEvent<string, Detail>): Promise<
     log('notify.skipped', { type: event['detail-type'], artistId, reason: decision.reason });
     return;
   }
-  const to = decision.to === 'bmg' ? env('BMG_NOTIFY_ADDRESS') : contact?.email;
+  const to = decision.to === 'bmg' ? await bmgAddress(bmgOwnerSub) : contact?.email;
   if (!to) {
     log('notify.skipped', { type: event['detail-type'], artistId, reason: 'no-contact' });
     return;

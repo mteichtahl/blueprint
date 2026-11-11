@@ -81,6 +81,8 @@ export type Plan = Omit<z.infer<typeof PlanBody>, 'version' | 'ownerSub' | 'hand
   /** Rev 12. Plans from before then have none until someone picks one. */
   ownerSub?: string;
   ownerSince?: string;
+  /** The note from the latest handover, for the new owner's summary. */
+  handoverNote?: string;
 };
 
 /** Phase library from the plan templates screen. */

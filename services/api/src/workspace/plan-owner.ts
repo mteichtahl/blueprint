@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import type { Person } from '../files/people.ts';
 import type { Todo } from './model.ts';
+import type { PlanChange } from './plan-history.ts';
 
 /**
  * Plan owner (rev 12): every artist plan has one Blueprint owner. Pure rules,
@@ -66,13 +68,38 @@ export function movesWithOwner(
   return !todo.bmgOwnerSub || todo.bmgOwnerSub === previousOwnerSub;
 }
 
-/** The history line for an owner change, e.g. "Changed the plan owner from Kyra to Sam (4 open to-dos moved)". */
-export function ownerChangeLine(from: string | undefined, to: string, moved: number): string {
-  const head = from
-    ? `Changed the plan owner from ${from} to ${to}`
-    : `Set the plan owner to ${to}`;
-  return moved > 0 ? `${head} (${moved} open to-do${moved === 1 ? '' : 's'} moved)` : head;
+/**
+ * The history line for an owner change, e.g. "Changed the plan owner from
+ * Kyra to Sam". Artists read the history, so it doesn't count the to-dos
+ * that moved (some may be BMG-only); the owners' notices do.
+ */
+export function ownerChangeLine(from: string | undefined, to: string): string {
+  return from ? `Changed the plan owner from ${from} to ${to}` : `Set the plan owner to ${to}`;
 }
 
 /** Plan, history entry and to-dos go in one transaction (DynamoDB allows 100 items). */
 export const MAX_TODOS_IN_MOVE = 98;
+
+/**
+ * Plan update notifications are rolled up per person (rev 12): the first
+ * save starts a 10-minute window, and one notification lists everything
+ * that person changed in it.
+ */
+export const PLAN_DIGEST_MINUTES = 10;
+
+/** One pending roll-up per artist and editor; Scheduler names are limited to 64 characters. */
+export const planDigestScheduleName = (artistId: string, bySub: string) =>
+  `plan-${createHash('sha256').update(`${artistId}:${bySub}`).digest('hex').slice(0, 40)}`;
+
+/** The roll-up's lines: this editor's saves in the window, oldest first, without meeting updates (already told). */
+export function digestLines(
+  entries: readonly Pick<PlanChange, 'at' | 'bySub' | 'kind' | 'changes'>[],
+  bySub: string,
+  max = 10,
+): { lines: string[]; more: number } {
+  const all = [...entries]
+    .filter((e) => e.bySub === bySub && e.kind !== 'meeting' && e.kind !== 'undone')
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .flatMap((e) => e.changes);
+  return { lines: all.slice(0, max), more: Math.max(0, all.length - max) };
+}

@@ -4,7 +4,7 @@
  * unit-tested. Nothing here carries message text or file contents: emails
  * and notifications say what happened and link to the app.
  */
-import { renderLayout } from '@bmg/email';
+import { renderLayout, type Block as EmailBlock } from '@bmg/email';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
@@ -92,19 +92,56 @@ export type DomainEvent =
       outcome: 'ready' | 'failed' | 'no-ai' | 'off';
     }
   | {
-      /** Blueprint updated (or undid an update to) an artist's plan from a meeting (rev 11). */
+      /**
+       * Blueprint updated (or undid an update to) an artist's plan, from a
+       * meeting (rev 11) or the plan editor (rev 12, rolled up over 10 minutes).
+       * The artist and the plan owner hear about it, never the person who made it.
+       */
       type: 'plan.updated';
       artistId: string;
       undo?: boolean;
       /** What changed, in plain words (plan titles and dates, never the meeting). */
       lines: string[];
       more: number;
+      /** Who made the change (not told). Rev 12. */
+      bySub?: string;
+      /** Staff chose not to tell the artist (meeting updates); the owner still hears. */
+      skipArtist?: boolean;
+      /** The plan owner; with none, the Blueprint admins hear instead. Rev 12. */
+      ownerSub?: string;
+      artistName?: string;
+    }
+  | {
+      /**
+       * A plan changed owner (rev 12), with the handover summary already
+       * written from the plan's data (never AI). The new owner gets the
+       * summary; the previous owner a short notice.
+       */
+      type: 'plan.ownerChanged';
+      artistId: string;
+      artistName: string;
+      fromSub?: string;
+      toSub: string;
+      toName: string;
+      bySub: string;
+      moved: number;
+      summary: string[];
     };
 
 export interface Draft {
   /** In-app and email category; preferences can turn email off per category later. */
   kind:
-    'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector' | 'todo' | 'meeting' | 'plan';
+    | 'review'
+    | 'feedback'
+    | 'message'
+    | 'file'
+    | 'gig'
+    | 'connector'
+    | 'todo'
+    | 'meeting'
+    | 'plan'
+    /** An artist's plan, for its Blueprint owner (rev 12). */
+    | 'artistPlan';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
@@ -127,11 +164,13 @@ const bmgFor = (r: Recipient, artistIds: string[]) =>
     artistIds.length > 0 &&
     artistIds.every((id) => (r.assignedArtistIds ?? []).includes(id)));
 
+export interface Planned {
+  to: Recipient[];
+  draft: Draft;
+}
+
 /** Picks recipients and words the notification. The actor is never notified. */
-export function plan(
-  e: DomainEvent,
-  everyone: Recipient[],
-): { to: Recipient[]; draft: Draft } | undefined {
+export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined {
   const artistsOf = (ids: string[]) =>
     everyone.filter((r) => r.role === 'artist' && r.artistId && ids.includes(r.artistId));
   switch (e.type) {
@@ -281,17 +320,88 @@ export function plan(
         },
       };
     }
+    case 'plan.updated':
+    case 'plan.ownerChanged':
+      // Worded per person; see planGroups. This is the first group (the artist, or the new owner).
+      return planGroups(e, everyone)[0];
+  }
+}
+
+/**
+ * Every recipient group, each with its own wording (rev 12: a plan update
+ * reads differently for the artist and for the plan owner).
+ */
+export function planGroups(e: DomainEvent, everyone: Recipient[]): Planned[] {
+  const isPlanEvent = e.type === 'plan.updated' || e.type === 'plan.ownerChanged';
+  if (!isPlanEvent) {
+    const one = plan(e, everyone);
+    return one ? [one] : [];
+  }
+  const artistsOf = (ids: string[]) =>
+    everyone.filter((r) => r.role === 'artist' && r.artistId && ids.includes(r.artistId));
+  switch (e.type) {
     case 'plan.updated': {
       const list = e.lines.map((l) => `• ${l}`).join('\n');
-      return {
-        to: artistsOf([e.artistId]),
-        draft: {
-          kind: 'plan',
-          title: e.undo ? 'Blueprint undid a plan update' : 'Blueprint updated your plan',
-          body: `${list}${e.more ? `\n+ ${e.more} more change${e.more === 1 ? '' : 's'}` : ''}`,
-          link: 'plan',
+      const body = `${list}${e.more ? `\n+ ${e.more} more change${e.more === 1 ? '' : 's'}` : ''}`;
+      const notActor = (r: Recipient) => r.sub !== e.bySub;
+      // The plan owner (rev 12); a plan with no owner (or one who left) goes to the admins.
+      const owner = everyone.find((r) => r.sub === e.ownerSub && isBmg(r));
+      const bmg = (owner ? [owner] : everyone.filter((r) => r.role === 'bmg-admin')).filter(
+        notActor,
+      );
+      const name = e.artistName ?? 'An artist';
+      return [
+        {
+          to: e.skipArtist ? [] : artistsOf([e.artistId]).filter(notActor),
+          draft: {
+            kind: 'plan',
+            title: e.undo ? 'Blueprint undid a plan update' : 'Blueprint updated your plan',
+            body,
+            link: 'plan',
+          },
         },
-      };
+        {
+          to: bmg,
+          draft: {
+            kind: 'artistPlan',
+            title: e.undo
+              ? `A plan update to ${name}'s plan was undone`
+              : `${name}'s plan was updated`,
+            body,
+            link: `plan:${e.artistId}`,
+          },
+        },
+      ];
+    }
+
+    case 'plan.ownerChanged': {
+      const to = everyone.find((r) => r.sub === e.toSub && isBmg(r));
+      const from = e.fromSub ? everyone.find((r) => r.sub === e.fromSub && isBmg(r)) : undefined;
+      const link = `plan:${e.artistId}`;
+      return [
+        // The summary is a briefing, so the new owner gets it even when they took the plan on themselves.
+        {
+          to: to ? [to] : [],
+          draft: {
+            kind: 'artistPlan',
+            title: `You now own ${e.artistName}'s plan`,
+            body: e.summary.join('\n'),
+            link,
+          },
+        },
+        {
+          to: from && from.sub !== e.toSub && from.sub !== e.bySub ? [from] : [],
+          draft: {
+            kind: 'artistPlan',
+            title: `${e.toName} now owns ${e.artistName}'s plan`,
+            body:
+              e.moved > 0
+                ? `${e.moved} open to-do${e.moved === 1 ? '' : 's'} moved to ${e.toName}.`
+                : `${e.toName} looks after the plan from now on.`,
+            link,
+          },
+        },
+      ];
     }
   }
 }
@@ -347,7 +457,27 @@ const EYEBROW: Record<Draft['kind'], string> = {
   todo: 'To-do',
   meeting: 'Meeting notes',
   plan: 'Your plan',
+  artistPlan: 'Artist plan',
 };
+
+/**
+ * A notification body as email blocks: "• " lines become lists, other lines
+ * paragraphs (plan changes and handover summaries are mostly lists).
+ */
+export function bodyBlocks(body: string): EmailBlock[] {
+  const blocks: EmailBlock[] = [];
+  for (const line of body.split('\n')) {
+    const item = /^•\s+(.*)$/.exec(line);
+    const last = blocks[blocks.length - 1];
+    if (item) {
+      if (last?.kind === 'list') last.items.push(item[1]!);
+      else blocks.push({ kind: 'list', items: [item[1]!] });
+    } else if (line.trim()) {
+      blocks.push({ kind: 'p', text: line.trim() });
+    }
+  }
+  return blocks.length ? blocks : [{ kind: 'p', text: body }];
+}
 
 /** The notification as a BMG-branded email (the shared layout in `@bmg/email`). */
 export function emailText(
@@ -361,7 +491,7 @@ export function emailText(
       preheader: d.body,
       eyebrow: EYEBROW[d.kind],
       heading: d.title,
-      blocks: [{ kind: 'p', text: d.body }],
+      blocks: bodyBlocks(d.body),
       ...(origin ? { cta: { label: 'Open Blueprint', url: origin } } : {}),
       footerNote: 'You can change which emails you get in Profile & preferences.',
     },
