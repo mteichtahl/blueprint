@@ -297,6 +297,34 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
 });
 
 /**
+ * The to-dos made by this meeting's actions (Do it), set to match its
+ * sharing through the normal to-dos API. One that's gone or can't be changed
+ * is skipped: the meeting's sharing still changes.
+ */
+async function todosFollow(
+  m: Meeting,
+  principal: Principal,
+  shared: boolean,
+  call: ApiCall,
+): Promise<string[]> {
+  if (!m.artistId) return [];
+  const content = await readContent(m, staffRole(principal));
+  const todoIds = (content.actions?.items ?? [])
+    .filter((a) => a.kind === 'todo' && a.status === 'done' && a.resultId)
+    .map((a) => a.resultId!);
+  const moved: string[] = [];
+  for (const todoId of todoIds) {
+    const res = await call({
+      method: 'PATCH',
+      path: `/artists/${m.artistId}/todos/${encodeURIComponent(todoId)}`,
+      body: { bmgOnly: !shared },
+    }).catch(() => ({ ok: false, out: {} }));
+    if (res.ok) moved.push(todoId);
+  }
+  return moved;
+}
+
+/**
  * Calls the app's own API with the caller's token, like the assistant's "Do
  * it" (ai-actions), so an action is authorised exactly as if done by hand.
  */
@@ -378,6 +406,14 @@ async function patch(
   }
   if (body.shared !== undefined && body.shared !== m.shared) {
     await audit(event, body.shared ? 'meeting.share' : 'meeting.unshare', 'success', ids(m));
+    // To-dos its actions made follow the meeting: shown with it, hidden again without it.
+    const moved = await todosFollow(m, principal, body.shared, asThePerson(event));
+    if (moved.length) {
+      await audit(event, body.shared ? 'meeting.todos-shown' : 'meeting.todos-hidden', 'success', {
+        ...ids(m),
+        count: moved.length,
+      });
+    }
     // The files follow, and the knowledge base hears about each one (file.share / file.unshare).
     for (const fileId of await shareFiles({ ...m, shared: body.shared }, body.shared)) {
       await audit(event, body.shared ? 'file.share' : 'file.unshare', 'success', {

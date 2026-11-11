@@ -28,7 +28,8 @@ Meetings now list what they agreed, ready to add to the app with one tap.
   wording or dates first. Nothing is added until you press Do it.
 - To-dos from a meeting that isn't shared with the artist are BMG only, so
   the artist doesn't see them. This also applies to **Create to-dos** in the
-  meeting notes.
+  meeting notes. Share the meeting later and the to-dos its actions made
+  appear for the artist; stop sharing and they're hidden again.
 - The plan update opens the usual review, so each plan change is still
   checked before the plan changes.
 - Ignored actions can be brought back, and **Look again** finds new ones

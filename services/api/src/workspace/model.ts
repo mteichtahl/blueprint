@@ -225,6 +225,8 @@ export const TodoPatch = z
     dueTime: Time.nullable().optional(),
     reminder: z.enum(REMINDERS).nullable().optional(),
     done: z.boolean().optional(),
+    /** Blueprint only: hide it from the artist, or show it (a meeting shared or unshared). */
+    bmgOnly: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to change');
 
