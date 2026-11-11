@@ -190,6 +190,31 @@ Transcript (each line starts with its [line number]):
 {{transcript}}`,
   },
   {
+    id: 'meetings.actions',
+    label: 'Meetings · actions to take',
+    usedBy: 'Finding to-dos and gigs to create from a meeting about an artist',
+    variables: ['today', 'title', 'meetingDate', 'artistName', 'attendees', 'notes', 'transcript'],
+    defaultText: `Below is a Blueprint Music Group meeting about {{artistName}}. List the things the meeting agreed that should be added to the Blueprint app:
+
+- A to-do: a task someone agreed to do for {{artistName}}'s work ("send the stems to the mixer", "book the photographer"). Start the title with a verb. Give a due date only if one was said.
+- A gig: a performance that was booked or agreed, with its date. Not one that was only floated as an idea.
+
+Only list what was clearly agreed. Ideas, maybes and things still being worked out are not actions. Changes to the development plan itself (stages, milestones, goals) are handled separately: leave them out. If nothing needs doing, list nothing.
+
+Today is {{today}}; turn "next Friday" and similar into real dates. For each action, say in one line what was agreed and give the transcript lines it comes from.
+
+Meeting: {{title}} ({{meetingDate}})
+Attendees: {{attendees}}
+
+Notes typed during the meeting:
+{{notes}}
+
+Transcript (each line starts with its [line number]):
+{{transcript}}
+
+Plain Australian English.`,
+  },
+  {
     id: 'tools.search_my_content',
     label: 'Tool · search my content',
     usedBy: 'What the agent is told the search tool does',

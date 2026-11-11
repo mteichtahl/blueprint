@@ -235,3 +235,31 @@ describe('to-do threads (rev 7)', () => {
     ).toEqual(['staffA']);
   });
 });
+
+describe('to-dos shared from a meeting (rev 11 change)', () => {
+  const team = [
+    { sub: 'admin', role: 'bmg-admin' },
+    { sub: 'staffA', role: 'bmg-staff', assignedArtistIds: [A] },
+    { sub: 'artA', role: 'artist', artistId: A },
+    { sub: 'artB', role: 'artist', artistId: B },
+  ] as never;
+  const ev = (titles: string[], count = titles.length) =>
+    ({ type: 'todo.shared', artistId: A, count, titles, bySub: 'staffA' }) as never;
+
+  it('tells only that artist, once, naming the to-dos', () => {
+    const p = plan(ev(['Send the stems', 'Book the photographer']), team);
+    expect(subs(p)).toEqual(['artA']);
+    expect(p?.draft).toEqual({
+      kind: 'todo',
+      title: 'Blueprint added 2 to-dos for you',
+      body: '“Send the stems”, “Book the photographer”.',
+      link: 'todos',
+    });
+  });
+
+  it('keeps it short when there are many', () => {
+    const p = plan(ev(['A', 'B', 'C', 'D', 'E'], 7), team);
+    expect(p?.draft.body).toBe('“A”, “B”, “C” and 4 more.');
+    expect(plan(ev(['Only one']), team)?.draft.title).toBe('Blueprint added a to-do for you');
+  });
+});

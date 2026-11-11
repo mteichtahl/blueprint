@@ -511,6 +511,17 @@ Spec: section 17 of the project doc `BMG_Rev11_Meeting_Notes.md`.
 - **Only a "yes, opted out" is cached** (10 minutes). A "no" was cached too, so a warm worker kept refusing for up to 10 minutes after the policy took effect. A "no" now also logs `meetings.opt-out.not-opted-out` (whether AWS returned a policy at all), next to the existing `meetings.opt-out.unknown` for errors.
 - The `off` message now says it will be transcribed automatically once the opt-out takes effect.
 
+## Meeting notes: actions with Do it and Ignore (rev 11 change, 11 Nov 2026)
+
+Spec: the project doc `BMG_Meeting_Actions.md`.
+
+- **What's found:** to-dos and gigs only, from meetings about an artist (to-dos and gigs belong to an artist). Plan changes keep their own review (spec 6) and appear in Actions as one row, **Review and update** or **Ignore** (rejects the waiting suggestions), so each plan change is still checked one by one.
+- **When:** the worker starts an `actions` AI job (prompt `meetings.actions`, editable) as soon as a transcript is ready, as whoever recorded it, through the same `requestAi` path (AI choices checked, one job at a time). **Look again** reruns it: done, ignored and in-progress actions keep their ids; new ones that repeat a decided title are dropped.
+- **Do it** (`POST …/actions/{id}/do`) claims the action (`waiting` → `doing`, so two presses can't make two to-dos), then makes one call to the app's own API with the caller's token, like the assistant's Do it: `POST /artists/{id}/todos` or `POST /artists/{id}/gigs` (status `idea`). The normal rules, notifications and audit apply. Success → `done` with the new id; a refusal → back to `waiting` with the API's reason (HTTP 422). A `doing` older than 2 minutes counts as free again. Staff edits are re-validated on the server.
+- **Ignore / Bring back** (`PATCH …/actions`). `actionsWaiting` on the meeting drives the coral count on the tab (plus one while plan suggestions wait).
+- **To-dos follow the meeting's sharing:** from a meeting that isn't shared with the artist (the default), they're BMG-only (`bmgOnly: true`); from a shared meeting, the artist sees them. Summary's **Create to-dos** does the same. **Sharing the meeting later shows them** (and stopping sharing hides them again): the to-dos its actions made (`resultId` on done actions) are patched through the normal API with the new `TodoPatch.bmgOnly` (Blueprint only; artists get 403). When they're shown, the artist gets **one** notification for all of them (`todo.shared` on `bmg.workspace` → the API notifier: bell, push and email with their preferences and quiet hours; "Blueprint added 2 to-dos for you", naming up to three). Hiding them again tells nobody. Create to-dos doesn't record which to-dos it made, so those don't follow. Gigs are always shared, as for any gig Blueprint adds. Past due dates are dropped. Notes end with "From the meeting …".
+- No new routes or AWS resources (it's all under `/meetings/{proxy+}`).
+
 ## Plan owner and plan update notifications (rev 12, 11 Nov 2026)
 
 Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, notifications, screens).
