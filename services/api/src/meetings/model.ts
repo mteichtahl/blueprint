@@ -403,7 +403,7 @@ export function transcriptionBlock(input: {
     return {
       status: 'off',
       reason:
-        'Transcription is switched off until the AWS AI opt-out is set up (`blueprint ai opt-out`). The recording is kept.',
+        'Transcription is waiting for the AWS AI opt-out (`blueprint ai opt-out`). The recording is kept, and it’s transcribed automatically within 15 minutes of the opt-out taking effect.',
     };
   }
   return undefined;

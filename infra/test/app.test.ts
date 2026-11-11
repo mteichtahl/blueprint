@@ -901,6 +901,11 @@ describe('environment meetings (rev 11)', () => {
     prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-meetings-worker' });
     prod.hasResourceProperties('AWS::IAM::Role', { RoleName: 'bmg-prod-api-meetings' });
   });
+
+  it('retries meetings saved before the AI opt-out every 15 minutes', () => {
+    prod.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(15 minutes)' });
+    expect(JSON.stringify(prod.toJSON())).toContain('/index/GSI3');
+  });
 });
 
 describe('Phase 6 web headers', () => {
