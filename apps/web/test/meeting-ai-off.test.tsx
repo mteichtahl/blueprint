@@ -42,6 +42,7 @@ function meeting(over: Partial<Meeting> = {}): Meeting {
     aiJob: null,
     undoUntil: null,
     suggestionsWaiting: 0,
+    actionsWaiting: 0,
     consent: { at: '2026-11-11T03:00:00Z', wording: 'Everyone agreed.' },
     recordedByMe: true,
     canDelete: true,

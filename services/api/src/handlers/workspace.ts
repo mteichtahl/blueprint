@@ -963,10 +963,16 @@ export const handler = handle(async (event) => {
       if (!existing) throw new HttpError(404, 'No such to-do');
       ensure(principal, 'write', artistId, existing.visibility);
       const patch = parseBody(event, TodoPatch);
+      if (patch.bmgOnly !== undefined && principal.role === 'artist') {
+        throw new HttpError(403, 'Only Blueprint can change who sees a to-do');
+      }
       // Artists and Blueprint can both edit any to-do they can see (BMG-only
       // ones are invisible to artists, and `ensure` above refuses them).
       const merged: Todo = {
         ...existing,
+        ...(patch.bmgOnly !== undefined
+          ? { visibility: patch.bmgOnly ? ('bmg-only' as const) : ('normal' as const) }
+          : {}),
         ...(patch.title !== undefined ? { title: patch.title } : {}),
         ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
         ...(patch.done !== undefined ? { done: patch.done } : {}),
@@ -984,8 +990,11 @@ export const handler = handle(async (event) => {
       }
       if (!merged.notes) delete merged.notes;
       const changed = changedFields(existing, merged);
+      const visibilityChanged =
+        (merged.visibility ?? 'normal') !== (existing.visibility ?? 'normal');
       // Saving unchanged still retries a reminder that couldn't be scheduled.
-      if (changed.length === 0 && !existing.reminderFailed) return json(200, publicTodo(existing));
+      if (changed.length === 0 && !visibilityChanged && !existing.reminderFailed)
+        return json(200, publicTodo(existing));
       // Only a newly set timing is held to "not in the past"; ticking an old to-do is fine.
       const timing = changed.some((f) => f === 'due' || f === 'dueTime' || f === 'reminder');
       const updated: Todo = {
@@ -998,10 +1007,11 @@ export const handler = handle(async (event) => {
           TableName: table(),
           Key: key,
           UpdateExpression:
-            'SET title = :title, notes = :notes, done = :done, #due = :due, dueTime = :dueTime, reminder = :reminder, remindAt = :remindAt, GSI2SK = :gsi2, updatedAt = :at, updatedBy = :by',
+            'SET title = :title, notes = :notes, done = :done, #due = :due, dueTime = :dueTime, reminder = :reminder, remindAt = :remindAt, visibility = :vis, GSI2SK = :gsi2, updatedAt = :at, updatedBy = :by',
           ExpressionAttributeNames: { '#due': 'due' },
           ExpressionAttributeValues: {
             ':title': updated.title,
+            ':vis': updated.visibility ?? 'normal',
             ':notes': updated.notes ?? null,
             ':done': updated.done,
             ':due': updated.due ?? null,
@@ -1026,7 +1036,11 @@ export const handler = handle(async (event) => {
           notify,
         });
       }
-      await audit(event, 'todo.update', 'success', { artistId, todoId, fields: changed.join(',') });
+      await audit(event, 'todo.update', 'success', {
+        artistId,
+        todoId,
+        fields: [...changed, ...(visibilityChanged ? ['visibility'] : [])].join(','),
+      });
       return json(200, publicTodo(stored));
     }
 

@@ -46,6 +46,13 @@ import {
 } from '../meetings/store.ts';
 import { refreshNote } from '../meetings/note.ts';
 import {
+  ActionsPatch,
+  decideActions,
+  DoActionBody,
+  doAction,
+  type ApiCall,
+} from '../meetings/do-actions.ts';
+import {
   AiRequest,
   deleteBlocked,
   PlanUpdateBody,
@@ -138,6 +145,8 @@ async function list(principal: Principal, artistId?: string) {
  *   PATCH  /meetings/{space}/{id}/suggestions   accept, reject or edit suggestions
  *   POST   /meetings/{space}/{id}/plan-update   update the plan with the accepted changes
  *   POST   /meetings/{space}/{id}/plan-update/undo   undo it (7 days, plan unchanged since)
+ *   POST   /meetings/{space}/{id}/actions/{actionId}/do   Do it: add the to-do or gig
+ *   PATCH  /meetings/{space}/{id}/actions   Ignore actions, or bring them back
  *
  * `{space}` is `library` (Blueprint only) or the artist's id. The audio goes
  * up through the files API (`POST …/files` with `meetingId`), so it is
@@ -245,8 +254,122 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
     });
     return json(200, result);
   }
+  const doIt = /^actions\/(a\d{1,3})\/do$/.exec(action);
+  if (doIt && method === 'POST') {
+    const m = await open(principal, space, meetingId, true);
+    const result = await doAction(
+      m,
+      principal,
+      doIt[1]!,
+      parseBody(event, DoActionBody),
+      asThePerson(event),
+      new Date().toISOString().slice(0, 10),
+    );
+    await audit(event, 'meeting.action-done', result.ok ? 'success' : 'failed', {
+      ...ids(m),
+      actionId: result.action.id,
+      kind: result.action.kind,
+      ...(result.action.resultId ? { resultId: result.action.resultId } : {}),
+    });
+    const aiOff = await aiOffIn([result.meeting]);
+    return json(result.ok ? 200 : 422, {
+      action: result.action,
+      meeting: publicMeeting(result.meeting, principal, aiOff(result.meeting)),
+      ...(result.error ? { detail: result.error } : {}),
+    });
+  }
+  if (action === 'actions' && method === 'PATCH') {
+    const m = await open(principal, space, meetingId, true);
+    const body = parseBody(event, ActionsPatch);
+    const saved = await decideActions(m, principal, body);
+    await audit(event, 'meeting.actions-decided', 'success', {
+      ...ids(m),
+      ignored: body.updates.filter((u) => u.status === 'ignored').length,
+      restored: body.updates.filter((u) => u.status === 'waiting').length,
+    });
+    const aiOff = await aiOffIn([saved.meeting]);
+    return json(200, {
+      meeting: publicMeeting(saved.meeting, principal, aiOff(saved.meeting)),
+      content: saved.content,
+    });
+  }
   throw new HttpError(404, 'Not found');
 });
+
+/**
+ * The to-dos made by this meeting's actions (Do it), set to match its
+ * sharing through the normal to-dos API. One that's gone or can't be changed
+ * is skipped: the meeting's sharing still changes.
+ */
+async function todosFollow(
+  m: Meeting,
+  principal: Principal,
+  shared: boolean,
+  call: ApiCall,
+): Promise<string[]> {
+  if (!m.artistId) return [];
+  const content = await readContent(m, staffRole(principal));
+  const todoIds = (content.actions?.items ?? [])
+    .filter((a) => a.kind === 'todo' && a.status === 'done' && a.resultId)
+    .map((a) => a.resultId!);
+  const moved: string[] = [];
+  for (const todoId of todoIds) {
+    const res = await call({
+      method: 'PATCH',
+      path: `/artists/${m.artistId}/todos/${encodeURIComponent(todoId)}`,
+      body: { bmgOnly: !shared },
+    }).catch(() => ({ ok: false, out: {} }));
+    if (res.ok) moved.push(todoId);
+  }
+  return moved;
+}
+
+/** One notice to the artist: Blueprint added these to-dos for them (todo.shared). */
+async function tellArtistAboutTodos(m: Meeting, principal: Principal, todoIds: string[]) {
+  const content = await readContent(m, staffRole(principal));
+  const titles = (content.actions?.items ?? [])
+    .filter((a) => a.resultId && todoIds.includes(a.resultId))
+    .map((a) => a.todo?.title ?? '')
+    .filter(Boolean)
+    .slice(0, 5);
+  await events.send(
+    new PutEventsCommand({
+      Entries: [
+        {
+          EventBusName: env('EVENT_BUS'),
+          Source: 'bmg.workspace',
+          DetailType: 'todo.shared',
+          Detail: JSON.stringify({
+            id: randomUUID(),
+            artistId: m.artistId,
+            count: todoIds.length,
+            titles,
+            bySub: principal.sub,
+          }),
+        },
+      ],
+    }),
+  );
+}
+
+/**
+ * Calls the app's own API with the caller's token, like the assistant's "Do
+ * it" (ai-actions), so an action is authorised exactly as if done by hand.
+ */
+function asThePerson(event: APIGatewayProxyEvent): ApiCall {
+  const auth = event.headers?.Authorization ?? event.headers?.authorization ?? '';
+  const base = `https://${event.requestContext.domainName}/${event.requestContext.stage}`;
+  return async (step) => {
+    const res = await fetch(`${base}${step.path}`, {
+      method: step.method,
+      headers: { authorization: auth, 'content-type': 'application/json' },
+      body: JSON.stringify(step.body),
+      signal: AbortSignal.timeout(8000),
+    });
+    const out = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    return { ok: res.ok, out };
+  };
+}
 
 const ids = (m: Pick<Meeting, 'meetingId' | 'artistId'>) => ({
   meetingId: m.meetingId,
@@ -311,6 +434,16 @@ async function patch(
   }
   if (body.shared !== undefined && body.shared !== m.shared) {
     await audit(event, body.shared ? 'meeting.share' : 'meeting.unshare', 'success', ids(m));
+    // To-dos its actions made follow the meeting: shown with it, hidden again without it.
+    const moved = await todosFollow(m, principal, body.shared, asThePerson(event));
+    if (moved.length) {
+      await audit(event, body.shared ? 'meeting.todos-shown' : 'meeting.todos-hidden', 'success', {
+        ...ids(m),
+        count: moved.length,
+      });
+      // The artist hears once about the to-dos they can now see.
+      if (body.shared) await tellArtistAboutTodos(m, principal, moved);
+    }
     // The files follow, and the knowledge base hears about each one (file.share / file.unshare).
     for (const fileId of await shareFiles({ ...m, shared: body.shared }, body.shared)) {
       await audit(event, body.shared ? 'file.share' : 'file.unshare', 'success', {

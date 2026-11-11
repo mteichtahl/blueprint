@@ -39,6 +39,7 @@ import {
   type AiTask,
   type Attendee,
   type Meeting,
+  type MeetingAction,
   type MeetingContent,
   type RecordingSession,
   type Suggestion,
@@ -1093,7 +1094,7 @@ function Recorder({ onDone }: { onDone: (m?: Meeting) => void }) {
 }
 
 // ═════════════════════════════ A meeting (spec 5) ═════════════════════════════
-type Section = 'summary' | 'transcript' | 'plan' | 'details';
+type Section = 'summary' | 'actions' | 'transcript' | 'plan' | 'details';
 
 export function MeetingView({
   cfg,
@@ -1159,8 +1160,11 @@ export function MeetingView({
   // Nothing to show and nothing can be made: the tab stays, greyed out (spec 5, 8).
   // A transcript made before the artist opted out is still shown.
   const transcriptOff = !!aiOff && content.segments.length === 0;
+  // One row for the plan update, plus each to-do or gig still waiting.
+  const actionsCount = (m.actionsWaiting ?? 0) + (m.suggestionsWaiting > 0 ? 1 : 0);
   const sections: { id: Section; label: string; count?: number }[] = [
     { id: 'summary', label: 'Summary' },
+    ...(m.artistId ? [{ id: 'actions' as const, label: 'Actions', count: actionsCount }] : []),
     { id: 'transcript', label: 'Transcript' },
     ...(m.artistId
       ? [{ id: 'plan' as const, label: 'Plan update', count: m.suggestionsWaiting }]
@@ -1218,6 +1222,14 @@ export function MeetingView({
         })}
       </div>
       {shown === 'summary' && <SummarySection {...ctx} />}
+      {shown === 'actions' && (
+        <ActionsSection
+          {...ctx}
+          artistName={artist?.displayName ?? 'the artist'}
+          aiOff={aiOff}
+          onReviewPlan={() => setSection('plan')}
+        />
+      )}
       {shown === 'transcript' && <TranscriptSection {...ctx} />}
       {shown === 'plan' && (
         <PlanSection {...ctx} artistName={artist?.displayName ?? 'the artist'} />
@@ -1478,7 +1490,294 @@ const WORKING: Record<AiTask, string> = {
   full: 'Writing the meeting notes…',
   ask: 'Looking for the answer…',
   suggest: 'Reading the meeting against the plan…',
+  actions: 'Looking for to-dos and gigs to add…',
 };
+
+// ── Actions (rev 11 change): to-dos and gigs the meeting agreed, and the plan update ──
+const ACTION_LABEL: Record<MeetingAction['kind'], string> = {
+  todo: 'Add to-do',
+  gig: 'Create gig',
+};
+
+function ActionsSection(
+  ctx: Ctx & {
+    artistName: string;
+    aiOff: { notice: string; tooltip: string } | null;
+    onReviewPlan: () => void;
+  },
+) {
+  const { meeting: m, content, artistName, aiOff } = ctx;
+  const ai = useAi(ctx);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const items = content.actions?.items ?? [];
+  const waiting = items.filter((a) => a.status === 'waiting' || a.status === 'doing');
+  const decided = items.filter((a) => a.status === 'done' || a.status === 'ignored');
+  const planWaiting = m.suggestionsWaiting > 0 && !content.suggestions?.applied;
+
+  const run = async (label: string, fn: () => Promise<unknown>) => {
+    setBusy(label);
+    setError('');
+    try {
+      await fn();
+    } catch (e) {
+      setError(problemText(e));
+    } finally {
+      await ctx.reload();
+      setBusy('');
+    }
+  };
+  const doIt = (a: MeetingAction, edits?: Record<string, unknown>) =>
+    run(a.id, () =>
+      api(ctx.cfg, ctx.token, 'POST', `${meetingPath(m)}/actions/${a.id}/do`, {
+        ...(edits ? { edits: { [a.kind]: edits } } : {}),
+      }),
+    );
+  const decide = (a: MeetingAction, status: 'ignored' | 'waiting') =>
+    run(a.id, () =>
+      api(ctx.cfg, ctx.token, 'PATCH', `${meetingPath(m)}/actions`, {
+        updates: [{ id: a.id, status }],
+      }),
+    );
+  const ignorePlan = () =>
+    run('plan', () =>
+      api(ctx.cfg, ctx.token, 'PATCH', `${meetingPath(m)}/suggestions`, {
+        contentVersion: m.contentVersion,
+        updates: (content.suggestions?.suggestions ?? [])
+          .filter((x) => x.status === 'waiting')
+          .map((x) => ({ id: x.id, status: 'rejected' })),
+      }),
+    );
+
+  if (m.status !== 'ready') {
+    return (
+      <Card>
+        <p className="src m-0">Actions come once the transcript is in.</p>
+      </Card>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <Card
+        title="Actions from this meeting"
+        action={
+          <span title={aiOff?.tooltip}>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!!ai.working || !!aiOff}
+              onClick={() => void ai.run('actions')}
+            >
+              {content.actions ? 'Look again' : 'Look for actions'}
+            </Button>
+          </span>
+        }
+      >
+        <p className="src m-0">
+          Things this meeting agreed that the app can do for {artistName}. Nothing happens until you
+          press Do it.
+          {!m.shared && ' This meeting isn’t shared with them, so its to-dos are BMG only.'}
+        </p>
+        {aiOff && !items.length && <Notice>{aiOff.notice}</Notice>}
+        {ai.working === 'actions' && <Notice>{WORKING.actions}</Notice>}
+        {ai.failed?.task === 'actions' && <Notice tone="error">{ai.failed.error}</Notice>}
+        {ai.error && <Notice tone="error">{ai.error}</Notice>}
+        {error && <Notice tone="error">{error}</Notice>}
+        {content.actions && !waiting.length && !planWaiting && !decided.length && (
+          <p className="m-0">Nothing to do from this meeting.</p>
+        )}
+      </Card>
+
+      {planWaiting && (
+        <Card>
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag tone="c">Update plan</Tag>
+            <b>Update {artistName}’s plan</b>
+          </div>
+          <p className="m-0">
+            {m.suggestionsWaiting} suggested change{m.suggestionsWaiting === 1 ? '' : 's'} from this
+            meeting. Check each one before the plan changes.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="cta" size="sm" disabled={!!busy} onClick={ctx.onReviewPlan}>
+              Review and update
+            </Button>
+            <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => void ignorePlan()}>
+              {busy === 'plan' ? 'Ignoring…' : 'Ignore'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {waiting.map((a) => (
+        <ActionCard
+          key={a.id}
+          ctx={ctx}
+          action={a}
+          busy={busy === a.id || a.status === 'doing'}
+          locked={!!busy}
+          onDo={(edits) => void doIt(a, edits)}
+          onIgnore={() => void decide(a, 'ignored')}
+        />
+      ))}
+
+      {decided.length > 0 && (
+        <Card title="Done and ignored">
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {decided.map((a) => (
+              <li key={a.id} className="flex flex-wrap items-center gap-2">
+                <Tag tone={a.status === 'done' ? 'n' : 'k'}>
+                  {a.status === 'done' ? 'Done' : 'Ignored'}
+                </Tag>
+                <span>
+                  {ACTION_LABEL[a.kind]}: <b>{a.todo?.title ?? a.gig?.title}</b>
+                  {a.status === 'done' &&
+                    (a.kind === 'todo'
+                      ? ` · added to ${artistName}’s to-dos${m.shared ? '' : ' (BMG only)'}`
+                      : ` · added to ${artistName}’s gigs as an idea`)}
+                </span>
+                {a.status === 'ignored' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!!busy}
+                    onClick={() => void decide(a, 'waiting')}
+                  >
+                    Bring back
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ActionCard({
+  ctx,
+  action: a,
+  busy,
+  locked,
+  onDo,
+  onIgnore,
+}: {
+  ctx: Ctx;
+  action: MeetingAction;
+  busy: boolean;
+  locked: boolean;
+  onDo: (edits?: Record<string, string>) => void;
+  onIgnore: () => void;
+}) {
+  const { content, playAt } = ctx;
+  const [editing, setEditing] = useState(false);
+  const fields =
+    a.kind === 'todo'
+      ? [
+          { key: 'title', label: 'To-do', type: 'text', max: 200, value: a.todo?.title ?? '' },
+          { key: 'due', label: 'Due (optional)', type: 'date', value: a.todo?.due ?? '' },
+        ]
+      : [
+          { key: 'title', label: 'Gig', type: 'text', max: 120, value: a.gig?.title ?? '' },
+          { key: 'date', label: 'Date', type: 'date', value: a.gig?.date ?? '' },
+          {
+            key: 'startTime',
+            label: 'Starts (optional)',
+            type: 'time',
+            value: a.gig?.startTime ?? '',
+          },
+          {
+            key: 'venue',
+            label: 'Venue (optional)',
+            type: 'text',
+            max: 160,
+            value: a.gig?.venue ?? '',
+          },
+        ];
+  const [draft, setDraft] = useState<Record<string, string>>(
+    Object.fromEntries(fields.map((f) => [f.key, f.value])),
+  );
+  const title = a.todo?.title ?? a.gig?.title ?? '';
+  const details =
+    a.kind === 'todo'
+      ? a.todo?.due
+        ? `Due ${shortDate(a.todo.due)}`
+        : 'No due date'
+      : [a.gig?.date && shortDate(a.gig.date), a.gig?.startTime, a.gig?.venue]
+          .filter(Boolean)
+          .join(' · ');
+  const quotes = a.refs
+    .map((r) => content.segments.find((s) => s.id === r))
+    .filter((s): s is MeetingContent['segments'][number] => !!s)
+    .slice(0, 3);
+  const changed = () =>
+    Object.fromEntries(
+      fields
+        .filter((f) => draft[f.key] !== f.value && draft[f.key])
+        .map((f) => [f.key, draft[f.key]!]),
+    );
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center gap-2">
+        <Tag tone="s">{ACTION_LABEL[a.kind]}</Tag>
+        <b>{title}</b>
+      </div>
+      {details && <p className="src m-0">{details}</p>}
+      <p className="m-0">
+        <b>Why:</b> {a.why}
+      </p>
+      {quotes.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-bold">From the meeting</span>
+          {quotes.map((q) => (
+            <blockquote key={q.id} className="m-0 border-l-4 border-input pl-3 text-sm">
+              <TimeLink at={q.start} playAt={playAt} /> {speakerName(content, q.speaker)}: “{q.text}
+              ”
+            </blockquote>
+          ))}
+        </div>
+      )}
+      {a.error && <Notice tone="error">{a.error}</Notice>}
+      {editing && (
+        <div className="flex flex-col gap-2">
+          {fields.map((f) => (
+            <Field
+              key={f.key}
+              label={f.label}
+              type={f.type}
+              value={draft[f.key] ?? ''}
+              maxLength={f.max}
+              required={f.key === 'title' || f.key === 'date'}
+              onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+            />
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="cta"
+          size="sm"
+          disabled={
+            locked || busy || (editing && (!draft.title || (a.kind === 'gig' && !draft.date)))
+          }
+          onClick={() => {
+            const edits = editing ? changed() : {};
+            onDo(Object.keys(edits).length ? edits : undefined);
+          }}
+        >
+          {busy ? 'Doing it…' : 'Do it'}
+        </Button>
+        <Button variant="ghost" size="sm" disabled={locked} onClick={() => setEditing((x) => !x)}>
+          {editing ? 'Cancel edit' : 'Edit'}
+        </Button>
+        <Button variant="ghost" size="sm" disabled={locked} onClick={onIgnore}>
+          Ignore
+        </Button>
+      </div>
+    </Card>
+  );
+}
 
 // ── Summary (spec 5.2) ──
 function SummarySection(ctx: Ctx) {
@@ -1507,10 +1806,14 @@ function SummarySection(ctx: Ctx) {
           title: a.text.slice(0, 200),
           notes: `From the meeting “${m.title}”${a.owner ? ` (${a.owner})` : ''}`.slice(0, 2000),
           ...(a.due && a.due >= new Date().toISOString().slice(0, 10) ? { due: a.due } : {}),
+          // From a meeting the artist can't see: the to-do stays BMG-only too.
+          ...(m.shared ? {} : { bmgOnly: true }),
         });
         n++;
       }
-      setMade(`${n} to-do${n === 1 ? '' : 's'} added to the artist’s list.`);
+      setMade(
+        `${n} to-do${n === 1 ? '' : 's'} added to the artist’s list${m.shared ? '' : ', BMG only (this meeting isn’t shared with them)'}.`,
+      );
       setTicked(new Set());
     } catch (e) {
       setTodoError(`${n ? `${n} added, then: ` : ''}${problemText(e)}`);

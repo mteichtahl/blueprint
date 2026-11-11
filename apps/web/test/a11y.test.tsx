@@ -157,6 +157,7 @@ const meeting = {
   aiJob: null,
   undoUntil: null,
   suggestionsWaiting: 2,
+  actionsWaiting: 1,
   consent: {
     at: now,
     wording: 'Everyone in this meeting knows it’s being recorded and has agreed.',
@@ -181,6 +182,30 @@ const aiOffMeeting = () => ({
 });
 const meetingContent = {
   notes: 'Push the EP to January',
+  actions: {
+    requestId: 'r1',
+    createdAt: now,
+    createdBy: 'k',
+    items: [
+      {
+        id: 'a1',
+        kind: 'todo',
+        why: 'Kyra will send the stems to the mixer.',
+        refs: [0],
+        todo: { title: 'Send the stems to the mixer', due: '2026-12-01' },
+        status: 'waiting',
+      },
+      {
+        id: 'a2',
+        kind: 'gig',
+        why: 'The Lantern Room show was booked.',
+        refs: [],
+        gig: { title: 'Lantern Room', date: '2026-12-12', startTime: '20:00' },
+        status: 'done',
+        resultId: 'gig1',
+      },
+    ],
+  },
   markers: [{ at: 61, note: 'budget agreed' }],
   speakers: { spk_0: 'Kyra Teichtahl' },
   segments: [
@@ -994,7 +1019,7 @@ describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
     expect(await violations()).toEqual([]);
   });
 
-  it.each(['Summary', 'Transcript', 'Plan update', 'Details'])(
+  it.each(['Summary', 'Actions', 'Transcript', 'Plan update', 'Details'])(
     'BMG: a meeting’s %s',
     async (section) => {
       await openMeetings();

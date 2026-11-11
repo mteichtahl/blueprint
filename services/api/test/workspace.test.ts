@@ -259,3 +259,11 @@ describe('to-do threads (rev 7)', () => {
     });
   });
 });
+
+describe('to-do visibility (meeting sharing)', () => {
+  it('lets a patch show or hide a to-do, and nothing else is needed', () => {
+    expect(TodoPatch.parse({ bmgOnly: false })).toEqual({ bmgOnly: false });
+    expect(TodoPatch.parse({ bmgOnly: true })).toEqual({ bmgOnly: true });
+    expect(TodoPatch.safeParse({ bmgOnly: 'yes' }).success).toBe(false);
+  });
+});

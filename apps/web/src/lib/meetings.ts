@@ -17,7 +17,7 @@ export interface Attendee {
   name: string;
 }
 
-export type AiTask = 'quick' | 'full' | 'ask' | 'suggest';
+export type AiTask = 'quick' | 'full' | 'ask' | 'suggest' | 'actions';
 
 export interface Meeting {
   meetingId: string;
@@ -40,6 +40,8 @@ export interface Meeting {
   aiJob: { task: AiTask; status: 'working' | 'failed'; error: string | null } | null;
   undoUntil: string | null;
   suggestionsWaiting: number;
+  /** To-dos and gigs from the meeting still waiting for Do it or Ignore. */
+  actionsWaiting: number;
   consent: { at: string; wording: string };
   recordedByMe: boolean;
   canDelete: boolean;
@@ -124,6 +126,27 @@ export interface SuggestionSet {
   };
 }
 
+/** Something the meeting agreed that the app can do (rev 11 change). */
+export interface MeetingAction {
+  id: string;
+  kind: 'todo' | 'gig';
+  why: string;
+  refs: number[];
+  todo?: { title: string; notes?: string; due?: string };
+  gig?: { title: string; date: string; startTime?: string; venue?: string; notes?: string };
+  status: 'waiting' | 'doing' | 'done' | 'ignored';
+  decidedBy?: string;
+  decidedAt?: string;
+  resultId?: string;
+  error?: string;
+}
+export interface MeetingActionSet {
+  requestId: string;
+  createdAt: string;
+  createdBy: string;
+  items: MeetingAction[];
+}
+
 export interface MeetingContent {
   notes: string;
   markers: Marker[];
@@ -133,6 +156,7 @@ export interface MeetingContent {
   summaries?: Summary[];
   answers?: Answer[];
   suggestions?: SuggestionSet;
+  actions?: MeetingActionSet;
 }
 
 export const STATUS_LABEL: Record<MeetingStatus, [tone: 'c' | 's' | 'n' | 'k', text: string]> = {

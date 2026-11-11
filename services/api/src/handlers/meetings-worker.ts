@@ -38,6 +38,14 @@ import {
   reviewChanges,
 } from '../meetings/plan-changes.ts';
 import { loadPlan } from '../workspace/plan-store.ts';
+import { requestAi } from '../meetings/actions.ts';
+import {
+  ACTIONS_REPLY_SHAPE,
+  actionsFrom,
+  actionsWaiting,
+  mergeActions,
+} from '../meetings/meeting-actions.ts';
+import type { Principal } from '@bmg/authz';
 import { storedKey, type FileRecord } from '../files/model.ts';
 import { QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { db, env } from '../lib.ts';
@@ -422,6 +430,17 @@ async function finish(job: string, status: string | undefined): Promise<void> {
   await cleanUp(m, ref.attempt, job);
   await processed(ready, 'ready');
   log('meetings.ready', { meetingId: m.meetingId, segments: segments.length });
+  // A meeting about an artist: look for to-dos and gigs to add straight away,
+  // as whoever recorded it. Nothing is done until someone presses Do it.
+  if (ready.artistId && segments.length) {
+    const recorder = { sub: m.createdBy, role: m.createdByRole } as Principal;
+    await requestAi(ready, recorder, { task: 'actions' }).catch((err) =>
+      log('meetings.actions-not-started', {
+        meetingId: m.meetingId,
+        error: (err as Error).message,
+      }),
+    );
+  }
 }
 
 // ── Summaries, answers and plan suggestions (rev 11, spec 5.2 and 6) ──
@@ -520,6 +539,29 @@ async function runAi(space: MeetingSpace, meetingId: string, requestId: string):
         {},
         ['aiJob'],
       );
+    } else if (job.task === 'actions') {
+      if (!m.artistId) return fail('Only a meeting about an artist has actions to take.');
+      const prompt = `${render(await livePrompt('meetings.actions'), vars)}\n\n${ACTIONS_REPLY_SHAPE}`;
+      const set = actionsFrom(
+        jsonIn(await converse(env('SUMMARY_MODEL'), prompt, 4000)),
+        content.segments,
+        { ...meta, requestId },
+      );
+      if (!set) return fail('The actions didn’t come back right. Try again.');
+      let waiting = 0;
+      const saved = await mutateContent(
+        space,
+        meetingId,
+        role,
+        (c) => {
+          const merged = mergeActions(c.actions, set);
+          waiting = actionsWaiting(merged);
+          return { ...c, actions: merged };
+        },
+        {},
+        ['aiJob'],
+      );
+      await updateMeeting(saved.meeting, { actionsWaiting: waiting });
     } else {
       if (!m.artistId) return fail('Only a meeting about an artist can change a plan.');
       const plan = await loadPlan(m.artistId);
