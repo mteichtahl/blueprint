@@ -742,6 +742,27 @@ describe('actions from a meeting (Do it, Ignore)', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('shows its to-dos when the meeting is shared, and hides them again when it isn’t', async () => {
+    const { id } = await withActions();
+    await req(staff, 'POST', `${ARTIST}/${id}/actions/a1/do`, {});
+    calls.length = 0;
+    reply = { ok: true, body: {} };
+    expect((await req(staff, 'PATCH', `${ARTIST}/${id}`, { shared: true })).statusCode).toBe(200);
+    const todoCalls = () => calls.filter((c) => c.url.endsWith(`/artists/${ARTIST}/todos/t1`));
+    expect(todoCalls()).toHaveLength(1);
+    expect(todoCalls()[0]!.init.method).toBe('PATCH');
+    expect(JSON.parse(todoCalls()[0]!.init.body)).toEqual({ bmgOnly: false });
+
+    calls.length = 0;
+    await req(staff, 'PATCH', `${ARTIST}/${id}`, { shared: false });
+    expect(JSON.parse(todoCalls()[0]!.init.body)).toEqual({ bmgOnly: true });
+
+    // Sharing an unchanged meeting again touches nothing.
+    calls.length = 0;
+    await req(staff, 'PATCH', `${ARTIST}/${id}`, { shared: false });
+    expect(todoCalls()).toHaveLength(0);
+  });
+
   it('puts it back to waiting with the reason when the API says no', async () => {
     const { id } = await withActions();
     reply = { ok: false, body: { detail: 'Give the gig a date' } };
