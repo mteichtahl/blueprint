@@ -14,7 +14,7 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
-## 1.3.0 — 2026-11-11
+## 1.4.0 — 2026-11-11
 
 Meetings now list what they agreed, ready to add to the app with one tap.
 
@@ -33,6 +33,16 @@ Meetings now list what they agreed, ready to add to the app with one tap.
   checked before the plan changes.
 - Ignored actions can be brought back, and **Look again** finds new ones
   without repeating what's already done.
+
+## 1.3.0 — 2026-11-11
+
+Overview is back at the top of the phone menu.
+
+### Improved
+
+- On a phone, **Overview** is the first item in the BMG menu, above "Needs
+  attention", so Studio HQ is always one tap away.
+- The folded "Studio HQ" heading is gone; Overview was the only thing in it.
 
 ## 1.2.1 — 2026-11-11
 
