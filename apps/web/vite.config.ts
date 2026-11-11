@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 // Relative import: the config is bundled, so the shared TS module needs no build step.
 import { buildRelease } from '../../packages/config/src/release.ts';
 
-// Release label and notes, from VERSION and CHANGELOG.md. The Deploy workflow
+// Release label and notes, from VERSION and CHANGELOG.md. The deploy workflows
 // sets BMG_ENV (staging → beta-X.Y.Z, prod → X.Y.Z); anything else is dev-X.Y.Z.
 const release = buildRelease(
   resolve(import.meta.dirname, '../..'),

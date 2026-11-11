@@ -10,7 +10,7 @@ import { emailSetup } from './commands/email.ts';
 import { githubConnect, githubProtect } from './commands/github.ts';
 import { init } from './commands/init.ts';
 import { pipelineDeploy } from './commands/pipeline.ts';
-import { release, releaseShow } from './commands/release.ts';
+import { release, releaseShip, releaseShow } from './commands/release.ts';
 import { secretsSet } from './commands/secrets.ts';
 import { stacksRepair } from './commands/stacks.ts';
 import { status } from './commands/status.ts';
@@ -22,7 +22,7 @@ const program = new Command()
   .description(
     'One-time setup for the BMG platform. First run, in order:\n' +
       '  init → doctor → bootstrap → account setup → github connect → github protect\n' +
-      '  → pipeline deploy → (push to main; wait for Deploy) → secrets set → email setup → admin create → ai opt-out',
+      '  → pipeline deploy → (push to main; wait for Deploy staging; release ship) → secrets set → email setup → admin create → ai opt-out',
   )
   .option('-y, --yes', 'apply without asking for confirmation')
   .option('--dry-run', 'show what would change, change nothing');
@@ -165,6 +165,13 @@ releaseCmd
   .command('hotfix')
   .description('fixes only: X.Y.Z+1')
   .action(wrap(() => release('hotfix', g())));
+releaseCmd
+  .command('ship')
+  .description(
+    'send what staging is running to production: tags it vX.Y.Z and starts Release to production',
+  )
+  .option('--sha <commit>', 'release this commit instead of the one staging is running')
+  .action(wrap((o: { sha?: string }) => releaseShip({ ...g(), ...o })));
 releaseCmd
   .command('show')
   .description('print the current version and its staging/production labels')

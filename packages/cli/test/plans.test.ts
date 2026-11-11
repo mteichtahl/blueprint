@@ -15,6 +15,7 @@ import {
   toolingBootstrap,
   toolingRetainedResources,
   partitionAlarms,
+  planShip,
 } from '../src/lib/plans.ts';
 import { redact } from '../src/lib/runtime.ts';
 
@@ -90,6 +91,32 @@ describe('github protection', () => {
   it('gates production on the configured reviewers', () => {
     expect(find('/environments/production')?.body).toMatchObject({
       reviewers: [{ type: 'User', id: 42 }],
+    });
+  });
+
+  it('lets production deploy only from release tags, never from a branch', () => {
+    expect(find('/environments/production')?.body).toMatchObject({
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    });
+    const policy = find('/environments/production/deployment-branch-policies');
+    expect(policy?.body).toEqual({ name: 'v*.*.*', type: 'tag' });
+    expect(policy?.ensure).toMatchObject({ key: 'name', value: 'v*.*.*', updateExisting: false });
+  });
+
+  it('restricts release tags to repository admins, idempotently', () => {
+    const ruleset = find('/rulesets');
+    expect(ruleset?.body).toMatchObject({
+      target: 'tag',
+      enforcement: 'active',
+      conditions: { ref_name: { include: ['refs/tags/v*'] } },
+      rules: [{ type: 'creation' }, { type: 'update' }, { type: 'deletion' }],
+    });
+    expect(ruleset?.ensure).toMatchObject({ value: 'Release tags', updateExisting: true });
+  });
+
+  it('keeps staging on protected branches (main)', () => {
+    expect(find('/environments/staging')?.body).toMatchObject({
+      deployment_branch_policy: { protected_branches: true },
     });
   });
 
@@ -244,5 +271,36 @@ describe('partitionAlarms', () => {
     );
     expect(ours.map((a) => a.name)).toEqual(['bmg-prod-api-5xx']);
     expect(others).toHaveLength(2);
+  });
+});
+
+describe('release ship', () => {
+  const base = {
+    sha: 'abc1234def5678',
+    versionAtSha: '1.5.0\n',
+    existingTags: ['v1.4.0'],
+    onMain: true,
+    changes: ['Gigs: venue map (#130)', 'Chat: read receipts (#128)'],
+  };
+
+  it('tags the staged commit with its VERSION', () => {
+    expect(planShip(base)).toEqual({ tag: 'v1.5.0', version: '1.5.0', problems: [] });
+  });
+
+  it('refuses a version that was already released', () => {
+    const plan = planShip({ ...base, versionAtSha: '1.4.0' });
+    expect(plan.problems.join()).toMatch(/v1\.4\.0 has already been released/);
+  });
+
+  it('refuses a commit that is not on main', () => {
+    expect(planShip({ ...base, onMain: false }).problems.join()).toMatch(/not on main/);
+  });
+
+  it('refuses an empty release', () => {
+    expect(planShip({ ...base, changes: [] }).problems.join()).toMatch(/nothing to release/);
+  });
+
+  it('refuses a malformed VERSION', () => {
+    expect(planShip({ ...base, versionAtSha: '1.5' }).problems).toHaveLength(1);
   });
 });

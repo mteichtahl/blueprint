@@ -98,7 +98,29 @@ export async function githubProtect(opts: GlobalOptions): Promise<void> {
   const steps: PlanStep[] = requests.map((req) => ({
     description: req.description,
     run: async () => {
-      const args = ['api', '-X', req.method, req.path, '-H', 'Accept: application/vnd.github+json'];
+      let { method, path } = req;
+      if (req.ensure) {
+        const { listPath, listField, key, value, updateExisting } = req.ensure;
+        const listed = JSON.parse(
+          (
+            await run('gh', ['api', listPath, '-H', 'Accept: application/vnd.github+json'], {
+              capture: true,
+            })
+          ).stdout || '[]',
+        ) as unknown;
+        const items = (listField ? (listed as Record<string, unknown>)[listField] : listed) as
+          Record<string, unknown>[] | undefined;
+        const existing = items?.find((item) => item[key] === value);
+        if (existing && !updateExisting) {
+          ok(`already set: ${value}`);
+          return;
+        }
+        if (existing) {
+          method = 'PUT';
+          path = `${listPath}/${String(existing.id)}`;
+        }
+      }
+      const args = ['api', '-X', method, path, '-H', 'Accept: application/vnd.github+json'];
       if (req.body !== undefined) args.push('--input', '-');
       await run('gh', args, {
         capture: true,

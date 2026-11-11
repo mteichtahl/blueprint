@@ -146,7 +146,25 @@ export interface GhRequest {
   method: 'GET' | 'PUT' | 'PATCH' | 'POST';
   path: string;
   body?: unknown;
+  /**
+   * Makes a POST idempotent: list `listPath` first (items under `listField` if the
+   * response is an object) and look for an item whose `key` equals `value`. If one
+   * exists, PUT the body to `${listPath}/<id>` when `updateExisting`, else skip.
+   */
+  ensure?: {
+    listPath: string;
+    listField?: string;
+    key: string;
+    value: string;
+    updateExisting: boolean;
+  };
 }
+
+/** Release tags (`blueprint release ship`); production deploys only from these. */
+export const RELEASE_TAG_PATTERN = 'v*.*.*';
+export const RELEASE_TAG_RULESET = 'Release tags';
+/** GitHub's built-in repository role id for Admin. */
+const REPO_ADMIN_ROLE_ID = 5;
 
 export const REQUIRED_CHECKS = ['CI checks', 'Workflow policy', 'Secret scan'];
 
@@ -218,13 +236,47 @@ export function githubProtectionRequests(cfg: BmgConfig, reviewerIds: number[]):
       },
     },
     {
-      description: `Create the production environment with required reviewers (${cfg.github.productionReviewers.join(', ')})`,
+      description: `Create the production environment with required reviewers (${cfg.github.productionReviewers.join(', ')}), release tags only`,
       method: 'PUT',
       path: `${repo}/environments/production`,
       body: {
         reviewers: reviewerIds.map((id) => ({ type: 'User', id })),
         prevent_self_review: false,
-        deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+        deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+      },
+    },
+    {
+      description: `Production deploys only from release tags (${RELEASE_TAG_PATTERN})`,
+      method: 'POST',
+      path: `${repo}/environments/production/deployment-branch-policies`,
+      body: { name: RELEASE_TAG_PATTERN, type: 'tag' },
+      ensure: {
+        listPath: `${repo}/environments/production/deployment-branch-policies`,
+        listField: 'branch_policies',
+        key: 'name',
+        value: RELEASE_TAG_PATTERN,
+        updateExisting: false,
+      },
+    },
+    {
+      description: 'Only repository admins can create, move or delete release tags (v*)',
+      method: 'POST',
+      path: `${repo}/rulesets`,
+      body: {
+        name: RELEASE_TAG_RULESET,
+        target: 'tag',
+        enforcement: 'active',
+        bypass_actors: [
+          { actor_id: REPO_ADMIN_ROLE_ID, actor_type: 'RepositoryRole', bypass_mode: 'always' },
+        ],
+        conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
+        rules: [{ type: 'creation' }, { type: 'update' }, { type: 'deletion' }],
+      },
+      ensure: {
+        listPath: `${repo}/rulesets`,
+        key: 'name',
+        value: RELEASE_TAG_RULESET,
+        updateExisting: true,
       },
     },
     {
@@ -349,4 +401,43 @@ export function toolingRetainedResources(cfg: BmgConfig) {
 export function partitionAlarms<T extends { name: string }>(alarms: T[], project: string) {
   const ours = alarms.filter((a) => a.name.startsWith(`${project}-`));
   return { ours, others: alarms.filter((a) => !ours.includes(a)) };
+}
+
+// ---- Release ship (docs/releases.md) ---------------------------------------------------
+
+export interface ShipInputs {
+  /** The commit to release: the one staging last deployed successfully. */
+  sha: string;
+  /** VERSION file contents at that commit. */
+  versionAtSha: string;
+  /** Release tags that already exist (local or on origin). */
+  existingTags: string[];
+  /** True when origin/main contains the commit. */
+  onMain: boolean;
+  /** Commit subjects in the release (since production's commit), newest first. */
+  changes: string[];
+}
+
+export interface ShipPlan {
+  tag: string;
+  version: string;
+  problems: string[];
+}
+
+/** Works out the release tag for `blueprint release ship` and anything that blocks it. */
+export function planShip(input: ShipInputs): ShipPlan {
+  const version = input.versionAtSha.trim();
+  const tag = `v${version}`;
+  const problems: string[] = [];
+  if (!/^\d+\.\d+\.\d+$/.test(version))
+    problems.push(`VERSION at ${input.sha.slice(0, 7)} is "${version}", not MAJOR.MINOR.PATCH`);
+  if (!input.onMain) problems.push(`${input.sha.slice(0, 7)} is not on main`);
+  if (input.existingTags.includes(tag))
+    problems.push(
+      `${tag} has already been released. Bump the version in a PR first ` +
+        '(`blueprint release minor`, `major` or `hotfix`), merge it, and let staging deploy it.',
+    );
+  if (input.changes.length === 0)
+    problems.push('nothing to release: production already has this commit');
+  return { tag, version, problems };
 }

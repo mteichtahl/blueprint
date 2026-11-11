@@ -66,6 +66,37 @@ describe('workflow policy', () => {
     expect(checkWorkflow('bad.yml', wrongRunner).map((v) => v.rule)).toContain('prod-environment');
   });
 
+  describe('production starts only from release tags', () => {
+    const prodJob = `jobs:\n  d:\n    runs-on: ${label('deploy-prod')}\n    environment: production\n    steps:\n      - run: echo\n`;
+    const withOn = (on: string) =>
+      `name: t\non:\n${on}\npermissions:\n  contents: read\n${prodJob}`;
+
+    it.each([
+      ['tag push', `  push:\n    tags: ['v*.*.*']`],
+      ['tag push or by hand', `  push:\n    tags: ['v*.*.*']\n  workflow_dispatch:`],
+      ['by hand only', `  workflow_dispatch:`],
+    ])('accepts %s', (_name, on) => {
+      expect(checkWorkflow('ok.yml', withOn(on))).toEqual([]);
+    });
+
+    it.each([
+      ['push to main', `  push:\n    branches: [main]`],
+      ['branches and tags', `  push:\n    branches: [main]\n    tags: ['v*']`],
+      ['any push', `  push:`],
+      ['pull requests', `  pull_request:\n  workflow_dispatch:`],
+      ['a schedule', `  schedule:\n    - cron: '0 0 * * *'`],
+    ])('rejects %s', (_name, on) => {
+      expect(checkWorkflow('bad.yml', withOn(on)).map((v) => v.rule)).toContain(
+        'prod-release-tags',
+      );
+    });
+
+    it('leaves workflows without a production job alone', () => {
+      const src = `name: t\non:\n  push:\n    branches: [main]\npermissions:\n  contents: read\njobs:\n  s:\n    runs-on: ${label('deploy-staging')}\n    environment: staging\n    steps:\n      - run: echo\n`;
+      expect(checkWorkflow('ok.yml', src)).toEqual([]);
+    });
+  });
+
   it("passes on the repo's own workflows", () => {
     const dir = resolve(import.meta.dirname, '../../../.github/workflows');
     const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));
