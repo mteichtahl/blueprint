@@ -14,7 +14,7 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
-## 1.4.1 — 2026-11-11
+## 1.5.1 — 2026-11-11
 
 Meeting recordings play straight away.
 
@@ -24,6 +24,18 @@ Meeting recordings play straight away.
   until you skipped back or forward 15 seconds. It now plays from the start,
   for recordings already saved too, and shows how long the recording is.
 - The speed you pick (1.5× or 2×) is kept when the player renews its link.
+
+## 1.5.0 — 2026-11-11
+
+The assistant has moved to the top bar and is now called Ask BMG.
+
+### Improved
+
+- **Ask BMG** sits in the top bar on every Blueprint screen, so it's one tap
+  away on a phone too. ⌘K still opens it on a computer.
+- It's no longer in the menu, which now starts with Overview.
+- It has a new icon: a speech bubble with a spark. Artists see the same name
+  and icon on their floating button.
 
 ## 1.4.0 — 2026-11-11
 

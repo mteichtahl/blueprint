@@ -379,22 +379,6 @@ export function BmgShell({
       <button type="button" className="mb-[18px] px-2 text-left" onClick={() => go('overview')}>
         <Logo />
       </button>
-      <button
-        type="button"
-        className="mb-3 flex min-h-[42px] items-center gap-2.5 rounded-[10px] border border-white/20 bg-white/5 px-2.5 text-left text-[15px] font-bold text-[#F1F4F7] hover:bg-white/10 disabled:opacity-60"
-        disabled={!onAsk}
-        title={onAsk ? undefined : 'The assistant is not available'}
-        onClick={() => {
-          setOpen(false);
-          onAsk?.();
-        }}
-      >
-        <Icon name="sparkle" />
-        Ask Blueprint AI
-        <span className="kbd ml-auto border-white/20 bg-white/10 text-[#D3D8DE] max-lg:hidden">
-          ⌘K
-        </span>
-      </button>
       {phone ? (
         <>
           {lead.length > 0 && (
@@ -545,6 +529,19 @@ export function BmgShell({
             <span className="kbd">/</span>
           </label>
           <div className="ml-auto flex items-center gap-2.5">
+            <button
+              type="button"
+              className="askbtn"
+              disabled={!onAsk}
+              title={onAsk ? 'Ask BMG (⌘K)' : 'The assistant is not available'}
+              onClick={onAsk}
+            >
+              <Icon name="assistant" />
+              Ask BMG
+              <span className="kbd max-lg:hidden" aria-hidden="true">
+                ⌘K
+              </span>
+            </button>
             {bell}
             {topActions}
             <ProfileMenu
@@ -618,11 +615,11 @@ export function ArtistShell({
         {onAsk && current !== 'chat' && (
           <button
             type="button"
-            aria-label="Ask Blueprint AI"
+            aria-label="Ask BMG"
             onClick={onAsk}
             className="absolute -top-[70px] right-4 flex size-14 items-center justify-center rounded-full bg-cta text-white shadow-[0_6px_16px_rgba(1,25,53,.28)]"
           >
-            <Icon name="sparkle" size={24} />
+            <Icon name="assistant" size={24} />
           </button>
         )}
         {tabs.map((t) => (

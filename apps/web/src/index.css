@@ -318,6 +318,31 @@ main {
     background: #f6f8fa;
     white-space: nowrap;
   }
+  /* "Ask BMG" in the top bar: navy on the light bar, outlined on the navy phone bar. */
+  .askbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background: #011935;
+    color: #f1f4f7;
+    font: 700 15px var(--font-sans);
+    white-space: nowrap;
+    box-shadow: 0 1px 0 rgba(1, 25, 53, 0.05);
+  }
+  .askbtn:hover {
+    background: #0b2747;
+  }
+  .askbtn:disabled {
+    opacity: 0.6;
+  }
+  .askbtn .kbd {
+    color: #d3d8de;
+    border-color: rgba(241, 244, 247, 0.25);
+    background: rgba(241, 244, 247, 0.1);
+  }
   .ibtn {
     position: relative;
     display: inline-flex;
@@ -2136,6 +2161,13 @@ nav,
   }
   .topbar .ibtn {
     color: #f1f4f7;
+  }
+  .topbar .askbtn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(241, 244, 247, 0.3);
+  }
+  .topbar .askbtn:hover {
+    background: rgba(255, 255, 255, 0.14);
   }
   .topbar .ibtn:hover {
     background: rgba(255, 255, 255, 0.1);

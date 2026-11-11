@@ -721,7 +721,7 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
 
   it('artist phone: AI assistant open', async () => {
     await phone();
-    await click('Ask Blueprint AI');
+    await click('Ask BMG');
     expect(await violations()).toEqual([]);
   });
 
