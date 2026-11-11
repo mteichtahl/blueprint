@@ -20,9 +20,9 @@ The phone menu is shorter and puts what needs you first.
 
 ### Improved
 
-- On a phone, the BMG menu opens with the three most urgent places at the top
-  under "Needs attention": unread chat, the review queue and gigs that need
-  help, with the busiest first.
+- On a phone, the BMG menu opens with "Needs attention" at the top: Tasks &
+  to-dos (always there, with how many are overdue) plus the three most urgent
+  of unread chat, the review queue and gigs that need help, busiest first.
 - Everything else sits under headings (Studio HQ, Artist workspaces, Shared
   with artists, BMG only) that start folded each time the menu opens. Tap a
   heading to open it; a folded heading shows how much is waiting inside and a

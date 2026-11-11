@@ -104,19 +104,23 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [wsTab, setWsTab] = useState<WorkspaceTab | undefined>();
   const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
   const [gigHelp, setGigHelp] = useState(0);
+  const [todosOverdue, setTodosOverdue] = useState(0);
   const [asking, setAsking] = useState(false);
   // A document opened from a Studio HQ card shows its page in the library (rev 8).
   const [libraryFile, setLibraryFile] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [roster, queue, help] = await Promise.all([
+    const [roster, queue, help, openTodos] = await Promise.all([
       api<{ artists: ArtistSummary[] }>(cfg, token, 'GET', '/artists'),
       api<{ submissions: SubmissionSummary[] }>(cfg, token, 'GET', '/review-queue?status=open'),
       api<{ gigs: unknown[] }>(cfg, token, 'GET', '/gigs?filter=help').catch(() => ({ gigs: [] })),
+      api<{ todos: Todo[] }>(cfg, token, 'GET', '/todos').catch(() => ({ todos: [] })),
     ]);
     setArtists(roster.artists);
     setOpenReviews(queue.submissions);
     setGigHelp(help.gigs.length);
+    const today = new Date().toISOString().slice(0, 10);
+    setTodosOverdue(openTodos.todos.filter((t) => !t.done && !!t.due && t.due < today).length);
   }, [cfg, token]);
   useEffect(() => void load().catch(() => undefined), [load]);
 
@@ -178,7 +182,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           icon: 'mic',
           badge: gigHelp ? `${gigHelp} need help` : undefined,
           badgeTone: 'w',
-          urgent: { waiting: gigHelp, priority: 3 },
+          urgent: { waiting: gigHelp, priority: 4 },
         },
         {
           id: 'artists',
@@ -204,7 +208,14 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           badge: unread || undefined,
           urgent: { waiting: unread, priority: 1 },
         },
-        { id: 'todos', label: 'Tasks & to-dos', icon: 'todo' },
+        {
+          id: 'todos',
+          label: 'Tasks & to-dos',
+          icon: 'todo',
+          badge: todosOverdue ? `${todosOverdue} overdue` : undefined,
+          urgent: { waiting: todosOverdue, priority: 2 },
+          alwaysOnTop: true,
+        },
         { id: 'library', label: 'Document library', icon: 'folder' },
         {
           id: 'review',
@@ -212,7 +223,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           icon: 'music',
           badge: openReviews.length || undefined,
           badgeTone: 'w',
-          urgent: { waiting: openReviews.length, priority: 2 },
+          urgent: { waiting: openReviews.length, priority: 3 },
         },
         { id: 'insights', label: 'Insights', icon: 'chart' },
         { id: 'contacts', label: 'Contacts', icon: 'users' },

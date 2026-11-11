@@ -211,6 +211,8 @@ export interface NavItem {
    * then lowest priority number) sit at the top of the menu.
    */
   urgent?: { waiting: number; priority: number };
+  /** Phones: always in the top group, alongside the three most urgent. */
+  alwaysOnTop?: boolean;
 }
 
 export interface NavSection {
@@ -302,7 +304,7 @@ export function BmgShell({
     };
   }, [open]);
 
-  // Phone menu: the three most urgent items on top, everything else folded
+  // Phone menu: to-dos and the three most urgent items on top, everything else folded
   // under headings that start collapsed each time the menu opens.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const openMenu = () => {
@@ -316,13 +318,17 @@ export function BmgShell({
       else next.add(key);
       return next;
     });
-  const pinned = sections
-    .flatMap((s) => s.items)
-    .filter((item) => item.urgent && !item.soon)
-    .sort(
-      (a, b) => b.urgent!.waiting - a.urgent!.waiting || a.urgent!.priority - b.urgent!.priority,
-    )
-    .slice(0, 3);
+  const byUrgency = (a: NavItem, b: NavItem) =>
+    (b.urgent?.waiting ?? 0) - (a.urgent?.waiting ?? 0) ||
+    (a.urgent?.priority ?? Infinity) - (b.urgent?.priority ?? Infinity);
+  const all = sections.flatMap((s) => s.items).filter((item) => !item.soon);
+  const pinned = [
+    ...all.filter((item) => item.alwaysOnTop),
+    ...all
+      .filter((item) => item.urgent && !item.alwaysOnTop)
+      .sort(byUrgency)
+      .slice(0, 3),
+  ].sort(byUrgency);
   const pinnedIds = new Set(pinned.map((item) => item.id));
   const folded = sections
     .map((section) => ({

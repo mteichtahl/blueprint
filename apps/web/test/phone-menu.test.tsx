@@ -28,6 +28,14 @@ const sections: NavSection[] = [
     items: [
       { id: 'messages', label: 'Chat', icon: 'chat', urgent: { waiting: 2, priority: 1 } },
       { id: 'review', label: 'Review queue', icon: 'music', urgent: { waiting: 5, priority: 2 } },
+      {
+        id: 'todos',
+        label: 'Tasks & to-dos',
+        icon: 'todo',
+        urgent: { waiting: 1, priority: 4 },
+        alwaysOnTop: true,
+      },
+      { id: 'contacts', label: 'Contacts', icon: 'users', urgent: { waiting: 0, priority: 5 } },
       { id: 'library', label: 'Document library', icon: 'folder' },
     ],
   },
@@ -55,16 +63,17 @@ function openMenu() {
 }
 
 describe('Phone menu', () => {
-  it('puts the three most urgent items first, most waiting first', () => {
+  it('puts to-dos and the three most urgent items first, most waiting first', () => {
     const menu = openMenu();
     const rows = within(menu)
       .getAllByRole('button')
       .map((b) => b.textContent);
     const top = rows.slice(
       rows.indexOf('Ask Blueprint AI⌘K') + 1,
-      rows.indexOf('Ask Blueprint AI⌘K') + 4,
+      rows.indexOf('Ask Blueprint AI⌘K') + 6,
     );
-    expect(top).toEqual(['Review queue', 'Chat', 'Artist gigs']);
+    // Contacts is a fourth urgent candidate, so it stays folded.
+    expect(top).toEqual(['Review queue', 'Chat', 'Tasks & to-dos', 'Artist gigs', 'STUDIO HQ']);
   });
 
   it('folds everything else under headings that start collapsed', async () => {
