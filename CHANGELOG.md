@@ -14,6 +14,17 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.3.2 — 2026-11-11
+
+Meeting recordings play straight away.
+
+### Fixed
+
+- Pressing play on a meeting recording could show it playing with no sound
+  until you skipped back or forward 15 seconds. It now plays from the start,
+  for recordings already saved too, and shows how long the recording is.
+- The speed you pick (1.5× or 2×) is kept when the player renews its link.
+
 ## 1.3.1 — 2026-11-11
 
 The top of the app on a phone is one solid navy.

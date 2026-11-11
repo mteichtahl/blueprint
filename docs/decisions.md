@@ -493,6 +493,7 @@ Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project. These are the 
   - **Create to-dos** from action items uses the normal to-dos API (artist meetings only), not the assistant's checklist. Each to-do notes the meeting it came from.
   - Staff use the same screens on a phone (responsive); there's no separate phone layout.
 - **Saving names or transcript fixes refiles the meeting note** as its next version.
+- **The player seeks for the browser (1.3.2).** Recordings made with MediaRecorder (WebM) carry no duration, and some browsers then "play" in silence until something seeks. On `loadedmetadata` with no finite duration, the player seeks to the end and back (on `durationchange`, or `seeked` if the browser can't work it out), and the first `play` of each link seeks to where it is. Works for recordings already saved; nothing is re-encoded. The chosen speed is re-applied when a renewed link loads.
 - **Not built yet (rev 11):** the custom word list for names; deleting audio after 90 days and its setting; starting a meeting from the assistant; the Timeline preview on the plan review; the plan under the note's "Where it's used"; "[recording paused]" in the transcript; the staging gate additions (a real Transcribe job across two artists' keys).
 
 ## Meeting notes: opted-out meetings in the screens (rev 11 change, 11 Nov 2026)
