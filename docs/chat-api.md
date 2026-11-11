@@ -144,6 +144,8 @@ Marks the conversation read for the caller.
 
 → `201 { messageId, createdAt }`. Artists can't attach files in a group when "artists can share files" is off. The client decides what to show in a card; the API stores it sealed and never trusts it for access: opening a card goes through that item's own API.
 
+**Uploading a file into a chat (rev 7).** There's no upload on this route. The app first uploads the file through the files API (`POST /artists/{artistId}/files`, or `/library` for Blueprint's groups and announcements), with `sharedWithArtistIds` set to the other artists in the chat. In an artist ↔ artist chat the file is stored `private`, so Blueprint can't open it. Once the malware scan is clean, the app posts a `file` card here. Recipients open the card with the file's own download endpoint, which returns a 5-minute link signed for them. Posting a file card also records where the file is used (`FILEUSE#…`), and a card for a deleted file reads "This file was deleted" (rev 8).
+
 ## `GET /directory`
 
 `{ artists: [{ artistId, displayName }], team: [{ name: "Blueprint", ... }] }` — people you can start a chat with.

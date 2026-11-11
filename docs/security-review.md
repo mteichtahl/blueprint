@@ -40,7 +40,21 @@
 - **S3:** every bucket blocks public access, refuses non-TLS requests, and uses KMS for data buckets. Logs go to access-log buckets.
 - **Headers:** a strict CSP (no inline script or style, `frame-ancestors 'none'`), HSTS for one year, `nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
 
-## Remaining Phase 6 items
+## Phase 6 status
 
-- The accessibility audit (WCAG 2.2 AA).
-- The extended ZAP scan and load test against staging.
+All three Phase 6 gates are met: this review, the accessibility audit ([accessibility.md](accessibility.md)) and the staging ZAP scan and load test ([staging-scans.md](staging-scans.md), which also found W5).
+
+## Changes since the review (to 1.1.0)
+
+These were made after 10 Nov and keep to the same rules. Each is in [decisions.md](decisions.md).
+
+- **Headers (W2):** `Permissions-Policy` now allows `microphone=(self)`, so the app can record meetings (rev 11). Camera and the rest stay off.
+- **CSP:**
+  - `frame-src https://www.google.com` only, for the venue map embed.
+  - `media-src` and `img-src` allow `blob:` (local previews of a picked file) and the two file buckets' download origins.
+  - `connect-src` adds the download origins, so the browser can read brand kit and library images for the PDF export and profile pictures.
+- **S3 CORS:** `artist-data` and `org-data` allow `GET`/`HEAD` from the app origins. Every read still needs a 5-minute presigned link signed in the caller's data-access session.
+- **Data-access callers (I1):** now 10 roles, with `api-meetings` and `api-meetings-worker` added. The infra test still fails if the list drifts.
+- **Artist-to-artist file sharing (rev 7):** an artist may read another artist's `private` item only when it was shared with them in an artist ↔ artist chat. BMG roles are still refused by authz and by KMS.
+- **Venue logo lookup:** the server fetches a venue's website, with SSRF protection (http/https on ports 80 and 443 only; private, loopback, link-local, CGNAT and multicast addresses refused at connect time; every redirect re-checked; size caps). SVG is never stored.
+- **AWS Organizations:** on, with this account only, to hold the AI services opt-out policy. No SCPs.
