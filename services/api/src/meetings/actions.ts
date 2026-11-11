@@ -70,6 +70,7 @@ const TASK_WORDS: Record<AiTask, string> = {
   full: 'meeting notes',
   ask: 'an answer',
   suggest: 'plan suggestions',
+  actions: 'the actions from this meeting',
 };
 
 export const AiRequest = z
@@ -91,6 +92,9 @@ export async function requestAi(
 ): Promise<AiJob> {
   if (m.status !== 'ready') throw new HttpError(409, 'The transcript isn’t ready yet');
   await needAi(m);
+  if (body.task === 'actions' && !m.artistId) {
+    throw new HttpError(400, 'Only a meeting about an artist has actions to take');
+  }
   if (body.task === 'suggest') {
     if (!m.artistId) throw new HttpError(400, 'Only a meeting about an artist can change a plan');
     if (!(await loadPlan(m.artistId))) {

@@ -46,6 +46,13 @@ import {
 } from '../meetings/store.ts';
 import { refreshNote } from '../meetings/note.ts';
 import {
+  ActionsPatch,
+  decideActions,
+  DoActionBody,
+  doAction,
+  type ApiCall,
+} from '../meetings/do-actions.ts';
+import {
   AiRequest,
   deleteBlocked,
   PlanUpdateBody,
@@ -138,6 +145,8 @@ async function list(principal: Principal, artistId?: string) {
  *   PATCH  /meetings/{space}/{id}/suggestions   accept, reject or edit suggestions
  *   POST   /meetings/{space}/{id}/plan-update   update the plan with the accepted changes
  *   POST   /meetings/{space}/{id}/plan-update/undo   undo it (7 days, plan unchanged since)
+ *   POST   /meetings/{space}/{id}/actions/{actionId}/do   Do it: add the to-do or gig
+ *   PATCH  /meetings/{space}/{id}/actions   Ignore actions, or bring them back
  *
  * `{space}` is `library` (Blueprint only) or the artist's id. The audio goes
  * up through the files API (`POST …/files` with `meetingId`), so it is
@@ -245,8 +254,66 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
     });
     return json(200, result);
   }
+  const doIt = /^actions\/(a\d{1,3})\/do$/.exec(action);
+  if (doIt && method === 'POST') {
+    const m = await open(principal, space, meetingId, true);
+    const result = await doAction(
+      m,
+      principal,
+      doIt[1]!,
+      parseBody(event, DoActionBody),
+      asThePerson(event),
+      new Date().toISOString().slice(0, 10),
+    );
+    await audit(event, 'meeting.action-done', result.ok ? 'success' : 'failed', {
+      ...ids(m),
+      actionId: result.action.id,
+      kind: result.action.kind,
+      ...(result.action.resultId ? { resultId: result.action.resultId } : {}),
+    });
+    const aiOff = await aiOffIn([result.meeting]);
+    return json(result.ok ? 200 : 422, {
+      action: result.action,
+      meeting: publicMeeting(result.meeting, principal, aiOff(result.meeting)),
+      ...(result.error ? { detail: result.error } : {}),
+    });
+  }
+  if (action === 'actions' && method === 'PATCH') {
+    const m = await open(principal, space, meetingId, true);
+    const body = parseBody(event, ActionsPatch);
+    const saved = await decideActions(m, principal, body);
+    await audit(event, 'meeting.actions-decided', 'success', {
+      ...ids(m),
+      ignored: body.updates.filter((u) => u.status === 'ignored').length,
+      restored: body.updates.filter((u) => u.status === 'waiting').length,
+    });
+    const aiOff = await aiOffIn([saved.meeting]);
+    return json(200, {
+      meeting: publicMeeting(saved.meeting, principal, aiOff(saved.meeting)),
+      content: saved.content,
+    });
+  }
   throw new HttpError(404, 'Not found');
 });
+
+/**
+ * Calls the app's own API with the caller's token, like the assistant's "Do
+ * it" (ai-actions), so an action is authorised exactly as if done by hand.
+ */
+function asThePerson(event: APIGatewayProxyEvent): ApiCall {
+  const auth = event.headers?.Authorization ?? event.headers?.authorization ?? '';
+  const base = `https://${event.requestContext.domainName}/${event.requestContext.stage}`;
+  return async (step) => {
+    const res = await fetch(`${base}${step.path}`, {
+      method: step.method,
+      headers: { authorization: auth, 'content-type': 'application/json' },
+      body: JSON.stringify(step.body),
+      signal: AbortSignal.timeout(8000),
+    });
+    const out = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    return { ok: res.ok, out };
+  };
+}
 
 const ids = (m: Pick<Meeting, 'meetingId' | 'artistId'>) => ({
   meetingId: m.meetingId,

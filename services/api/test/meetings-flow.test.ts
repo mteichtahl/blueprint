@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 /**
@@ -654,5 +654,148 @@ describe('a meeting that can’t be transcribed (AI off)', () => {
     const r = await req(staff, 'POST', `${ARTIST}/${id}/transcribe`);
     expect(r.statusCode).toBe(202);
     expect(sent).toContain('meeting.transcribe');
+  });
+});
+
+describe('actions from a meeting (Do it, Ignore)', () => {
+  const calls: {
+    url: string;
+    init: { method: string; headers: Record<string, string>; body: string };
+  }[] = [];
+  let reply: { ok: boolean; body: Record<string, unknown> } = { ok: true, body: { todoId: 't1' } };
+  beforeEach(() => {
+    calls.length = 0;
+    reply = { ok: true, body: { todoId: 't1' } };
+    vi.stubGlobal('fetch', async (url: string, init: never) => {
+      calls.push({ url, init });
+      return { ok: reply.ok, json: async () => reply.body };
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function withActions() {
+    const id = ((await start()).meeting as { meetingId: string }).meetingId;
+    const k = `ARTIST#${ARTIST}|MEETING#${id}`;
+    items.set(k, { ...items.get(k)!, status: 'ready', contentVersion: 1, actionsWaiting: 2 });
+    objects.set(
+      `artist_bucket/artists/${ARTIST}/meetings/${id}/content-1.json`,
+      JSON.stringify({
+        notes: '',
+        markers: [],
+        speakers: {},
+        segments: [{ id: 0, speaker: 'spk_0', start: 1, end: 2, text: 'I’ll send the stems.' }],
+        actions: {
+          requestId: 'r1',
+          createdAt: '2026-11-11T00:00:00Z',
+          createdBy: staff.sub,
+          items: [
+            {
+              id: 'a1',
+              kind: 'todo',
+              why: 'Agreed',
+              refs: [0],
+              status: 'waiting',
+              todo: { title: 'Send the stems' },
+            },
+            {
+              id: 'a2',
+              kind: 'gig',
+              why: 'Booked',
+              refs: [],
+              status: 'waiting',
+              gig: { title: 'Lantern Room', date: '2026-12-12' },
+            },
+          ],
+        },
+      }),
+    );
+    return { id, k };
+  }
+  const content = async (id: string) =>
+    (
+      parse(await req(staff, 'GET', `${ARTIST}/${id}`)).content as {
+        actions: { items: { id: string; status: string; resultId?: string; error?: string }[] };
+      }
+    ).actions.items;
+
+  it('Do it adds the to-do through the normal API as the person, once', async () => {
+    const { id, k } = await withActions();
+    const r = await req(staff, 'POST', `${ARTIST}/${id}/actions/a1/do`, {});
+    expect(r.statusCode).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toMatch(new RegExp(`/artists/${ARTIST}/todos$`));
+    expect(calls[0]!.init.method).toBe('POST');
+    expect(JSON.parse(calls[0]!.init.body)).toMatchObject({ title: 'Send the stems' });
+    expect((await content(id)).find((a) => a.id === 'a1')).toMatchObject({
+      status: 'done',
+      resultId: 't1',
+    });
+    expect(items.get(k)!.actionsWaiting).toBe(1);
+
+    // Pressing it again doesn't make a second to-do.
+    const again = parse(await req(staff, 'POST', `${ARTIST}/${id}/actions/a1/do`, {}));
+    expect(again.status).toBe(409);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('puts it back to waiting with the reason when the API says no', async () => {
+    const { id } = await withActions();
+    reply = { ok: false, body: { detail: 'Give the gig a date' } };
+    const r = parse(await req(staff, 'POST', `${ARTIST}/${id}/actions/a2/do`, {}));
+    expect(r.status).toBe(422);
+    expect((await content(id)).find((a) => a.id === 'a2')).toMatchObject({
+      status: 'waiting',
+      error: 'Give the gig a date',
+    });
+  });
+
+  it('refuses bad edits before calling anything', async () => {
+    const { id } = await withActions();
+    const r = parse(
+      await req(staff, 'POST', `${ARTIST}/${id}/actions/a2/do`, {
+        edits: { gig: { date: 'soon' } },
+      }),
+    );
+    expect(r.status).toBe(400);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('Ignore sets it aside, and Bring back undoes that', async () => {
+    const { id, k } = await withActions();
+    const r = await req(staff, 'PATCH', `${ARTIST}/${id}/actions`, {
+      updates: [{ id: 'a2', status: 'ignored' }],
+    });
+    expect(r.statusCode).toBe(200);
+    expect((await content(id)).find((a) => a.id === 'a2')!.status).toBe('ignored');
+    expect(items.get(k)!.actionsWaiting).toBe(1);
+    expect(parse(await req(staff, 'POST', `${ARTIST}/${id}/actions/a2/do`, {})).status).toBe(409);
+    await req(staff, 'PATCH', `${ARTIST}/${id}/actions`, {
+      updates: [{ id: 'a2', status: 'waiting' }],
+    });
+    expect((await content(id)).find((a) => a.id === 'a2')!.status).toBe('waiting');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('can look for actions again, but only in a meeting about an artist', async () => {
+    const { id } = await withActions();
+    items.set(`ARTIST#${ARTIST}|AI`, { PK: `ARTIST#${ARTIST}`, SK: 'AI', aiOptIn: true });
+    const r = await req(staff, 'POST', `${ARTIST}/${id}/ai`, { task: 'actions' });
+    expect(r.statusCode).toBe(202);
+    const lib = ((await start(staff, { artistId: undefined })).meeting as { meetingId: string })
+      .meetingId;
+    const lk = `ORG#meetings|MEETING#${lib}`;
+    items.set(lk, { ...items.get(lk)!, status: 'ready' });
+    expect(parse(await req(staff, 'POST', `library/${lib}/ai`, { task: 'actions' })).status).toBe(
+      400,
+    );
+  });
+
+  it('is for the Blueprint team only, and staff assigned to the artist', async () => {
+    const { id } = await withActions();
+    expect(parse(await req(artist, 'POST', `${ARTIST}/${id}/actions/a1/do`, {})).status).toBe(403);
+    expect(parse(await req(otherStaff, 'POST', `${ARTIST}/${id}/actions/a1/do`, {})).status).toBe(
+      404,
+    );
+    expect(calls).toHaveLength(0);
   });
 });

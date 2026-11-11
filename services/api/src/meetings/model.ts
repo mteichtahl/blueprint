@@ -5,6 +5,7 @@ import { extensionOf, gigNamePart } from '../gigs/media.ts';
 import { artistPk } from '../workspace/model.ts';
 import type { AiJob, Answer, Summary } from './ai.ts';
 import type { SuggestionSet } from './plan-changes.ts';
+import type { MeetingActionSet } from './meeting-actions.ts';
 
 /**
  * Meeting notes (rev 11): Blueprint staff record a meeting, it's transcribed
@@ -126,6 +127,8 @@ export interface Meeting {
   undoUntil?: string;
   /** Suggested plan changes still to be decided or applied (for counts on the Plan tab). */
   suggestionsWaiting?: number;
+  /** Actions (to-dos, gigs) still waiting for Do it or Ignore. */
+  actionsWaiting?: number;
 }
 
 /** Everything said and written in a meeting (kept encrypted in the space's bucket). */
@@ -159,6 +162,8 @@ export interface MeetingContent {
   answers?: Answer[];
   /** Suggested changes to the linked artist's plan. */
   suggestions?: SuggestionSet;
+  /** To-dos and gigs the meeting agreed, waiting for Do it or Ignore. */
+  actions?: MeetingActionSet;
   /** A question waiting for its answer. */
   pending?: { requestId: string; question: string };
 }
@@ -623,6 +628,7 @@ export function publicMeeting(
       : null,
     undoUntil: m.undoUntil ?? null,
     suggestionsWaiting: m.suggestionsWaiting ?? 0,
+    actionsWaiting: m.actionsWaiting ?? 0,
     consent: { at: m.consent.at, wording: m.consent.wording },
     recordedByMe: m.createdBy === viewer.sub,
     canDelete: canDeleteMeeting(viewer, m),

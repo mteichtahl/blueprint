@@ -45,7 +45,7 @@ export const MAX_ANSWERS = 20;
 export const QUESTION_MAX = 500;
 
 /** The AI work a meeting can have running. */
-export const AI_TASKS = ['quick', 'full', 'ask', 'suggest'] as const;
+export const AI_TASKS = ['quick', 'full', 'ask', 'suggest', 'actions'] as const;
 export type AiTask = (typeof AI_TASKS)[number];
 
 export interface AiJob {

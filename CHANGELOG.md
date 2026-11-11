@@ -14,6 +14,23 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.3.0 — 2026-11-11
+
+Meetings now list what they agreed, ready to add to the app with one tap.
+
+### New
+
+- A meeting about an artist has a new **Actions** tab. Once the transcript is
+  in, it lists the to-dos and gigs the meeting agreed, each with what was
+  said and when, plus the suggested plan update if there is one.
+- Each action has **Do it** and **Ignore**. Do it adds the to-do to the
+  artist's list, or the gig to their gigs as an idea. You can **Edit** the
+  wording or dates first. Nothing is added until you press Do it.
+- The plan update opens the usual review, so each plan change is still
+  checked before the plan changes.
+- Ignored actions can be brought back, and **Look again** finds new ones
+  without repeating what's already done.
+
 ## 1.2.1 — 2026-11-11
 
 Meetings recorded before transcription was set up now get transcribed.
