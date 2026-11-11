@@ -85,7 +85,10 @@ jobs:
 
   codeql:
     name: CodeQL
-    runs-on: codebuild-bmg-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    # CodeQL ran out of memory on the project's small ARM runner (4 GB) once the
+    # codebase grew (rev 11). This job alone runs on a large one (16 GB), with
+    # the single-label override <env>-<image>-<size> (same image as the project).
+    runs-on: codebuild-bmg-ci-${{ github.run_id }}-${{ github.run_attempt }}-arm-3.0-large
     permissions:
       contents: read
       security-events: write
