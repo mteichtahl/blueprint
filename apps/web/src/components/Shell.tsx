@@ -206,6 +206,13 @@ export interface NavItem {
   badgeTone?: 'k' | 'w';
   /** Not built yet: shown greyed out, like the design's later screens. */
   soon?: boolean;
+  /**
+   * Things waiting here. On phones the three most urgent items (most waiting,
+   * then lowest priority number) sit at the top of the menu.
+   */
+  urgent?: { waiting: number; priority: number };
+  /** Phones: always in the top group, alongside the three most urgent. */
+  alwaysOnTop?: boolean;
 }
 
 export interface NavSection {
@@ -297,7 +304,71 @@ export function BmgShell({
     };
   }, [open]);
 
-  const sidebar = (
+  // Phone menu: to-dos and the three most urgent items on top, everything else folded
+  // under headings that start collapsed each time the menu opens.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const openMenu = () => {
+    setExpanded(new Set());
+    setOpen(true);
+  };
+  const toggle = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const byUrgency = (a: NavItem, b: NavItem) =>
+    (b.urgent?.waiting ?? 0) - (a.urgent?.waiting ?? 0) ||
+    (a.urgent?.priority ?? Infinity) - (b.urgent?.priority ?? Infinity);
+  const all = sections.flatMap((s) => s.items).filter((item) => !item.soon);
+  const pinned = [
+    ...all.filter((item) => item.alwaysOnTop),
+    ...all
+      .filter((item) => item.urgent && !item.alwaysOnTop)
+      .sort(byUrgency)
+      .slice(0, 3),
+  ].sort(byUrgency);
+  const pinnedIds = new Set(pinned.map((item) => item.id));
+  const folded = sections
+    .map((section) => ({
+      label: section.label ?? 'STUDIO HQ',
+      items: section.items.filter((item) => !pinnedIds.has(item.id)),
+    }))
+    .filter((section) => section.items.length > 0);
+
+  const navButton = (item: NavItem, square: boolean) => (
+    <button
+      key={item.id}
+      type="button"
+      className="nav"
+      aria-current={current === item.id ? 'page' : undefined}
+      aria-disabled={item.soon || undefined}
+      title={item.soon ? 'Coming in a later release' : undefined}
+      onClick={() => !item.soon && go(item.id)}
+    >
+      {item.avatar ? (
+        <Avatar
+          name={item.avatar}
+          artistId={item.avatarArtistId}
+          size={26}
+          className="!bg-[#F1F4F7] !text-[#011935]"
+        />
+      ) : item.icon && square ? (
+        <span className={`appsq ${item.coral ? 'appsq-c' : ''}`}>
+          <Icon name={item.icon} size={14} strokeWidth={2.4} />
+        </span>
+      ) : (
+        item.icon && <Icon name={item.icon} />
+      )}
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+      {item.badge !== undefined && item.badge !== 0 && (
+        <span className={`tag t${item.badgeTone ?? 'k'}`}>{item.badge}</span>
+      )}
+    </button>
+  );
+
+  const sidebar = (phone: boolean) => (
     <nav aria-label="Main" className="bp flex h-full flex-col gap-0.5 px-3.5 pt-[22px] pb-3.5">
       <button type="button" className="mb-[18px] px-2 text-left" onClick={() => go('overview')}>
         <Logo />
@@ -318,41 +389,66 @@ export function BmgShell({
           ⌘K
         </span>
       </button>
-      {sections.map((section, i) => (
-        <div key={section.label ?? i} className="flex flex-col gap-0.5">
-          {section.label && <div className="navlabel">{section.label}</div>}
-          {section.items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="nav"
-              aria-current={current === item.id ? 'page' : undefined}
-              aria-disabled={item.soon || undefined}
-              title={item.soon ? 'Coming in a later release' : undefined}
-              onClick={() => !item.soon && go(item.id)}
-            >
-              {item.avatar ? (
-                <Avatar
-                  name={item.avatar}
-                  artistId={item.avatarArtistId}
-                  size={26}
-                  className="!bg-[#F1F4F7] !text-[#011935]"
-                />
-              ) : item.icon && section.label ? (
-                <span className={`appsq ${item.coral ? 'appsq-c' : ''}`}>
-                  <Icon name={item.icon} size={14} strokeWidth={2.4} />
-                </span>
-              ) : (
-                item.icon && <Icon name={item.icon} />
-              )}
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {item.badge !== undefined && item.badge !== 0 && (
-                <span className={`tag t${item.badgeTone ?? 'k'}`}>{item.badge}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      ))}
+      {phone ? (
+        <>
+          {pinned.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              <div className="navlabel">NEEDS ATTENTION</div>
+              {pinned.map((item) => navButton(item, true))}
+            </div>
+          )}
+          {folded.map((section) => {
+            const isOpen = expanded.has(section.label);
+            const id = `nav-${section.label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
+            const waiting = section.items.reduce((n, item) => n + (item.urgent?.waiting ?? 0), 0);
+            const here = section.items.some((item) => item.id === current);
+            return (
+              <div key={section.label} className="flex flex-col gap-0.5">
+                <button
+                  type="button"
+                  className="navlabel navgroup"
+                  aria-expanded={isOpen}
+                  aria-controls={id}
+                  onClick={() => toggle(section.label)}
+                >
+                  <span className="min-w-0 flex-1 truncate text-left">{section.label}</span>
+                  {!isOpen && here && <span className="sr-only">(current page is here)</span>}
+                  {!isOpen && here && (
+                    <span aria-hidden="true" className="size-1.5 rounded-full bg-[#F1F4F7]" />
+                  )}
+                  {!isOpen && waiting > 0 && <span className="tag tk">{waiting}</span>}
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`flex-none transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {isOpen && (
+                  <div id={id} className="flex flex-col gap-0.5">
+                    {section.items.map((item) => navButton(item, true))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      ) : (
+        sections.map((section, i) => (
+          <div key={section.label ?? i} className="flex flex-col gap-0.5">
+            {section.label && <div className="navlabel">{section.label}</div>}
+            {section.items.map((item) => navButton(item, !!section.label))}
+          </div>
+        ))
+      )}
       <div className="mt-auto pt-5">
         <AppearanceSwitch theme={theme} onChange={onTheme} />
         <ReleaseFooter />
@@ -364,7 +460,7 @@ export function BmgShell({
     <div className="bmg-frame flex min-h-dvh bg-background text-foreground">
       <SkipLink />
       <div className="sticky top-0 hidden h-dvh w-[264px] flex-none overflow-y-auto lg:block">
-        {sidebar}
+        {sidebar(false)}
       </div>
       {open && (
         <div
@@ -394,7 +490,7 @@ export function BmgShell({
                 <path d="M6 6l12 12M18 6L6 18" />
               </svg>
             </button>
-            {sidebar}
+            {sidebar(true)}
           </div>
           <button
             type="button"
@@ -413,7 +509,7 @@ export function BmgShell({
             className="ibtn lg:hidden"
             aria-label="Open menu"
             aria-expanded={open}
-            onClick={() => setOpen(true)}
+            onClick={openMenu}
           >
             <svg
               width="20"

@@ -93,6 +93,19 @@ main {
     color: #e8726e;
     padding: 18px 10px 6px;
   }
+  /* Phone menu: a heading that folds its section away. */
+  .navgroup {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 12px 10px 4px;
+    border-radius: 8px;
+  }
+  .navgroup:hover {
+    color: #f1f4f7;
+  }
   .t {
     font-family: var(--font-title);
     font-weight: 700;
