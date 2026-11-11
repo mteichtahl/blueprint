@@ -8,7 +8,7 @@ Please do **not** open a public issue. Report it privately through GitHub's **Re
 
 ## What we protect
 
-- Artist data. Each artist has their own KMS key, and AI access to their data depends on a KMS grant that exists only while they opt in.
+- Artist data. Each artist has their own KMS key, and items they mark private are refused to Blueprint by KMS itself. AI features only read an artist's data while they have opted in: their knowledge base exists only then, and consent is checked again before every read and every transcription.
 - The AWS account. A permission boundary sits on every role; GuardDuty, Security Hub, CloudTrail and Config are always on.
 - The pipeline. Ephemeral CodeBuild runners, actor-ID webhook filters, fork-PR approval, SHA-pinned actions, and no secrets in GitHub.
 

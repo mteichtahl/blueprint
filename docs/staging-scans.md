@@ -13,7 +13,8 @@ The target is `vars.STAGING_WEB_URL`, defaulting to the staging CloudFront URL. 
 
 - **Version and checksum:** ZAP 2.17.0 from its GitHub release, checked against a pinned SHA-256 before it runs. To upgrade, change `ZAP_VERSION` and `ZAP_SHA256` together.
 - **Plan:** `tools/scans/zap-plan.mjs` writes it.
-  - It seeds all 103 API routes from `infra/lib/api-stack.ts`, with harmless sample ids, so the scan reaches the API and not only the web app.
+  - It seeds every `route(...)` call in `infra/lib/api-stack.ts` (104 at release 1.1.0), with harmless sample ids, so the scan reaches the API and not only the web app. It stops if it finds fewer than 50, so a change to how routes are declared can't quietly shrink the scan.
+  - The `{proxy+}` routes (library, folders, access, contacts and venues, newsroom, meetings) aren't seeded, so the scan only reaches them if the spider finds them. They sit behind the same WAF and token authorizer as every other route. Seeding their paths is a follow-up.
   - Then it spiders the app and runs a passive scan. In `full` mode, an active scan follows.
   - The active scan is paced to 1 thread at 400 ms, at most 750 requests per 5 minutes, so the API WAF doesn't block the scanner partway through.
 - **Unauthenticated:** the scan tests the edge, the security headers, the WAF, the token authorizer and how the gateway handles bad input. Authenticated, per-role checks are the job of the authorisation matrix, which runs in CI.
