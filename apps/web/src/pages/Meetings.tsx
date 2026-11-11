@@ -1319,6 +1319,8 @@ function Player({
   const [src, setSrc] = useState('');
   const [rate, setRate] = useState(1);
   const [error, setError] = useState('');
+  /** Whether this link has had its first play nudged (see onPlay). */
+  const nudged = useRef(false);
   const renew = useCallback(async () => {
     try {
       const at = audio.current?.currentTime ?? 0;
@@ -1353,6 +1355,37 @@ function Player({
         className="w-full"
         aria-label="Meeting recording"
         onError={() => src && void renew()}
+        onLoadedMetadata={(e) => {
+          const a = e.currentTarget;
+          nudged.current = false;
+          // A new link resets the speed; keep the one chosen.
+          a.playbackRate = rate;
+          // Recordings made in the browser don't say how long they are, and
+          // some browsers then "play" in silence until something seeks. Seek
+          // to the end and back: the length becomes known and decoding starts.
+          if (!Number.isFinite(a.duration)) {
+            const at = a.currentTime;
+            // Back to where it was as soon as the length is known, or the
+            // seek finishes without it (a browser that can't work it out).
+            const back = () => {
+              a.removeEventListener('durationchange', back);
+              a.removeEventListener('seeked', back);
+              a.currentTime = at;
+            };
+            a.addEventListener('durationchange', back);
+            a.addEventListener('seeked', back);
+            a.currentTime = Number.MAX_SAFE_INTEGER;
+          }
+        }}
+        onPlay={(e) => {
+          // The first play of each link seeks to where it is, which wakes the
+          // decoder (the same thing the 15-second buttons do).
+          if (nudged.current) return;
+          nudged.current = true;
+          const a = e.currentTarget;
+          const at = a.currentTime;
+          a.currentTime = at;
+        }}
       />
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => skip(-15)}>
