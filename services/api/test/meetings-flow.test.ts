@@ -752,10 +752,14 @@ describe('actions from a meeting (Do it, Ignore)', () => {
     expect(todoCalls()).toHaveLength(1);
     expect(todoCalls()[0]!.init.method).toBe('PATCH');
     expect(JSON.parse(todoCalls()[0]!.init.body)).toEqual({ bmgOnly: false });
+    // The artist is told once.
+    expect(sent.filter((t) => t === 'todo.shared')).toHaveLength(1);
 
     calls.length = 0;
     await req(staff, 'PATCH', `${ARTIST}/${id}`, { shared: false });
     expect(JSON.parse(todoCalls()[0]!.init.body)).toEqual({ bmgOnly: true });
+    // Hiding them again tells nobody.
+    expect(sent.filter((t) => t === 'todo.shared')).toHaveLength(1);
 
     // Sharing an unchanged meeting again touches nothing.
     calls.length = 0;

@@ -324,6 +324,34 @@ async function todosFollow(
   return moved;
 }
 
+/** One notice to the artist: Blueprint added these to-dos for them (todo.shared). */
+async function tellArtistAboutTodos(m: Meeting, principal: Principal, todoIds: string[]) {
+  const content = await readContent(m, staffRole(principal));
+  const titles = (content.actions?.items ?? [])
+    .filter((a) => a.resultId && todoIds.includes(a.resultId))
+    .map((a) => a.todo?.title ?? '')
+    .filter(Boolean)
+    .slice(0, 5);
+  await events.send(
+    new PutEventsCommand({
+      Entries: [
+        {
+          EventBusName: env('EVENT_BUS'),
+          Source: 'bmg.workspace',
+          DetailType: 'todo.shared',
+          Detail: JSON.stringify({
+            id: randomUUID(),
+            artistId: m.artistId,
+            count: todoIds.length,
+            titles,
+            bySub: principal.sub,
+          }),
+        },
+      ],
+    }),
+  );
+}
+
 /**
  * Calls the app's own API with the caller's token, like the assistant's "Do
  * it" (ai-actions), so an action is authorised exactly as if done by hand.
@@ -413,6 +441,8 @@ async function patch(
         ...ids(m),
         count: moved.length,
       });
+      // The artist hears once about the to-dos they can now see.
+      if (body.shared) await tellArtistAboutTodos(m, principal, moved);
     }
     // The files follow, and the knowledge base hears about each one (file.share / file.unshare).
     for (const fileId of await shareFiles({ ...m, shared: body.shared }, body.shared)) {

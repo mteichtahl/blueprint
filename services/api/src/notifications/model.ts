@@ -72,6 +72,18 @@ export type DomainEvent =
       byRole: 'artist' | 'bmg-admin' | 'bmg-staff';
       bmgOnly?: boolean;
     }
+  | {
+      /**
+       * Blueprint shared a meeting with the artist, so the to-dos its actions
+       * made are now theirs to see (rev 11 change). One notice for all of them.
+       */
+      type: 'todo.shared';
+      artistId: string;
+      count: number;
+      /** The to-dos' titles (the first few), which the artist can now see. */
+      titles: string[];
+      bySub: string;
+    }
   | { type: 'connector.reminder'; artistId: string }
   | { type: 'connector.needsReauth'; connectorId: string; label: string; artistId?: string }
   | {
@@ -266,6 +278,19 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
           body: `“${e.title}”`,
           link: 'todos',
           throttleKey: `todo-${e.todoId}`,
+        },
+      };
+    }
+    case 'todo.shared': {
+      const shown = e.titles.slice(0, 3).map((t) => `“${t}”`);
+      const more = e.count - shown.length;
+      return {
+        to: artistsOf([e.artistId]).filter((r) => r.sub !== e.bySub),
+        draft: {
+          kind: 'todo',
+          title: `Blueprint added ${e.count === 1 ? 'a to-do' : `${e.count} to-dos`} for you`,
+          body: `${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}.`,
+          link: 'todos',
         },
       };
     }
