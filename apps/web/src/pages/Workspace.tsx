@@ -20,6 +20,8 @@ import { ArtistChatTab, useNarrow } from './Messages.tsx';
 import { PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG } from './Review.tsx';
 import { ArtistTodos } from './Todos.tsx';
+import { LatestMeetingCard, PlanSuggestionsBanner, useArtistMeetings } from './Meetings.tsx';
+import type { Meeting } from '../lib/meetings.ts';
 
 /**
  * Workspace tabs (screens doc rev 9): four tabs, each with a section switch
@@ -137,6 +139,8 @@ export function ArtistWorkspace({
   artist,
   onNavigate,
   onOpenChat,
+  onRecordMeeting,
+  onOpenMeeting,
 }: {
   cfg: AppConfig;
   token: string;
@@ -146,7 +150,13 @@ export function ArtistWorkspace({
   onNavigate?: (view: string) => void;
   /** "Open in Chat": the full Chat page on this conversation. */
   onOpenChat?: (conversationId: string) => void;
+  /** Record meeting (rev 11): a new meeting about this artist. */
+  onRecordMeeting?: () => void;
+  /** Opens one of this artist's meetings. */
+  onOpenMeeting?: (m: Meeting) => void;
 }) {
+  const meetings = useArtistMeetings(cfg, token, artist.artistId);
+  const planReview = meetings.reduce((n, m) => n + m.suggestionsWaiting, 0);
   const [tab, setTabState] = useState<TabId>('summary');
   // Each tab reopens on the section last used in it.
   const [lastIn, setLastIn] = useState<Partial<Record<GroupId, TabId>>>({});
@@ -190,11 +200,12 @@ export function ArtistWorkspace({
 
   const group = groupOf(tab);
   const sectionCount: Partial<Record<TabId, { n: number; hot?: boolean }>> = {
+    plan: { n: planReview, hot: true },
     todo: { n: counts.todos },
     submissions: { n: counts.submissions, hot: true },
   };
   const groupCount: Partial<Record<GroupId, { n: number; hot?: boolean }>> = {
-    plan: sectionCount.todo,
+    plan: planReview ? { n: planReview, hot: true } : sectionCount.todo,
     work: sectionCount.submissions,
   };
   const chat = (
@@ -218,6 +229,11 @@ export function ArtistWorkspace({
           <span className="eyebrow">Artist workspace</span>
           <div className="flex items-center gap-3">
             <h1 className="t m-0 min-w-0 flex-1 text-[38px] leading-tight">{artist.displayName}</h1>
+            {onRecordMeeting && (
+              <Button size="sm" className="shrink-0" onClick={onRecordMeeting}>
+                <Icon name="record" size={16} /> Record meeting
+              </Button>
+            )}
             {/* Chat toggle: an icon on the far right of the name line. */}
             <Button
               size="sm"
@@ -285,7 +301,19 @@ export function ArtistWorkspace({
                   }}
                 />
                 <WorkspaceOverview cfg={cfg} token={token} artist={artist} onTab={setTab} />
+                {onOpenMeeting && onRecordMeeting && (
+                  <div className="flex flex-wrap gap-5">
+                    <LatestMeetingCard
+                      meetings={meetings}
+                      onOpen={onOpenMeeting}
+                      onRecord={onRecordMeeting}
+                    />
+                  </div>
+                )}
               </>
+            )}
+            {tab === 'plan' && onOpenMeeting && (
+              <PlanSuggestionsBanner meetings={meetings} onOpen={onOpenMeeting} />
             )}
             {tab === 'plan' && (
               <PlanTab

@@ -12,7 +12,8 @@ export const planLogSk = (at: string, changeId: string) => `${PLAN_LOG_PREFIX}${
 /** Most changes in a single entry; the rest are counted. */
 export const MAX_CHANGE_LINES = 40;
 
-export type PlanChangeKind = 'created' | 'edited' | 'stage-added';
+/** `meeting`: from a meeting's suggested changes; `undone`: one of those, undone (rev 11). */
+export type PlanChangeKind = 'created' | 'edited' | 'stage-added' | 'meeting' | 'undone';
 
 export interface PlanChange {
   changeId: string;

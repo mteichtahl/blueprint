@@ -97,6 +97,99 @@ Warm, clear and upbeat, in Australian English. No hype words. Under 400 words in
 {{feedback}}`,
   },
   {
+    id: 'meetings.summary.quick',
+    label: 'Meetings · quick summary',
+    usedBy: 'The quick summary of a recorded meeting',
+    variables: ['today', 'title', 'meetingDate', 'attendees', 'about', 'notes', 'transcript'],
+    defaultText: `Summarise this Blueprint Music Group meeting in five to eight short points, most important first: what was decided, what's changing, and what happens next.
+
+Meeting: {{title}} ({{meetingDate}}), about {{about}}.
+Attendees: {{attendees}}
+
+Notes typed during the meeting:
+{{notes}}
+
+Transcript (each line starts with its [line number]):
+{{transcript}}
+
+Use only what was said or written. Plain, warm Australian English. Name people as the transcript does.`,
+  },
+  {
+    id: 'meetings.summary.full',
+    label: 'Meetings · full notes',
+    usedBy: 'Full meeting notes: decisions, action items, open questions',
+    variables: ['today', 'title', 'meetingDate', 'attendees', 'about', 'notes', 'transcript'],
+    defaultText: `Write meeting notes for this Blueprint Music Group meeting.
+
+Sections, in this order (leave out any that would be empty):
+- Overview: two or three points on what the meeting was for and how it went.
+- Decisions: what was agreed.
+- Open questions: what's still to be worked out.
+- Plan: anything that changes or affects the artist's development plan (stages, milestones, dates, goals).
+
+Then list the action items: who will do what, and by when if a date was said. Today is {{today}}; turn "next Friday" and similar into a date.
+
+Meeting: {{title}} ({{meetingDate}}), about {{about}}.
+Attendees: {{attendees}}
+
+Notes typed during the meeting:
+{{notes}}
+
+Transcript (each line starts with its [line number]):
+{{transcript}}
+
+Use only what was said or written. Plain Australian English, short points.`,
+  },
+  {
+    id: 'meetings.ask',
+    label: 'Meetings · ask about a meeting',
+    usedBy: 'Answering a question about one recorded meeting',
+    variables: [
+      'today',
+      'title',
+      'meetingDate',
+      'attendees',
+      'about',
+      'notes',
+      'transcript',
+      'question',
+    ],
+    defaultText: `Answer the question below from this Blueprint Music Group meeting only. If the meeting doesn't say, answer that it wasn't discussed. Keep it to a few sentences.
+
+Question: {{question}}
+
+Meeting: {{title}} ({{meetingDate}}), about {{about}}.
+Attendees: {{attendees}}
+
+Notes typed during the meeting:
+{{notes}}
+
+Transcript (each line starts with its [line number]):
+{{transcript}}`,
+  },
+  {
+    id: 'meetings.plan_update',
+    label: 'Meetings · suggested plan changes',
+    usedBy: "Suggesting changes to an artist's plan from a meeting about it",
+    variables: ['today', 'title', 'meetingDate', 'artistName', 'plan', 'notes', 'transcript'],
+    defaultText: `{{artistName}}'s development plan is below, followed by a Blueprint meeting about it. Suggest the changes to the plan that the people in the meeting actually agreed on.
+
+Only suggest a change when the meeting clearly settles it: a decision, an agreed date, a milestone that's done, a new goal. Ideas that were only floated, or things still being worked out, are not changes. If nothing in the meeting changes the plan, suggest nothing.
+
+Keep the plan's own wording and style where you edit it. Today is {{today}}; turn relative dates into real dates.
+
+The plan:
+{{plan}}
+
+Meeting: {{title}} ({{meetingDate}})
+
+Notes typed during the meeting:
+{{notes}}
+
+Transcript (each line starts with its [line number]):
+{{transcript}}`,
+  },
+  {
     id: 'tools.search_my_content',
     label: 'Tool · search my content',
     usedBy: 'What the agent is told the search tool does',

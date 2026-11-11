@@ -396,3 +396,28 @@ Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project. These are the 
 - **Microphone:** the `Permissions-Policy` header now allows `microphone=(self)` (it was `()`), so the app itself can record. Camera stays off.
 - **Data-access callers (I1):** `api-meetings` and `api-meetings-worker` join the list, which is now 10 roles.
 - **API stack size:** the meetings API function lives in the meetings stack; the API stack only has `/meetings/{proxy+}` and its invoke permission (the list is `/meetings/items`). The API stack is now at 459 of its 460 guardrail, so **the next new route must go into a second API stack**.
+
+## Meeting notes: summaries and plan updates (rev 11, 11 Nov 2026)
+
+- **The AI work runs in the meetings worker,** not the API: a three-hour transcript doesn't fit in API Gateway's 29 seconds. `POST /meetings/{space}/{id}/ai` (`quick`, `full`, `ask` or `suggest`) starts one job per meeting (a job quiet for 6 minutes counts as lost), and the app polls the meeting. A question is saved with the meeting's content first, so it never travels on the event bus.
+- **Models and prompts:** summaries and answers use the summary model, plan suggestions the assistant's model, both called directly with Converse (as the newsroom does), with no tools. The four prompts (`meetings.summary.quick`, `meetings.summary.full`, `meetings.ask`, `meetings.plan_update`) are editable in AI prompts; the reply shape is appended by code. Every point cites transcript lines, and lines that don't exist are dropped.
+- **AI choices are checked twice:** when the work is asked for, and again by the worker before anything is sent.
+- **Plan suggestions are checked against the real plan:** each must point at a stage or milestone that exists, "before" is read from the plan, no-ops and repeats are dropped, and only the changes listed in spec 6.2 are possible (no to-dos: action items become to-dos from the meeting page through the normal to-dos API). Removals and date moves of more than four weeks are tagged "Check this". A milestone for a new stage is linked to it.
+- **Update plan** saves every accepted change in one transaction with one history entry (`kind: meeting`, starting "From the meeting “…”"). If any accepted change no longer fits because the plan changed, nothing is saved: those go back to waiting, marked to check again, and staff press Update plan once more. (The spec let the rest go through straight away.)
+- **Undo** is possible for 7 days, and only while nobody has changed the plan since (the spec allowed it if only other parts had changed). It writes a history entry (`kind: undone`). A meeting can't be deleted while its update can be undone.
+- **The artist is told** (`plan.updated`: bell, email, push) with up to five plan changes in plain words, never the transcript or Blueprint's reasons. There's no free-text message to the artist: notifications never carry free text; use Chat.
+- **Linking a meeting to an artist afterwards isn't built.** It would mean moving the recording and note from Blueprint's library into the artist's Library, and rev 10 doesn't move files between spaces (different keys). Meetings are linked when they're started.
+- **Plan saves are shared:** the plan editor and meeting updates both save through `workspace/plan-store.ts`.
+
+## Meeting notes: screens (rev 11, 11 Nov 2026)
+
+- **Where:** Meetings sits under BMG ONLY in the sidebar. An artist workspace has **Record meeting** in its header, a **Latest meeting** card on Overview → Summary, and a banner plus a coral count on Plan when suggestions are waiting. Notifications open the meeting (`meeting:<space>/<id>`); artists' plan-update notifications open My plan.
+- **One recorder for the whole app:** it keeps running while staff move around, with a "Recording 12:41" bar on every other screen. The page must stay open. Each 10 seconds of audio is saved on the device (IndexedDB); Meetings offers **Finish and transcribe** or **Discard** for a recording left unfinished. The screen is kept awake (Wake Lock) where the browser allows, and leaving the page asks first.
+- **Departures from the spec's screens:**
+  - The player is the browser's own audio control, with Back/Forward 15 s, 1× / 1.5× / 2× and the marked moments as buttons. There's no waveform. Download links last 5 minutes, so the player renews its link in place when one runs out.
+  - **Who's speaking?** has a "Play <speaker>" button per voice and a name box that suggests the attendees.
+  - Attendees are the Blueprint team, the artist, and names typed in. Picking from Contacts isn't built.
+  - **Create to-dos** from action items uses the normal to-dos API (artist meetings only), not the assistant's checklist. Each to-do notes the meeting it came from.
+  - Staff use the same screens on a phone (responsive); there's no separate phone layout.
+- **Saving names or transcript fixes refiles the meeting note** as its next version.
+- **Not built yet (rev 11):** the custom word list for names; deleting audio after 90 days and its setting; starting a meeting from the assistant; the Timeline preview on the plan review; the plan under the note's "Where it's used"; "[recording paused]" in the transcript; the staging gate additions (a real Transcribe job across two artists' keys).

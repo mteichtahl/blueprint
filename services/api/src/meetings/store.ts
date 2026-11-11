@@ -158,6 +158,7 @@ export async function writeContent(
   content: MeetingContent,
   role: SessionRole,
   extra: Partial<Meeting> = {},
+  remove: (keyof Meeting)[] = [],
 ): Promise<number> {
   const next = m.contentVersion + 1;
   const b = await bucketFor(m, role);
@@ -174,7 +175,7 @@ export async function writeContent(
   const moved = await updateMeeting(
     m,
     { ...extra, contentVersion: next },
-    { expect: { contentVersion: m.contentVersion } },
+    { expect: { contentVersion: m.contentVersion }, remove },
   );
   if (!moved) {
     await b.client.send(new DeleteObjectCommand({ Bucket: b.bucket, Key })).catch(() => undefined);
@@ -187,6 +188,31 @@ export async function writeContent(
       .catch(() => undefined);
   }
   return next;
+}
+
+/**
+ * Reads the latest content, changes it and saves it, starting again (up to
+ * three times) if someone else saved in between. For changes that only add
+ * (a summary, an answer), so re-applying them is safe.
+ */
+export async function mutateContent(
+  space: MeetingSpace,
+  meetingId: string,
+  role: SessionRole,
+  change: (content: MeetingContent, m: Meeting) => MeetingContent,
+  extra: Partial<Meeting> = {},
+  remove: (keyof Meeting)[] = [],
+): Promise<{ meeting: Meeting; content: MeetingContent; version: number }> {
+  for (let attempt = 0; ; attempt++) {
+    const m = await loadMeeting(space, meetingId);
+    const content = change(await readContent(m, role), m);
+    try {
+      const version = await writeContent(m, content, role, extra, remove);
+      return { meeting: { ...m, ...extra, contentVersion: version }, content, version };
+    } catch (err) {
+      if (!(err instanceof HttpError && err.status === 409) || attempt >= 2) throw err;
+    }
+  }
 }
 
 /** Removes every content version still around (meeting deleted). */

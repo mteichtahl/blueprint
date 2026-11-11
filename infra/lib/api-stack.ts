@@ -825,6 +825,7 @@ export class ApiStack extends BmgStack {
           'connector.reminder',
           'connector.needsReauth',
           'meeting.processed',
+          'plan.updated',
         ],
       },
       targets: [

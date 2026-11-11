@@ -3,6 +3,8 @@ import { ARTIST_ID_PATTERN } from '@bmg/crypto';
 import { authorize, type Principal } from '@bmg/authz';
 import { extensionOf, gigNamePart } from '../gigs/media.ts';
 import { artistPk } from '../workspace/model.ts';
+import type { AiJob, Answer, Summary } from './ai.ts';
+import type { SuggestionSet } from './plan-changes.ts';
 
 /**
  * Meeting notes (rev 11): Blueprint staff record a meeting, it's transcribed
@@ -118,6 +120,12 @@ export interface Meeting {
   transcribeJob?: string;
   contentVersion: number;
   updatedAt: string;
+  /** A summary, answer or plan suggestions being worked on (rev 11, spec 5.2 and 6). */
+  aiJob?: AiJob;
+  /** A plan update from this meeting can be undone until then; the meeting can't be deleted before. */
+  undoUntil?: string;
+  /** Suggested plan changes still to be decided or applied (for counts on the Plan tab). */
+  suggestionsWaiting?: number;
 }
 
 /** Everything said and written in a meeting (kept encrypted in the space's bucket). */
@@ -145,6 +153,14 @@ export interface MeetingContent {
   segments: Segment[];
   /** Someone fixed words in the transcript. */
   edited?: boolean;
+  /** Summaries, oldest first (the latest goes into the note). */
+  summaries?: Summary[];
+  /** "Ask about this meeting", oldest first. */
+  answers?: Answer[];
+  /** Suggested changes to the linked artist's plan. */
+  suggestions?: SuggestionSet;
+  /** A question waiting for its answer. */
+  pending?: { requestId: string; question: string };
 }
 
 export const emptyContent = (): MeetingContent => ({
@@ -588,6 +604,11 @@ export function publicMeeting(m: Meeting, viewer: Pick<Principal, 'sub' | 'role'
     audioFileId: m.audioFileId ?? null,
     noteFileId: m.noteFileId ?? null,
     contentVersion: m.contentVersion,
+    aiJob: m.aiJob
+      ? { task: m.aiJob.task, status: m.aiJob.status, error: m.aiJob.error ?? null }
+      : null,
+    undoUntil: m.undoUntil ?? null,
+    suggestionsWaiting: m.suggestionsWaiting ?? 0,
     consent: { at: m.consent.at, wording: m.consent.wording },
     recordedByMe: m.createdBy === viewer.sub,
     canDelete: canDeleteMeeting(viewer, m),

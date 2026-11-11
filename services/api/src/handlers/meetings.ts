@@ -42,6 +42,16 @@ import {
   writeContent,
 } from '../meetings/store.ts';
 import { refreshNote } from '../meetings/note.ts';
+import {
+  AiRequest,
+  deleteBlocked,
+  PlanUpdateBody,
+  requestAi,
+  reviewSuggestions,
+  SuggestionsPatch,
+  undoPlanUpdate,
+  updatePlan,
+} from '../meetings/actions.ts';
 
 const events = new EventBridgeClient({});
 const table = () => env('MAIN_TABLE');
@@ -110,6 +120,10 @@ async function list(principal: Principal, artistId?: string) {
  *   DELETE /meetings/{space}/{id}          (whoever recorded it, or an admin)
  *   POST   /meetings/{space}/{id}/transcribe   try transcription again
  *   POST   /meetings/{space}/{id}/note     file the latest note in the Library
+ *   POST   /meetings/{space}/{id}/ai       summary (quick, full), ask, or plan suggestions
+ *   PATCH  /meetings/{space}/{id}/suggestions   accept, reject or edit suggestions
+ *   POST   /meetings/{space}/{id}/plan-update   update the plan with the accepted changes
+ *   POST   /meetings/{space}/{id}/plan-update/undo   undo it (7 days, plan unchanged since)
  *
  * `{space}` is `library` (Blueprint only) or the artist's id. The audio goes
  * up through the files API (`POST …/files` with `meetingId`), so it is
@@ -146,6 +160,8 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
     if (!canDeleteMeeting(principal, m)) {
       throw new HttpError(403, 'Only whoever recorded the meeting, or an admin, can delete it');
     }
+    const blocked = deleteBlocked(m);
+    if (blocked) throw new HttpError(409, blocked);
     await deleteContent(m, staffRole(principal));
     await db.send(
       new DeleteCommand({
@@ -176,6 +192,34 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
     const fileId = await refreshNote(m, staffRole(principal));
     await audit(event, 'meeting.note', 'success', { ...ids(m), fileId });
     return json(202, { noteFileId: fileId });
+  }
+  if (action === 'ai' && method === 'POST') {
+    const m = await open(principal, space, meetingId, true);
+    const job = await requestAi(m, principal, parseBody(event, AiRequest));
+    await audit(event, 'meeting.ai-requested', 'success', { ...ids(m), task: job.task });
+    return json(202, { aiJob: { task: job.task, status: job.status, error: null } });
+  }
+  if (action === 'suggestions' && method === 'PATCH') {
+    const m = await open(principal, space, meetingId, true);
+    return json(200, await reviewSuggestions(m, principal, parseBody(event, SuggestionsPatch)));
+  }
+  if (action === 'plan-update' && method === 'POST') {
+    const m = await open(principal, space, meetingId, true);
+    const result = await updatePlan(m, principal, parseBody(event, PlanUpdateBody));
+    await audit(event, 'meeting.plan-update', 'success', {
+      ...ids(m),
+      planVersion: result.planVersion,
+    });
+    return json(200, result);
+  }
+  if (action === 'plan-update/undo' && method === 'POST') {
+    const m = await open(principal, space, meetingId, true);
+    const result = await undoPlanUpdate(m, principal);
+    await audit(event, 'meeting.plan-update-undone', 'success', {
+      ...ids(m),
+      planVersion: result.planVersion,
+    });
+    return json(200, result);
   }
   throw new HttpError(404, 'Not found');
 });
