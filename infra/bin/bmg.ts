@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { App } from 'aws-cdk-lib';
 import { loadConfig } from '@bmg/config';
+import { formatVersion, readVersionFile } from '@bmg/config/release';
 import { buildApp } from '../lib/app.ts';
 
 // BMG_CONFIG lets CI synthesize against bmg.config.example.json before
@@ -22,5 +23,9 @@ const skip = {
   config: existing.config || ctx('bmg:skipConfig'),
   accessAnalyzer: existing.accessAnalyzer || ctx('bmg:skipAccessAnalyzer'),
 };
-buildApp(app, cfg, { skip, version: process.env.BMG_VERSION ?? process.env.GITHUB_SHA ?? 'local' });
+buildApp(app, cfg, {
+  skip,
+  version: process.env.BMG_VERSION ?? process.env.GITHUB_SHA ?? 'local',
+  release: formatVersion(readVersionFile(resolve(import.meta.dirname, '..', '..'))),
+});
 app.synth();

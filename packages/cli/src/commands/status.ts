@@ -72,7 +72,12 @@ export async function status(): Promise<void> {
       const v = (
         await ssm.send(new GetParameterCommand({ Name: names.ssm(cfg, env, 'foundation/version') }))
       ).Parameter?.Value;
-      ok(`${env}: ${v}`);
+      // The release parameter arrived with semantic versioning; older deploys lack it.
+      const rel = await ssm
+        .send(new GetParameterCommand({ Name: names.ssm(cfg, env, 'foundation/release') }))
+        .then((r) => r.Parameter?.Value)
+        .catch(() => undefined);
+      ok(`${env}: ${rel ? `${rel} (${v})` : v}`);
     } catch (err) {
       if (isNotFound(err)) warn(`${env}: not deployed`);
       else throw err;

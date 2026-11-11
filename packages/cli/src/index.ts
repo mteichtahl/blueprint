@@ -10,6 +10,7 @@ import { emailSetup } from './commands/email.ts';
 import { githubConnect, githubProtect } from './commands/github.ts';
 import { init } from './commands/init.ts';
 import { pipelineDeploy } from './commands/pipeline.ts';
+import { release, releaseShow } from './commands/release.ts';
 import { secretsSet } from './commands/secrets.ts';
 import { stacksRepair } from './commands/stacks.ts';
 import { status } from './commands/status.ts';
@@ -148,5 +149,25 @@ program
   .command('status')
   .description('stacks, runners, versions and alarms (read-only)')
   .action(wrap(() => status()));
+
+const releaseCmd = program
+  .command('release')
+  .description('semantic release versions (VERSION file): staging shows beta-X.Y.Z');
+releaseCmd
+  .command('major')
+  .description('breaking or large release: X+1.0.0')
+  .action(wrap(() => release('major', g())));
+releaseCmd
+  .command('minor')
+  .description('new features: X.Y+1.0')
+  .action(wrap(() => release('minor', g())));
+releaseCmd
+  .command('hotfix')
+  .description('fixes only: X.Y.Z+1')
+  .action(wrap(() => release('hotfix', g())));
+releaseCmd
+  .command('show')
+  .description('print the current version and its staging/production labels')
+  .action(wrap(() => releaseShow()));
 
 await program.parseAsync(process.argv);

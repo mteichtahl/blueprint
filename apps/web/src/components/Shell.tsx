@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { RELEASE, openWhatsNew } from '../lib/release.ts';
 import { Avatar, Icon, initials, Logo, type IconName } from './ui.tsx';
 
 // ── Appearance (Light / Dark / System), from the sidebar or Profile ──────────
@@ -50,6 +51,23 @@ function AppearanceSwitch({ theme, onChange }: { theme: Theme; onChange: (t: The
         </button>
       ))}
     </div>
+  );
+}
+
+// ── Release version at the foot of the menu; opens "What's new" ─────────────
+function ReleaseFooter() {
+  const title = RELEASE.commit ? `Build ${RELEASE.commit}` : undefined;
+  return (
+    <button
+      type="button"
+      onClick={openWhatsNew}
+      title={title}
+      className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-[#D3D8DE] hover:bg-white/5 hover:text-white"
+    >
+      <span>Version {RELEASE.label}</span>
+      <span aria-hidden="true">·</span>
+      <span className="underline underline-offset-2">What's new</span>
+    </button>
   );
 }
 
@@ -337,6 +355,7 @@ export function BmgShell({
       ))}
       <div className="mt-auto pt-5">
         <AppearanceSwitch theme={theme} onChange={onTheme} />
+        <ReleaseFooter />
       </div>
     </nav>
   );
