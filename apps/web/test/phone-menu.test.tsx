@@ -63,22 +63,33 @@ function openMenu() {
 }
 
 describe('Phone menu', () => {
-  it('puts to-dos and the three most urgent items first, most waiting first', () => {
+  it('puts Overview first, then to-dos and the three most urgent items, most waiting first', () => {
     const menu = openMenu();
     const rows = within(menu)
       .getAllByRole('button')
       .map((b) => b.textContent);
     const top = rows.slice(
       rows.indexOf('Ask Blueprint AI⌘K') + 1,
-      rows.indexOf('Ask Blueprint AI⌘K') + 6,
+      rows.indexOf('Ask Blueprint AI⌘K') + 7,
     );
     // Contacts is a fourth urgent candidate, so it stays folded.
-    expect(top).toEqual(['Review queue', 'Chat', 'Tasks & to-dos', 'Artist gigs', 'STUDIO HQ']);
+    expect(top).toEqual([
+      'Overview',
+      'Review queue',
+      'Chat',
+      'Tasks & to-dos',
+      'Artist gigs',
+      'ARTIST WORKSPACES',
+    ]);
+    // Overview sits above the Needs attention label, with no heading of its own.
+    const text = menu.textContent ?? '';
+    expect(text.indexOf('Overview')).toBeLessThan(text.indexOf('NEEDS ATTENTION'));
+    expect(within(menu).queryByRole('button', { name: /STUDIO HQ/ })).toBeNull();
   });
 
   it('folds everything else under headings that start collapsed', async () => {
     const menu = openMenu();
-    for (const name of ['STUDIO HQ', 'ARTIST WORKSPACES', 'SHARED WITH ARTISTS', 'BMG ONLY']) {
+    for (const name of ['ARTIST WORKSPACES', 'SHARED WITH ARTISTS', 'BMG ONLY']) {
       expect(within(menu).getByRole('button', { name: new RegExp(name) })).toHaveProperty(
         'ariaExpanded',
         'false',
