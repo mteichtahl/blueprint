@@ -1,4 +1,8 @@
-import { GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  GetCommand,
+  TransactWriteCommand,
+  type TransactWriteCommandInput,
+} from '@aws-sdk/lib-dynamodb';
 import type { Principal } from '@bmg/authz';
 import { db, env, HttpError } from '../lib.ts';
 import { artistPk, newId, PLAN_SK, type Plan } from './model.ts';
@@ -75,18 +79,27 @@ export async function savePlan(input: {
   content: Pick<Plan, 'outcome' | 'measures' | 'phases'>;
   kind: PlanChangeKind;
   lead?: string[];
-}): Promise<{ version: number; at: string; changes: string[] }> {
+  /** A new owner (rev 12). Otherwise the plan keeps the one it has. */
+  owner?: string;
+  /** Written in the same transaction, e.g. to-dos moving to a new owner (rev 12). */
+  extra?: NonNullable<TransactWriteCommandInput['TransactItems']>;
+}): Promise<{ version: number; at: string; changes: string[]; changeId?: string }> {
   const { principal, artistId, current } = input;
   const from = current?.version ?? 0;
   const at = new Date().toISOString();
   const next = { ...input.content, version: from + 1, updatedAt: at };
   const changes = planChanges(current, next);
-  const log = changes.length
+  const ownerChanged = !!input.owner && input.owner !== current?.ownerSub;
+  const ownerSub = input.owner ?? current?.ownerSub;
+  const ownerSince = ownerChanged ? at : current?.ownerSince;
+  // An owner change on its own is still a change worth recording.
+  const lines = changes.length || ownerChanged ? [...(input.lead ?? []), ...changes] : [];
+  const log = lines.length
     ? await changeEntry(principal, artistId, {
         version: next.version,
         at,
-        kind: current ? input.kind : 'created',
-        changes: [...(input.lead ?? []), ...changes],
+        kind: !current ? 'created' : changes.length ? input.kind : 'owner',
+        changes: lines,
       })
     : undefined;
   try {
@@ -102,6 +115,9 @@ export async function savePlan(input: {
                 type: 'plan',
                 artistId,
                 ...next,
+                // Kept on every save, including meeting updates (rev 12).
+                ...(ownerSub ? { ownerSub } : {}),
+                ...(ownerSince ? { ownerSince } : {}),
                 updatedBy: principal.sub,
               },
               ConditionExpression: from === 0 ? 'attribute_not_exists(PK)' : 'version = :v',
@@ -109,6 +125,7 @@ export async function savePlan(input: {
             },
           },
           ...(log ? [{ Put: { TableName: table(), Item: log } }] : []),
+          ...(input.extra ?? []),
         ],
       }),
     );
@@ -118,5 +135,10 @@ export async function savePlan(input: {
     }
     throw err;
   }
-  return { version: next.version, at, changes };
+  return {
+    version: next.version,
+    at,
+    changes,
+    ...(log ? { changeId: log.changeId as string } : {}),
+  };
 }
