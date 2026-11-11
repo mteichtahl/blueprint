@@ -83,9 +83,10 @@ blueprint ai opt-out        # AWS Organizations (this account only) + the AI ser
 blueprint github connect    # CodeConnections link (approve once in the AWS console)
 blueprint github protect    # makes the repo public and locks it down
 blueprint pipeline deploy   # CodeBuild runner projects
-git push origin main        # pipeline deploys staging, then prod after approval
-                            # (creates each environment's platform KMS key)
-# After the Deploy workflow has finished for an environment:
+git push origin main        # Deploy staging (creates staging's platform KMS key)
+blueprint release ship      # tags vX.Y.Z → Release to production, after approval
+                            # (creates prod's platform KMS key; see docs/releases.md)
+# After the deploy has finished for an environment:
 blueprint secrets set <name> --env prod
 blueprint email setup --env prod --test-to you@example.com
                             # Gmail SMTP as kyra@: stores the app password in Secrets Manager

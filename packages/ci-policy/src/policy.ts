@@ -10,6 +10,9 @@ import { parse } from 'yaml';
  *  4. Workflows declare `permissions` explicitly (least privilege token).
  *  5. Production deploys only from the `bmg-deploy-prod` project and only from
  *     jobs bound to the `production` environment.
+ *  6. A workflow with a production job starts only from a release tag push or by
+ *     hand (no branch pushes, no pull requests), so production gets releases,
+ *     not every merge (docs/releases.md).
  */
 
 export interface Violation {
@@ -45,6 +48,22 @@ function environmentName(env: unknown): string | undefined {
   return rec && typeof rec.name === 'string' ? rec.name : undefined;
 }
 
+/**
+ * Why a workflow's triggers are not allowed to reach production, or undefined if
+ * they are: only `push` limited to tags and `workflow_dispatch`.
+ */
+export function prodTriggerProblem(on: unknown): string | undefined {
+  const names = triggerNames(on);
+  const other = names.filter((n) => n !== 'push' && n !== 'workflow_dispatch');
+  if (other.length > 0) return `trigger(s) ${other.join(', ')} may not reach production`;
+  if (!names.includes('push')) return undefined;
+  const push = asRecord(asRecord(on)?.push);
+  if (push?.branches !== undefined || push?.['branches-ignore'] !== undefined)
+    return 'push to branches may not reach production; use release tags';
+  if (push?.tags === undefined) return 'push must be limited to release tags (`tags:`)';
+  return undefined;
+}
+
 export function checkWorkflow(file: string, source: string): Violation[] {
   const violations: Violation[] = [];
   const add = (rule: string, message: string, job?: string) =>
@@ -74,6 +93,12 @@ export function checkWorkflow(file: string, source: string): Violation[] {
     add('jobs', 'workflow has no jobs');
     return violations;
   }
+
+  const hasProdJob = Object.values(jobs).some(
+    (j) => environmentName(asRecord(j)?.environment) === 'production',
+  );
+  const triggerProblem = hasProdJob ? prodTriggerProblem(doc.on) : undefined;
+  if (triggerProblem) add('prod-release-tags', triggerProblem);
 
   for (const [jobId, rawJob] of Object.entries(jobs)) {
     const job = asRecord(rawJob);

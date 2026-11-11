@@ -1,0 +1,80 @@
+name: Release to production
+
+# A vX.Y.Z release tag → release guard → approval → prod (bmg-deploy-prod runner).
+#
+# Tags are created by `blueprint release ship`, on the commit staging is
+# running. A release carries every PR merged since the last one. The guard
+# checks, before anyone is asked to approve, that the tag matches VERSION,
+# that the commit is on main, and that this exact commit passed its staging
+# deploy (docs/releases.md).
+#
+# Re-deploy or roll back: run this workflow by hand and pick the release tag
+# under "Use workflow from". The production environment only accepts v* tags.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Its own group: a release waiting for approval never blocks Deploy staging.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Release guard
+    runs-on: codebuild-bmg-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    permissions:
+      contents: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Tag matches VERSION, is on main, and passed staging
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/release/release-guard.mjs
+
+  deploy-prod:
+    name: Deploy production
+    needs: guard
+    runs-on: codebuild-bmg-deploy-prod-${{ github.run_id }}-${{ github.run_attempt }}
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build web app
+        env:
+          # Release label in the app's menu footer: X.Y.Z (VERSION file)
+          BMG_ENV: prod
+          BMG_VERSION: ${{ github.sha }}
+        run: npm run build -w @bmg/web
+      - name: cdk deploy (prod)
+        working-directory: infra
+        env:
+          BMG_VERSION: ${{ github.sha }}
+          BMG_REQUIRE_WEB_BUILD: '1'
+        run: npx cdk deploy 'bmg-prod-*' --require-approval never --progress events --outputs-file ../cdk-outputs.json
+      - name: Smoke test
+        run: |
+          deployed=$(node -p "require('./cdk-outputs.json')['bmg-prod-foundation'].DeployedVersion")
+          test "$deployed" = "$GITHUB_SHA" || { echo "::error::prod reports $deployed, expected $GITHUB_SHA"; exit 1; }
+          release=$(node -p "require('./cdk-outputs.json')['bmg-prod-foundation'].DeployedRelease")
+          expected="$(tr -d '[:space:]' < VERSION)"
+          test "$release" = "$expected" || { echo "::error::prod release is $release, expected $expected"; exit 1; }
+          echo "::notice::prod is on release $release"
+          echo "Released **$release** to prod (\`${GITHUB_SHA::7}\`)" >> "$GITHUB_STEP_SUMMARY"
