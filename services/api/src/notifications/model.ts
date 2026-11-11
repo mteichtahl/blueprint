@@ -81,11 +81,20 @@ export type DomainEvent =
       uploadedBy: string;
       name: string;
       reason: string;
+    }
+  | {
+      /** A meeting's transcript is in, or it couldn't be made (rev 11). Only the recorder hears. */
+      type: 'meeting.processed';
+      meetingId: string;
+      artistId?: string;
+      createdBy: string;
+      title: string;
+      outcome: 'ready' | 'failed' | 'no-ai' | 'off';
     };
 
 export interface Draft {
   /** In-app and email category; preferences can turn email off per category later. */
-  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector' | 'todo';
+  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector' | 'todo' | 'meeting';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
@@ -241,6 +250,27 @@ export function plan(
           link: 'library',
         },
       };
+    case 'meeting.processed': {
+      const words = {
+        ready: ['Transcript ready', 'The transcript is in. Open the meeting for a summary.'],
+        failed: ['Transcript not made', 'The recording couldn’t be transcribed. It’s still saved.'],
+        'no-ai': [
+          'Recording saved',
+          'An artist in this meeting has AI turned off, so it wasn’t transcribed.',
+        ],
+        off: ['Recording saved', 'Transcription is switched off for now. The recording is kept.'],
+      } as const;
+      const [title, body] = words[e.outcome];
+      return {
+        to: everyone.filter((r) => r.sub === e.createdBy && isBmg(r)),
+        draft: {
+          kind: 'meeting',
+          title: `${title}: ${e.title}`,
+          body,
+          link: `meeting:${e.artistId ?? 'library'}/${e.meetingId}`,
+        },
+      };
+    }
   }
 }
 
@@ -293,6 +323,7 @@ const EYEBROW: Record<Draft['kind'], string> = {
   gig: 'Gig help',
   connector: 'Connectors',
   todo: 'To-do',
+  meeting: 'Meeting notes',
 };
 
 /** The notification as a BMG-branded email (the shared layout in `@bmg/email`). */

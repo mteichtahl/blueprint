@@ -140,7 +140,7 @@ export class WebStack extends BmgStack {
           {
             header: 'Permissions-Policy',
             value:
-              'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), browsing-topics=()',
+              'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), browsing-topics=()',
             override: true,
           },
           { header: 'Cross-Origin-Opener-Policy', value: 'same-origin', override: true },

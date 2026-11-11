@@ -11,6 +11,7 @@ import { FilesStack } from './files-stack.ts';
 import { AiStack } from './ai-stack.ts';
 import { KbStack } from './kb-stack.ts';
 import { NewsroomStack } from './newsroom-stack.ts';
+import { MeetingsStack } from './meetings-stack.ts';
 import { IdentityStack } from './identity-stack.ts';
 import { KeysStack } from './keys-stack.ts';
 import { NotifyStack } from './notify-stack.ts';
@@ -37,6 +38,7 @@ export interface BuildAppOptions {
  *   bmg-<env>-files         home region  pipeline-deployed (quarantine, malware scan, file buckets)
  *   bmg-<env>-kb            home region  pipeline-deployed (vector store, knowledge-base provisioning and sync)
  *   bmg-<env>-newsroom      home region  pipeline-deployed (weekly newsletter draft)
+ *   bmg-<env>-meetings      home region  pipeline-deployed (meeting transcription: work bucket, worker)
  *   bmg-<env>-ai            home region  pipeline-deployed (assistant runtime, guardrail, action key)
  *   bmg-<env>-api           home region  pipeline-deployed (REST API, authorizer, WAF)
  *   bmg-<env>-notify        home region  pipeline-deployed (branded notification email)
@@ -143,6 +145,19 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       mainTable: data.tables.main,
       description: `BMG ${envName} newsroom: weekly newsletter draft`,
     });
+    const meetings = new MeetingsStack(app, `${cfg.project}-${envName}-meetings`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      quarantineKey: files.quarantineKey,
+      mainTable: data.tables.main,
+      bus: audit.bus,
+      alarmTopic: foundation.alarmTopic,
+      description: `BMG ${envName} meetings: transcription work bucket and worker`,
+    });
+    // The worker reads and writes artist data through the data-access role (keys stack).
+    meetings.addDependency(keys);
     const ai = new AiStack(app, `${cfg.project}-${envName}-ai`, {
       config: cfg,
       env: home,
@@ -165,6 +180,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       agentRuntimeArn: ai.runtime.agentRuntimeArn,
       actionKey: ai.actionKey,
       newsroomDraftArn: newsroom.draftFunction.functionArn,
+      meetingsFunctionArn: meetings.api.functionArn,
       description: `BMG ${envName} REST API: authorizer, consent, step-up, invites`,
     });
     const notify = new NotifyStack(app, `${cfg.project}-${envName}-notify`, {
@@ -192,7 +208,21 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       ),
       description: `BMG ${envName} web app: CloudFront, site bucket, web client`,
     });
-    return { foundation, data, identity, keys, audit, files, kb, newsroom, ai, api, notify, web };
+    return {
+      foundation,
+      data,
+      identity,
+      keys,
+      audit,
+      files,
+      kb,
+      newsroom,
+      meetings,
+      ai,
+      api,
+      notify,
+      web,
+    };
   });
 
   Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));
