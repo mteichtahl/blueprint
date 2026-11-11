@@ -122,7 +122,8 @@ export interface PlanChange {
   /** The plan version this change produced. */
   version: number;
   at: string;
-  kind: 'created' | 'edited' | 'stage-added';
+  /** `meeting`: from a meeting's suggestions; `undone`: one of those undone (rev 11). */
+  kind: 'created' | 'edited' | 'stage-added' | 'meeting' | 'undone';
   /** "Blueprint", or "Blueprint · <job title>". */
   byName: string;
   changes: string[];

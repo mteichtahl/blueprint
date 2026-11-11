@@ -379,6 +379,7 @@ const ICONS = {
   user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0',
   userPlus: 'M10 12a4 4 0 100-8 4 4 0 000 8zM2 21a8 8 0 0114.5-4.6M19 14v6M16 17h6',
   logout: 'M14 4h5v16h-5M10 8l-4 4 4 4M6 12h11',
+  record: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 9a3 3 0 100 6 3 3 0 000-6z',
 } as const;
 export type IconName = keyof typeof ICONS;
 

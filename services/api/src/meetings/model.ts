@@ -124,6 +124,8 @@ export interface Meeting {
   aiJob?: AiJob;
   /** A plan update from this meeting can be undone until then; the meeting can't be deleted before. */
   undoUntil?: string;
+  /** Suggested plan changes still to be decided or applied (for counts on the Plan tab). */
+  suggestionsWaiting?: number;
 }
 
 /** Everything said and written in a meeting (kept encrypted in the space's bucket). */
@@ -606,6 +608,7 @@ export function publicMeeting(m: Meeting, viewer: Pick<Principal, 'sub' | 'role'
       ? { task: m.aiJob.task, status: m.aiJob.status, error: m.aiJob.error ?? null }
       : null,
     undoUntil: m.undoUntil ?? null,
+    suggestionsWaiting: m.suggestionsWaiting ?? 0,
     consent: { at: m.consent.at, wording: m.consent.wording },
     recordedByMe: m.createdBy === viewer.sub,
     canDelete: canDeleteMeeting(viewer, m),

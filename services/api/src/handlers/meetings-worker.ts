@@ -477,7 +477,7 @@ async function runAi(space: MeetingSpace, meetingId: string, requestId: string):
             ...(suggestions.length ? {} : { none: true }),
           },
         }),
-        {},
+        { suggestionsWaiting: suggestions.length },
         ['aiJob'],
       );
     }

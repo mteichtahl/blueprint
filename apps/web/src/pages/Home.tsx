@@ -58,6 +58,7 @@ import { Prompts } from './Prompts.tsx';
 import { Newsroom } from './Newsroom.tsx';
 import { AllGigs, ArtistGigs } from './Gigs.tsx';
 import { ArtistWorkspace } from './Workspace.tsx';
+import { MeetingsPage, RecorderProvider, RecordingBar, type MeetingsTarget } from './Meetings.tsx';
 import { FileThumb } from '../components/FileThumb.tsx';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
@@ -132,10 +133,18 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     connectors: 'connectors',
     todos: 'todos',
   };
-  const goTo = (link: string) =>
-    link.startsWith('chat:')
-      ? openChat(link.slice('chat:'.length) || null)
-      : setView(LINK_VIEWS[link] ?? 'overview');
+  const [meetingsTarget, setMeetingsTarget] = useState<MeetingsTarget>({ kind: 'list' });
+  const openMeetings = (t: MeetingsTarget) => {
+    setMeetingsTarget(t);
+    setView('meetings');
+  };
+  const goTo = (link: string) => {
+    if (link.startsWith('chat:')) return openChat(link.slice('chat:'.length) || null);
+    // A meeting's notification: `meeting:<space>/<meetingId>` (rev 11).
+    const meeting = /^meeting:([^/]+)\/(.+)$/.exec(link);
+    if (meeting) return openMeetings({ kind: 'open', space: meeting[1]!, meetingId: meeting[2]! });
+    setView(LINK_VIEWS[link] ?? 'overview');
+  };
   useDeepLink(goTo);
   const openNotification = (n: AppNotification) => {
     void notes.markRead([n.id]);
@@ -202,6 +211,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     {
       label: 'BMG ONLY',
       items: [
+        { id: 'meetings', label: 'Meetings', icon: 'record' },
         { id: 'events', label: 'Events', icon: 'calendar' },
         { id: 'newsroom', label: 'Newsroom', icon: 'mail' },
         { id: 'connectors', label: 'Connectors', icon: 'plug' },
@@ -216,267 +226,306 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     : undefined;
 
   return (
-    <BmgShell
-      sections={sections}
-      current={view}
-      onNavigate={setView}
-      userName={userName}
-      roleLabel={jobTitle || ROLE_LABEL[me.role]}
-      theme={theme}
-      onTheme={setTheme}
-      onSignOut={onSignOut}
-      onProfile={() => setView('profile')}
-      avatar={avatar}
-      onAsk={() => setAsking(true)}
-      bell={
-        <Bell
-          items={notes.items}
-          unread={notes.unread}
-          onOpen={openNotification}
-          onMarkAll={() => void notes.markRead('all')}
-        />
-      }
-    >
-      {view === 'overview' && (
-        <StudioHq
-          cfg={cfg}
-          token={token}
-          userName={userName}
-          artists={artists}
-          openReviews={openReviews}
-          conversations={inbox.conversations ?? []}
-          onNavigate={setView}
-          onOpenFile={(id) => {
-            setLibraryFile(id);
-            setView('library');
-          }}
-        />
-      )}
-      {view === 'artists' && (
-        <ArtistsPage
-          cfg={cfg}
-          token={token}
-          me={me}
-          artists={artists}
-          onOpen={(id) => setView(`artist:${id}`)}
-          onReauth={onReauth}
-          onInvited={() => void load()}
-        />
-      )}
-      {openArtist && (
-        <ArtistWorkspace
-          cfg={cfg}
-          token={token}
-          me={me}
-          artist={openArtist}
-          onNavigate={setView}
-          onOpenChat={openChat}
-        />
-      )}
-      {view === 'insights' && (
-        <>
-          <PageHeader
-            eyebrow="Shared with artists · Insights"
-            title="Insights"
-            sub="Website, socials and newsletter in one place. Numbers update every hour from the connected apps."
+    <RecorderProvider cfg={cfg} token={token}>
+      <BmgShell
+        sections={sections}
+        current={view}
+        onNavigate={(v) => {
+          if (v === 'meetings') setMeetingsTarget({ kind: 'list' });
+          setView(v);
+        }}
+        userName={userName}
+        roleLabel={jobTitle || ROLE_LABEL[me.role]}
+        theme={theme}
+        onTheme={setTheme}
+        onSignOut={onSignOut}
+        onProfile={() => setView('profile')}
+        avatar={avatar}
+        onAsk={() => setAsking(true)}
+        bell={
+          <Bell
+            items={notes.items}
+            unread={notes.unread}
+            onOpen={openNotification}
+            onMarkAll={() => void notes.markRead('all')}
           />
-          <Insights cfg={cfg} token={token} onManage={() => setView('connectors')} />
-        </>
-      )}
-      {view === 'access' && (
-        <>
-          <PageHeader
-            eyebrow="BMG only · Settings"
-            title="Access & permissions"
-            sub="What artist accounts can do, and who is on the Blueprint team."
-          />
-          <AccessPage cfg={cfg} token={token} me={me} artists={artists} onReauth={onReauth} />
-        </>
-      )}
-      {view === 'connectors' && (
-        <>
-          <PageHeader
-            eyebrow="BMG only · Connectors"
-            title="Connected apps"
-            sub="The services Blueprint's app reads from and sends to. Artists connect their own accounts separately."
-          />
-          <BmgConnectors
-            cfg={cfg}
-            token={token}
-            isAdmin={me.role === 'bmg-admin'}
-            onReauth={onReauth}
-          />
-        </>
-      )}
-      {view === 'profile' && (
-        <>
-          <PageHeader eyebrow="Your account" title="Profile & preferences" />
-          <Profile
-            cfg={cfg}
-            token={token}
-            me={{ ...me, jobTitle, avatar }}
-            userName={userName}
-            theme={theme}
-            onTheme={setTheme}
-            onSignOut={onSignOut}
-            onJobTitle={setJobTitle}
-            onAvatar={setAvatar}
-          />
-        </>
-      )}
-      {view === 'invite' && me.role === 'bmg-admin' && (
-        <>
-          <PageHeader
-            eyebrow="Artist workspaces"
-            title="Invite artist"
-            sub="Sets up their login, private key and artist workspace."
-          />
-          <div className="max-w-[520px]">
-            <InviteArtist
+        }
+      >
+        {!(view === 'meetings' && meetingsTarget.kind === 'recorder') && (
+          <RecordingBar onOpen={() => openMeetings({ kind: 'recorder' })} />
+        )}
+        {view === 'meetings' && (
+          <>
+            <PageHeader
+              eyebrow="BMG only · Meeting notes"
+              title="Meetings"
+              sub="Record a meeting with everyone’s agreement. It’s transcribed and filed in the Library, ready for a summary and plan suggestions."
+            />
+            <MeetingsPage
               cfg={cfg}
               token={token}
-              onReauth={onReauth}
-              onInvited={() => void load()}
+              me={me}
+              artists={artists}
+              target={meetingsTarget}
+              onTarget={setMeetingsTarget}
             />
-          </div>
-        </>
-      )}
-      {view === 'templates' && (
-        <>
-          <PageHeader
-            eyebrow="Artist workspaces"
-            title="Plan templates"
-            sub="Custom stages for one or more artists, on top of the built-in phase library."
+          </>
+        )}
+        {view === 'overview' && (
+          <StudioHq
+            cfg={cfg}
+            token={token}
+            userName={userName}
+            artists={artists}
+            openReviews={openReviews}
+            conversations={inbox.conversations ?? []}
+            onNavigate={setView}
+            onOpenFile={(id) => {
+              setLibraryFile(id);
+              setView('library');
+            }}
           />
-          <PlanStages cfg={cfg} token={token} artists={artists} />
-        </>
-      )}
-      {view === 'messages' && (
-        <>
-          <PageHeader
-            eyebrow="Shared with artists"
-            title="Chat"
-            sub="Direct chats with artists, groups and announcements."
-          />
-          <BmgChat
+        )}
+        {view === 'artists' && (
+          <ArtistsPage
             cfg={cfg}
             token={token}
             me={me}
             artists={artists}
+            onOpen={(id) => setView(`artist:${id}`)}
+            onReauth={onReauth}
+            onInvited={() => void load()}
+          />
+        )}
+        {openArtist && (
+          <ArtistWorkspace
+            cfg={cfg}
+            token={token}
+            me={me}
+            artist={openArtist}
             onNavigate={setView}
-            initialConversationId={chatTarget}
+            onOpenChat={openChat}
+            onRecordMeeting={() => openMeetings({ kind: 'new', artistId: openArtist.artistId })}
+            onOpenMeeting={(m) =>
+              openMeetings({ kind: 'open', space: m.space, meetingId: m.meetingId })
+            }
           />
-        </>
-      )}
-      {view === 'todos' && (
-        <>
-          <PageHeader
-            eyebrow="Shared with artists"
-            title="Tasks & to-dos"
-            sub="Every artist's to-dos in one place, with quick filters."
-          />
-          <AllTodos cfg={cfg} token={token} artists={artists} />
-        </>
-      )}
-      {view === 'review' && (
-        <>
-          <PageHeader
-            eyebrow="Shared with artists"
-            title="Review queue"
-            sub="Sorted by priority, then date needed. Feedback turns into the artist's to-dos."
-          />
-          <ReviewQueue cfg={cfg} token={token} artists={artists} onChanged={() => void load()} />
-        </>
-      )}
-      {view === 'gigs' && (
-        <>
-          <PageHeader
-            eyebrow="Artist workspaces"
-            title="Artist gigs"
-            sub="Gigs artists share with Blueprint, with help requests first."
-          />
-          <AllGigs
-            cfg={cfg}
-            token={token}
-            artists={artists}
-            onOpenArtist={(id) => setView(`artist:${id}`)}
-          />
-        </>
-      )}
-      {view === 'contacts' && (
-        <>
-          <PageHeader
-            eyebrow="Shared with artists"
-            title="Contacts"
-            sub="Everyone Blueprint and its artists work with. Artists can pick and add; you manage the list."
-          />
-          <Contacts cfg={cfg} token={token} isBmg />
-        </>
-      )}
-      {view === 'venues' && (
-        <>
-          <PageHeader
-            eyebrow="Shared with artists"
-            title="Venues"
-            sub="Capacity, backline, and who to call. Managers and bookers live in Contacts."
-          />
-          <Venues cfg={cfg} token={token} isBmg />
-        </>
-      )}
-      {view === 'events' && <Events cfg={cfg} token={token} />}
-      {view === 'newsroom' && (
-        <>
-          <PageHeader
-            eyebrow="BMG only · Newsroom"
-            title="Weekly newsletter"
-            sub="Drafted every Sunday at 6:00 am. Nothing is sent until an admin approves it."
-          />
-          <Newsroom cfg={cfg} token={token} isAdmin={me.role === 'bmg-admin'} onReauth={onReauth} />
-        </>
-      )}
-      {view === 'prompts' && (
-        <>
-          <PageHeader
-            eyebrow="BMG only · Settings"
-            title="AI prompts"
-            sub="Every instruction the AI follows. Edit a draft, publish it, or roll back to any earlier version."
-          />
-          <Prompts cfg={cfg} token={token} isAdmin={me.role === 'bmg-admin'} onReauth={onReauth} />
-        </>
-      )}
-      {view === 'library' && (
-        <>
-          <PageHeader
-            eyebrow="Shared with artists"
-            title="Document library"
-            sub="Upload once, then choose per file who sees it."
-          />
-          <Library
-            cfg={cfg}
-            token={token}
-            isBmg
-            isAdmin={me.role === 'bmg-admin'}
-            artists={artists}
-            openFileId={libraryFile}
-            onClosed={() => setLibraryFile(null)}
-          />
-        </>
-      )}
-      <Assistant
-        cfg={cfg}
-        token={token}
-        open={asking}
-        onClose={() => setAsking(false)}
-        userName={userName}
-        roleLabel={ROLE_LABEL[me.role]}
-        lookingAt={openArtist ? openArtist.displayName : 'Studio HQ'}
-        suggestions={[
-          'What needs my attention this week?',
-          'Which artists have gigs asking for help?',
-          'Which artists opted in to AI?',
-        ]}
-      />
-    </BmgShell>
+        )}
+        {view === 'insights' && (
+          <>
+            <PageHeader
+              eyebrow="Shared with artists · Insights"
+              title="Insights"
+              sub="Website, socials and newsletter in one place. Numbers update every hour from the connected apps."
+            />
+            <Insights cfg={cfg} token={token} onManage={() => setView('connectors')} />
+          </>
+        )}
+        {view === 'access' && (
+          <>
+            <PageHeader
+              eyebrow="BMG only · Settings"
+              title="Access & permissions"
+              sub="What artist accounts can do, and who is on the Blueprint team."
+            />
+            <AccessPage cfg={cfg} token={token} me={me} artists={artists} onReauth={onReauth} />
+          </>
+        )}
+        {view === 'connectors' && (
+          <>
+            <PageHeader
+              eyebrow="BMG only · Connectors"
+              title="Connected apps"
+              sub="The services Blueprint's app reads from and sends to. Artists connect their own accounts separately."
+            />
+            <BmgConnectors
+              cfg={cfg}
+              token={token}
+              isAdmin={me.role === 'bmg-admin'}
+              onReauth={onReauth}
+            />
+          </>
+        )}
+        {view === 'profile' && (
+          <>
+            <PageHeader eyebrow="Your account" title="Profile & preferences" />
+            <Profile
+              cfg={cfg}
+              token={token}
+              me={{ ...me, jobTitle, avatar }}
+              userName={userName}
+              theme={theme}
+              onTheme={setTheme}
+              onSignOut={onSignOut}
+              onJobTitle={setJobTitle}
+              onAvatar={setAvatar}
+            />
+          </>
+        )}
+        {view === 'invite' && me.role === 'bmg-admin' && (
+          <>
+            <PageHeader
+              eyebrow="Artist workspaces"
+              title="Invite artist"
+              sub="Sets up their login, private key and artist workspace."
+            />
+            <div className="max-w-[520px]">
+              <InviteArtist
+                cfg={cfg}
+                token={token}
+                onReauth={onReauth}
+                onInvited={() => void load()}
+              />
+            </div>
+          </>
+        )}
+        {view === 'templates' && (
+          <>
+            <PageHeader
+              eyebrow="Artist workspaces"
+              title="Plan templates"
+              sub="Custom stages for one or more artists, on top of the built-in phase library."
+            />
+            <PlanStages cfg={cfg} token={token} artists={artists} />
+          </>
+        )}
+        {view === 'messages' && (
+          <>
+            <PageHeader
+              eyebrow="Shared with artists"
+              title="Chat"
+              sub="Direct chats with artists, groups and announcements."
+            />
+            <BmgChat
+              cfg={cfg}
+              token={token}
+              me={me}
+              artists={artists}
+              onNavigate={setView}
+              initialConversationId={chatTarget}
+            />
+          </>
+        )}
+        {view === 'todos' && (
+          <>
+            <PageHeader
+              eyebrow="Shared with artists"
+              title="Tasks & to-dos"
+              sub="Every artist's to-dos in one place, with quick filters."
+            />
+            <AllTodos cfg={cfg} token={token} artists={artists} />
+          </>
+        )}
+        {view === 'review' && (
+          <>
+            <PageHeader
+              eyebrow="Shared with artists"
+              title="Review queue"
+              sub="Sorted by priority, then date needed. Feedback turns into the artist's to-dos."
+            />
+            <ReviewQueue cfg={cfg} token={token} artists={artists} onChanged={() => void load()} />
+          </>
+        )}
+        {view === 'gigs' && (
+          <>
+            <PageHeader
+              eyebrow="Artist workspaces"
+              title="Artist gigs"
+              sub="Gigs artists share with Blueprint, with help requests first."
+            />
+            <AllGigs
+              cfg={cfg}
+              token={token}
+              artists={artists}
+              onOpenArtist={(id) => setView(`artist:${id}`)}
+            />
+          </>
+        )}
+        {view === 'contacts' && (
+          <>
+            <PageHeader
+              eyebrow="Shared with artists"
+              title="Contacts"
+              sub="Everyone Blueprint and its artists work with. Artists can pick and add; you manage the list."
+            />
+            <Contacts cfg={cfg} token={token} isBmg />
+          </>
+        )}
+        {view === 'venues' && (
+          <>
+            <PageHeader
+              eyebrow="Shared with artists"
+              title="Venues"
+              sub="Capacity, backline, and who to call. Managers and bookers live in Contacts."
+            />
+            <Venues cfg={cfg} token={token} isBmg />
+          </>
+        )}
+        {view === 'events' && <Events cfg={cfg} token={token} />}
+        {view === 'newsroom' && (
+          <>
+            <PageHeader
+              eyebrow="BMG only · Newsroom"
+              title="Weekly newsletter"
+              sub="Drafted every Sunday at 6:00 am. Nothing is sent until an admin approves it."
+            />
+            <Newsroom
+              cfg={cfg}
+              token={token}
+              isAdmin={me.role === 'bmg-admin'}
+              onReauth={onReauth}
+            />
+          </>
+        )}
+        {view === 'prompts' && (
+          <>
+            <PageHeader
+              eyebrow="BMG only · Settings"
+              title="AI prompts"
+              sub="Every instruction the AI follows. Edit a draft, publish it, or roll back to any earlier version."
+            />
+            <Prompts
+              cfg={cfg}
+              token={token}
+              isAdmin={me.role === 'bmg-admin'}
+              onReauth={onReauth}
+            />
+          </>
+        )}
+        {view === 'library' && (
+          <>
+            <PageHeader
+              eyebrow="Shared with artists"
+              title="Document library"
+              sub="Upload once, then choose per file who sees it."
+            />
+            <Library
+              cfg={cfg}
+              token={token}
+              isBmg
+              isAdmin={me.role === 'bmg-admin'}
+              artists={artists}
+              openFileId={libraryFile}
+              onClosed={() => setLibraryFile(null)}
+            />
+          </>
+        )}
+        <Assistant
+          cfg={cfg}
+          token={token}
+          open={asking}
+          onClose={() => setAsking(false)}
+          userName={userName}
+          roleLabel={ROLE_LABEL[me.role]}
+          lookingAt={openArtist ? openArtist.displayName : 'Studio HQ'}
+          suggestions={[
+            'What needs my attention this week?',
+            'Which artists have gigs asking for help?',
+            'Which artists opted in to AI?',
+          ]}
+        />
+      </BmgShell>
+    </RecorderProvider>
   );
 }
 
@@ -1016,7 +1065,9 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
           ? link
           : link === 'todos'
             ? 'todo'
-            : 'home',
+            : link === 'plan'
+              ? 'plan'
+              : 'home',
     );
   });
   const [view, setView] = useState<ArtistView>(hasPendingCallback() ? 'connectors' : 'home');
@@ -1105,7 +1156,9 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                               ? 'connectors'
                               : n.link === 'todos'
                                 ? 'todo'
-                                : 'home',
+                                : n.link === 'plan'
+                                  ? 'plan'
+                                  : 'home',
                     );
                   }}
                 />

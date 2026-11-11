@@ -215,7 +215,8 @@ export async function reviewSuggestions(
     }
     if (u.status) setStatus(list, s.id, u.status);
   }
-  const version = await writeContent(m, content, role);
+  const waiting = list.filter((x) => x.status !== 'rejected').length;
+  const version = await writeContent(m, content, role, { suggestionsWaiting: waiting });
   return { suggestions: set, contentVersion: version };
 }
 
@@ -287,13 +288,13 @@ export async function updatePlan(
   };
   // The plan is saved; recording it on the meeting is retried if someone edits at the same time.
   try {
-    await writeContent(m, content, role, { undoUntil });
+    await writeContent(m, content, role, { undoUntil, suggestionsWaiting: 0 });
   } catch (err) {
     if (!(err instanceof HttpError && err.status === 409)) throw err;
     const fresh = await loadMeeting(spaceOf(m), m.meetingId);
     const again = await readContent(fresh, role);
     again.suggestions = set;
-    await writeContent(fresh, again, role, { undoUntil });
+    await writeContent(fresh, again, role, { undoUntil, suggestionsWaiting: 0 });
   }
   if (body.notifyArtist) await tellArtist(m.artistId, saved.changes);
   return { planVersion: saved.version, changes: saved.changes, undoUntil };
