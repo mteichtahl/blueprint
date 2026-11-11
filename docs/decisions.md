@@ -421,3 +421,19 @@ Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project. These are the 
   - Staff use the same screens on a phone (responsive); there's no separate phone layout.
 - **Saving names or transcript fixes refiles the meeting note** as its next version.
 - **Not built yet (rev 11):** the custom word list for names; deleting audio after 90 days and its setting; starting a meeting from the assistant; the Timeline preview on the plan review; the plan under the note's "Where it's used"; "[recording paused]" in the transcript; the staging gate additions (a real Transcribe job across two artists' keys).
+
+## Plan owner and plan update notifications (rev 12, 11 Nov 2026)
+
+Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, notifications, screens).
+
+- **Who can own a plan:** a Blueprint admin, or staff assigned to the artist (staff can't see artists they aren't assigned to). The server refuses anyone else.
+- **Existing plans aren't migrated.** Plans from before rev 12 show **Needs an owner** (Studio HQ, Artists & access, the workspace header and the plan) until someone picks one. Editing one asks for an owner before it saves, and ticking a milestone asks for one first. (The spec suggested taking the creator as owner, but plans don't record who created them.) A plan whose owner leaves, or is unassigned from the artist, needs an owner the same way.
+- **To-dos have a Blueprint person** (`bmgOwnerSub`): the plan owner when the to-do is made. There was no such field before, so "the related to-dos" are the open to-dos looked after by the previous owner **or by nobody yet**. They move in the plan's own transaction (plan, history entry and up to 98 to-dos); any beyond that follow straight after. Done to-dos stay where they are. Reminders go to the artist, so nothing changes for them.
+- **No system note in each moved to-do's thread** (spec). Notes would have counted as comments and notified the artist. The plan history says the owner changed instead. It doesn't count the to-dos that moved, because artists read the history and some may be BMG-only; the owners' notices give the count.
+- **Changing the owner** uses `PUT /artists/{id}/plan` with `ownerSub` and an optional `handoverNote` (the API stack has one route left). The note is kept on the plan, not on the event bus.
+- **Plan updates are rolled up per editor over 10 minutes:** the first save creates a one-off EventBridge Scheduler schedule (`plan-<hash>` in the reminder group) that puts `plan.digest` on the bus; saves while it's pending find it already there. The notifier reads that person's history entries since then and tells the artist and the owner, never the person who made the change. With no owner, the admins hear. Meeting updates are told straight away as before, and now also tell the owner, even when staff chose not to tell the artist.
+- **The handover summary** (`plan.handover` → `plan.ownerChanged`) is built by the notifier from the plan's data, never AI: outcome and measures, stages with progress, milestones overdue or due in 30 days, the new owner's open to-dos for the artist, submissions waiting for review, the last 5 changes, and the note. The new owner gets it even if they took the plan on themselves; the previous owner gets a short notice. The artist hears through the plan update ("Changed the plan owner from Kyra to Sam").
+- **Quiet hours** work as for every other notification: push and email are skipped during quiet hours (in-app is always there), not held until morning as the spec suggested.
+- **To-do emails meant for Blueprint** go to the to-do's Blueprint person (their profile email), else the shared address as before.
+- **Fix on the way:** the API notifier lacked `dynamodb:Query` and `DeleteItem`, which push delivery already needed. It now has `GetItem`, `Query` and `DeleteItem` on the main table.
+- **No new AWS resources:** policy statements, an environment variable and event patterns only.

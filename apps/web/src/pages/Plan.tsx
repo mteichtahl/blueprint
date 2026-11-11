@@ -16,6 +16,7 @@ import { phaseProgress } from '../lib/plan.ts';
 import { MarkdownEditor, MarkdownView } from '../components/Markdown.tsx';
 import { Bar, Button, Card, Field, Notice, Tag, TextArea, WaveLoader } from '../components/ui.tsx';
 import { PlanTimeline } from '../components/PlanTimeline.tsx';
+import { ChangeOwnerPanel, OwnerChip, OwnerPicker } from '../components/PlanOwner.tsx';
 
 const MEASURES: MeasureId[] = ['M1', 'M2', 'M3', 'M4'];
 const fmtDay = (d: string) =>
@@ -78,7 +79,10 @@ export function PlanTab({
   artistName = 'Artist',
   autoStart = false,
   onChanged,
+  meSub,
 }: {
+  /** The signed-in person: the default owner of a plan they start (rev 12). */
+  meSub?: string;
   /** For the PDF export's title and file name. */
   artistName?: string;
   cfg: AppConfig;
@@ -97,36 +101,68 @@ export function PlanTab({
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Plan owner (rev 12): picked when starting a plan or saving one without an owner.
+  const [ownerPick, setOwnerPick] = useState('');
+  const [changingOwner, setChangingOwner] = useState(false);
+  const [ownerDone, setOwnerDone] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await api<PlanResponse>(cfg, token, 'GET', `/artists/${artistId}/plan`);
       setData(res);
       setDraft(null);
+      const mine = res.ownerCandidates?.some((c) => c.sub === meSub);
+      setOwnerPick(mine && meSub ? meSub : '');
       return res;
     } catch (e) {
       setError((e as Error).message);
       return null;
     }
-  }, [cfg, token, artistId]);
+  }, [cfg, token, artistId, meSub]);
   useEffect(() => {
     void load().then((res) => {
       if (res && !res.exists && autoStart && canEdit) setDraft(structuredClone(res.plan));
     });
   }, [load, autoStart, canEdit]);
 
-  async function save(plan: Plan) {
+  /** A plan with no owner (new, or from before rev 12) can't be saved without one. */
+  const needsOwner = !!data && canEdit && (!data.exists || data.ownerNeeded);
+
+  async function save(plan: Plan, owner?: { sub: string; note?: string }) {
     setError(null);
     setSaved(false);
+    // The picker only shows while editing; a tick on an ownerless plan asks for one first.
+    const ownerSub = owner?.sub ?? (needsOwner && draft ? ownerPick : undefined);
+    if (needsOwner && !ownerSub) {
+      setError(
+        draft ? 'Choose a plan owner first.' : 'This plan needs an owner first. Choose one above.',
+      );
+      return;
+    }
     setBusy(true);
     try {
-      await api(cfg, token, 'PUT', `/artists/${artistId}/plan`, {
-        outcome: plan.outcome,
-        measures: plan.measures,
-        phases: plan.phases,
-        version: plan.version,
-      });
-      setSaved(true);
+      const res = await api<{ owner: { displayName: string }; moved: number }>(
+        cfg,
+        token,
+        'PUT',
+        `/artists/${artistId}/plan`,
+        {
+          outcome: plan.outcome,
+          measures: plan.measures,
+          phases: plan.phases,
+          version: plan.version,
+          ...(ownerSub ? { ownerSub } : {}),
+          ...(owner?.note?.trim() ? { handoverNote: owner.note.trim() } : {}),
+        },
+      );
+      if (owner) {
+        setChangingOwner(false);
+        setOwnerDone(
+          `${res.owner.displayName} now owns the plan${
+            res.moved ? `, and ${res.moved} open to-do${res.moved === 1 ? '' : 's'} moved` : ''
+          }. They've been sent a summary.`,
+        );
+      } else setSaved(true);
       await load();
       onChanged?.();
     } catch (e) {
@@ -210,6 +246,32 @@ export function PlanTab({
 
   return (
     <div className="flex flex-col gap-4">
+      {data.exists && (
+        <OwnerChip
+          owner={data.owner}
+          ownerNeeded={data.ownerNeeded}
+          {...(canEdit && !editing
+            ? {
+                onChange: () => {
+                  setOwnerDone(null);
+                  setChangingOwner(true);
+                },
+              }
+            : {})}
+        />
+      )}
+      {changingOwner && canEdit && !editing && (
+        <ChangeOwnerPanel
+          artistName={artistName}
+          current={data.owner}
+          candidates={data.ownerCandidates ?? []}
+          movable={data.movableTodos ?? 0}
+          busy={busy}
+          onCancel={() => setChangingOwner(false)}
+          onConfirm={(sub, note) => void save(data.plan, { sub, note })}
+        />
+      )}
+      {ownerDone && <Notice tone="success">{ownerDone}</Notice>}
       <nav
         role="tablist"
         aria-label="Plan sections"
@@ -337,6 +399,13 @@ export function PlanTab({
           <span className="src">The whole plan, with the timeline and its history of changes.</span>
         </div>
       )}
+      {canEdit && editing && needsOwner && (
+        <OwnerPicker
+          candidates={data.ownerCandidates ?? []}
+          value={ownerPick}
+          onChange={setOwnerPick}
+        />
+      )}
       {canEdit && (
         <div className="flex flex-wrap items-center gap-3">
           {editing ? (
@@ -349,7 +418,14 @@ export function PlanTab({
               </Button>
             </>
           ) : (
-            <Button onClick={() => setDraft(structuredClone(data.plan))}>Edit plan</Button>
+            <Button
+              onClick={() => {
+                setChangingOwner(false);
+                setDraft(structuredClone(data.plan));
+              }}
+            >
+              Edit plan
+            </Button>
           )}
         </div>
       )}

@@ -57,7 +57,7 @@ import { Events } from './Events.tsx';
 import { Prompts } from './Prompts.tsx';
 import { Newsroom } from './Newsroom.tsx';
 import { AllGigs, ArtistGigs } from './Gigs.tsx';
-import { ArtistWorkspace } from './Workspace.tsx';
+import { ArtistWorkspace, type TabId as WorkspaceTab } from './Workspace.tsx';
 import { MeetingsPage, RecorderProvider, RecordingBar, type MeetingsTarget } from './Meetings.tsx';
 import { FileThumb } from '../components/FileThumb.tsx';
 
@@ -100,6 +100,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   // Back from a vendor's sign-in page: open Connectors to finish connecting.
   const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
+  // Which workspace section to open (a plan notification opens Plan; rev 12).
+  const [wsTab, setWsTab] = useState<WorkspaceTab | undefined>();
   const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
   const [gigHelp, setGigHelp] = useState(0);
   const [asking, setAsking] = useState(false);
@@ -143,6 +145,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     // A meeting's notification: `meeting:<space>/<meetingId>` (rev 11).
     const meeting = /^meeting:([^/]+)\/(.+)$/.exec(link);
     if (meeting) return openMeetings({ kind: 'open', space: meeting[1]!, meetingId: meeting[2]! });
+    // An artist's plan, for its owner: `plan:<artistId>` (rev 12).
+    const planOf = /^plan:(art_[a-z0-9]+)$/.exec(link);
+    if (planOf) {
+      setWsTab('plan');
+      return setView(`artist:${planOf[1]}`);
+    }
     setView(LINK_VIEWS[link] ?? 'overview');
   };
   useDeepLink(goTo);
@@ -232,6 +240,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         current={view}
         onNavigate={(v) => {
           if (v === 'meetings') setMeetingsTarget({ kind: 'list' });
+          setWsTab(undefined);
           setView(v);
         }}
         userName={userName}
@@ -276,6 +285,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             cfg={cfg}
             token={token}
             userName={userName}
+            meSub={me.sub}
             artists={artists}
             openReviews={openReviews}
             conversations={inbox.conversations ?? []}
@@ -303,6 +313,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             token={token}
             me={me}
             artist={openArtist}
+            {...(wsTab ? { initialTab: wsTab } : {})}
             onNavigate={setView}
             onOpenChat={openChat}
             onRecordMeeting={() => openMeetings({ kind: 'new', artistId: openArtist.artistId })}
@@ -534,6 +545,7 @@ function StudioHq({
   cfg,
   token,
   userName,
+  meSub,
   artists,
   openReviews,
   conversations,
@@ -543,6 +555,7 @@ function StudioHq({
   cfg: AppConfig;
   token: string;
   userName: string;
+  meSub: string;
   artists: ArtistSummary[];
   openReviews: SubmissionSummary[];
   conversations: ConversationSummary[];
@@ -551,6 +564,11 @@ function StudioHq({
   onOpenFile: (fileId: string) => void;
 }) {
   const [plans, setPlans] = useState<Record<string, PlanResponse>>({});
+  // "My plans" (rev 12): the artists whose plan this person owns.
+  const [whose, setWhose] = useState<'all' | 'mine'>('all');
+  const shownArtists =
+    whose === 'mine' ? artists.filter((a) => a.planOwner?.sub === meSub) : artists;
+  const needOwner = artists.filter((a) => a.planOwnerNeeded).length;
   const [files, setFiles] = useState<FileItem[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
@@ -609,11 +627,31 @@ function StudioHq({
         <Card
           className="flex-[1_1_320px]"
           title="Artist workspaces"
-          action={<span className="src">Phases from each plan</span>}
+          action={
+            <span className="flex flex-wrap items-center gap-2">
+              {needOwner > 0 && (
+                <Tag tone="c">
+                  {needOwner} need{needOwner === 1 ? 's' : ''} an owner
+                </Tag>
+              )}
+              <Chips
+                label="Whose plans"
+                value={whose}
+                onChange={setWhose}
+                options={[
+                  { id: 'all', label: 'All' },
+                  { id: 'mine', label: 'My plans' },
+                ]}
+              />
+            </span>
+          }
           footer={go('artists')}
         >
           {artists.length === 0 && <p className="src">No artists yet. Invite your first one.</p>}
-          {artists.slice(0, 4).map((a) => {
+          {artists.length > 0 && shownArtists.length === 0 && (
+            <p className="src">You don&apos;t own any artist plans yet.</p>
+          )}
+          {shownArtists.slice(0, 4).map((a) => {
             const p = plans[a.artistId]?.plan ? plans[a.artistId] : undefined;
             const now = p
               ? phaseProgress(p.plan)
@@ -637,6 +675,15 @@ function StudioHq({
                     <span className="src">
                       {now ? `Now: ${now}` : p?.exists ? 'Plan set' : 'No plan yet'}
                     </span>
+                    {a.hasPlan && (
+                      <span className="src block">
+                        {a.planOwnerNeeded
+                          ? 'Plan needs an owner'
+                          : a.planOwner
+                            ? `Owner: ${a.planOwner.displayName}`
+                            : ''}
+                      </span>
+                    )}
                   </span>
                   {n > 0 && <Tag tone="c">{n} to review</Tag>}
                 </span>
@@ -878,6 +925,11 @@ function ArtistsPage({
                             ? 'AI off'
                             : 'AI not chosen'}
                       </Tag>
+                      {a.planOwnerNeeded ? (
+                        <Tag tone="c">Plan needs an owner</Tag>
+                      ) : a.planOwner ? (
+                        <Tag tone="s">Plan owner: {a.planOwner.displayName}</Tag>
+                      ) : null}
                     </>
                   }
                   onOpen={() => onOpen(a.artistId)}
@@ -891,6 +943,7 @@ function ArtistsPage({
                   <th scope="col">App account</th>
                   <th scope="col">Terms</th>
                   <th scope="col">AI</th>
+                  <th scope="col">Plan owner</th>
                   <th scope="col">Joined</th>
                   <th scope="col" />
                 </tr>
@@ -921,6 +974,15 @@ function ArtistsPage({
                         <Tag tone="s">Opted out</Tag>
                       ) : (
                         <span className="src">Not chosen</span>
+                      )}
+                    </td>
+                    <td>
+                      {a.planOwnerNeeded ? (
+                        <Tag tone="c">Needs an owner</Tag>
+                      ) : a.planOwner ? (
+                        a.planOwner.displayName
+                      ) : (
+                        <span className="src">No plan yet</span>
                       )}
                     </td>
                     <td>{shortDate(a.createdAt)}</td>
