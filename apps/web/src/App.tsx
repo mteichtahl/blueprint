@@ -4,6 +4,7 @@ import { currentSession, profileOf, refresh, signOut, type Session } from './lib
 import { loadConfig, type AppConfig } from './lib/config.ts';
 import { captureCallback } from './lib/connectors.ts';
 import { Notice, WaveLoader } from './components/ui.tsx';
+import { WhatsNew } from './components/WhatsNew.tsx';
 import { Consent } from './pages/Consent.tsx';
 import { Home } from './pages/Home.tsx';
 import { SignIn, type SignInReason } from './pages/SignIn.tsx';
@@ -123,14 +124,18 @@ export function App() {
       />
     );
   return (
-    <Home
-      cfg={cfg}
-      token={token}
-      me={me}
-      userName={userName}
-      onSignOut={() => leave('signedOut')}
-      // Admin actions need a sign-in within 5 minutes (design 6.3): sign in again on our screens.
-      onReauth={() => leave('reauth')}
-    />
+    <>
+      <Home
+        cfg={cfg}
+        token={token}
+        me={me}
+        userName={userName}
+        onSignOut={() => leave('signedOut')}
+        // Admin actions need a sign-in within 5 minutes (design 6.3): sign in again on our screens.
+        onReauth={() => leave('reauth')}
+      />
+      {/* Once per release, after sign-in and consent (CHANGELOG.md). */}
+      <WhatsNew />
+    </>
   );
 }

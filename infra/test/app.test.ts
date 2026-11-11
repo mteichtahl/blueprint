@@ -13,7 +13,7 @@ const cfg = parseConfig(
 
 function synth() {
   const app = new App();
-  const stacks = buildApp(app, cfg, { version: 'test' });
+  const stacks = buildApp(app, cfg, { version: 'test', release: '1.4.2' });
   app.synth();
   return stacks;
 }
@@ -202,6 +202,16 @@ describe('environment foundations', () => {
     Template.fromStack(prod!).hasResourceProperties('AWS::KMS::Key', {
       EnableKeyRotation: true,
       Tags: Match.arrayWith([{ Key: 'bmg:env', Value: 'prod' }]),
+    });
+  });
+
+  it('records the release version, with a beta- prefix on staging', () => {
+    const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.foundation));
+    staging!.hasOutput('DeployedRelease', { Value: 'beta-1.4.2' });
+    prod!.hasOutput('DeployedRelease', { Value: '1.4.2' });
+    staging!.hasResourceProperties('AWS::SSM::Parameter', {
+      Name: names.ssm(cfg, 'staging', 'foundation/release'),
+      Value: 'beta-1.4.2',
     });
   });
 });

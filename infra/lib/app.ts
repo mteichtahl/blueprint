@@ -23,6 +23,8 @@ export interface BuildAppOptions {
   includeTooling?: boolean;
   skip?: { guardDuty?: boolean; securityHub?: boolean; config?: boolean; accessAnalyzer?: boolean };
   version?: string;
+  /** Semantic release version (VERSION file), e.g. 1.4.2. */
+  release?: string;
 }
 
 /**
@@ -79,6 +81,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       envName,
       description: `BMG ${envName} foundation`,
       ...(opts.version ? { version: opts.version } : {}),
+      ...(opts.release ? { release: opts.release } : {}),
     });
     const data = new DataStack(app, `${cfg.project}-${envName}-data`, {
       config: cfg,

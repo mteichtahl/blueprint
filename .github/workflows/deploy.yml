@@ -3,6 +3,10 @@ name: Deploy
 # main → checks → staging (bmg-deploy-staging runner) → approval → prod
 # (bmg-deploy-prod runner). AWS credentials come only from each CodeBuild
 # project's IAM role; no AWS secret is stored in GitHub (design 16).
+#
+# Release versions come from the VERSION file (`blueprint release major|minor|hotfix`),
+# with notes in CHANGELOG.md. Staging is the beta environment and shows
+# beta-X.Y.Z; prod shows X.Y.Z.
 
 on:
   push:
@@ -42,6 +46,10 @@ jobs:
           test -f bmg.config.json || { echo "::error::Run 'blueprint init' and commit bmg.config.json"; exit 1; }
       - run: npm ci --no-audit --no-fund
       - name: Build web app
+        env:
+          # Release label in the app's menu footer: beta-X.Y.Z (VERSION file)
+          BMG_ENV: staging
+          BMG_VERSION: ${{ github.sha }}
         run: npm run build -w @bmg/web
       - name: cdk deploy (staging)
         working-directory: infra
@@ -53,6 +61,11 @@ jobs:
         run: |
           deployed=$(node -p "require('./cdk-outputs.json')['bmg-staging-foundation'].DeployedVersion")
           test "$deployed" = "$GITHUB_SHA" || { echo "::error::staging reports $deployed, expected $GITHUB_SHA"; exit 1; }
+          release=$(node -p "require('./cdk-outputs.json')['bmg-staging-foundation'].DeployedRelease")
+          expected="beta-$(tr -d '[:space:]' < VERSION)"
+          test "$release" = "$expected" || { echo "::error::staging release is $release, expected $expected"; exit 1; }
+          echo "::notice::staging is on release $release"
+          echo "Released **$release** to staging (\`${GITHUB_SHA::7}\`)" >> "$GITHUB_STEP_SUMMARY"
 
   deploy-prod:
     name: Deploy production
@@ -69,6 +82,10 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Build web app
+        env:
+          # Release label in the app's menu footer: X.Y.Z (VERSION file)
+          BMG_ENV: prod
+          BMG_VERSION: ${{ github.sha }}
         run: npm run build -w @bmg/web
       - name: cdk deploy (prod)
         working-directory: infra
@@ -80,3 +97,8 @@ jobs:
         run: |
           deployed=$(node -p "require('./cdk-outputs.json')['bmg-prod-foundation'].DeployedVersion")
           test "$deployed" = "$GITHUB_SHA" || { echo "::error::prod reports $deployed, expected $GITHUB_SHA"; exit 1; }
+          release=$(node -p "require('./cdk-outputs.json')['bmg-prod-foundation'].DeployedRelease")
+          expected="$(tr -d '[:space:]' < VERSION)"
+          test "$release" = "$expected" || { echo "::error::prod release is $release, expected $expected"; exit 1; }
+          echo "::notice::prod is on release $release"
+          echo "Released **$release** to prod (\`${GITHUB_SHA::7}\`)" >> "$GITHUB_STEP_SUMMARY"
