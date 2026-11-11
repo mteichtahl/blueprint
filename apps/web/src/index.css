@@ -550,6 +550,13 @@ main {
     color: #011935;
     box-shadow: 0 0 0 1px #d3d8de;
   }
+  /* A section that can't be opened (an opted-out meeting's Transcript): greyed, no hover. */
+  .seg > button[aria-disabled='true'] {
+    color: #a3abb5;
+    cursor: not-allowed;
+    background: transparent;
+    box-shadow: none;
+  }
   /* Counts on workspace tabs and sections: coral when Blueprint has something to do. */
   .cnt {
     min-width: 20px;
@@ -759,6 +766,11 @@ html {
   background: #13233a;
   color: #f1f4f7;
   box-shadow: 0 0 0 1px #2c405c;
+}
+.dark .seg > button[aria-disabled='true'] {
+  color: #5d6d82;
+  background: transparent;
+  box-shadow: none;
 }
 .dark .cnt-hot {
   background: #b5403c;

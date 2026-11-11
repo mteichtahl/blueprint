@@ -31,7 +31,8 @@ import {
   saveSession,
   speakerName,
   speakersOf,
-  STATUS_LABEL,
+  aiOffWords,
+  statusLabel,
   unfinishedSessions,
   uploadRecording,
   WARN_RECORDING_SEC,
@@ -509,6 +510,13 @@ function MeetingsList({
           cfg={cfg}
           token={token}
           session={s}
+          aiOff={(() => {
+            const m = meetings?.find((x) => x.meetingId === s.meetingId);
+            return m
+              ? (aiOffWords(m, (id) => artists.find((a) => a.artistId === id)?.displayName) ??
+                  undefined)
+              : undefined;
+          })()}
           onDone={() => {
             setUnfinished((l) => l.filter((x) => x.meetingId !== s.meetingId));
             load();
@@ -539,7 +547,7 @@ function MeetingsList({
                 key={m.meetingId}
                 title={m.title}
                 sub={`${name(m.artistId)} · ${shortDate(m.startedAt)}${m.durationSec ? ` · ${clock(m.durationSec)}` : ''}`}
-                status={<Tag tone={STATUS_LABEL[m.status][0]}>{STATUS_LABEL[m.status][1]}</Tag>}
+                status={<Tag tone={statusLabel(m)[0]}>{statusLabel(m)[1]}</Tag>}
                 tags={m.suggestionsWaiting ? <Tag tone="c">Plan review</Tag> : undefined}
                 onOpen={() => onOpen(m)}
                 openLabel={`Open ${m.title}`}
@@ -572,7 +580,7 @@ function MeetingsList({
                   <td>{m.durationSec ? clock(m.durationSec) : '—'}</td>
                   <td>
                     <span className="flex flex-wrap gap-1.5">
-                      <Tag tone={STATUS_LABEL[m.status][0]}>{STATUS_LABEL[m.status][1]}</Tag>
+                      <Tag tone={statusLabel(m)[0]}>{statusLabel(m)[1]}</Tag>
                       {m.suggestionsWaiting > 0 && <Tag tone="c">Plan review</Tag>}
                     </span>
                   </td>
@@ -587,12 +595,18 @@ function MeetingsList({
 }
 
 /** "You have an unfinished recording": finish it from what the device saved, or let it go. */
-function UnfinishedRecording({
+export function UnfinishedRecording({
   cfg,
   token,
   session,
+  aiOff,
   onDone,
-}: Props & { session: RecordingSession; onDone: () => void }) {
+}: Props & {
+  session: RecordingSession;
+  /** Set when an artist in it has AI off: it can be saved, not transcribed (spec 8). */
+  aiOff?: { notice: string; tooltip: string };
+  onDone: () => void;
+}) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const finish = async () => {
@@ -637,11 +651,28 @@ function UnfinishedRecording({
         You have an unfinished recording: <b>{session.title}</b>, from {longDate(session.startedAt)}{' '}
         ({clock(session.elapsed)}).
       </p>
+      {aiOff && <Notice>{aiOff.notice}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
       <div className="flex flex-wrap gap-2">
-        <Button variant="cta" disabled={!!busy} onClick={() => void finish()}>
-          {busy || 'Finish and transcribe'}
-        </Button>
+        {aiOff ? (
+          <>
+            <Button variant="cta" disabled={!!busy} onClick={() => void finish()}>
+              {busy || 'Finish and save'}
+            </Button>
+            <span title={aiOff.tooltip}>
+              <Button variant="ghost" disabled aria-describedby={`ai-off-${session.meetingId}`}>
+                Finish and transcribe
+              </Button>
+            </span>
+            <span id={`ai-off-${session.meetingId}`} className="sr-only">
+              {aiOff.tooltip}
+            </span>
+          </>
+        ) : (
+          <Button variant="cta" disabled={!!busy} onClick={() => void finish()}>
+            {busy || 'Finish and transcribe'}
+          </Button>
+        )}
         <Button variant="ghost" disabled={!!busy} onClick={() => void discard()}>
           Discard
         </Button>
@@ -1064,7 +1095,7 @@ function Recorder({ onDone }: { onDone: (m?: Meeting) => void }) {
 // ═════════════════════════════ A meeting (spec 5) ═════════════════════════════
 type Section = 'summary' | 'transcript' | 'plan' | 'details';
 
-function MeetingView({
+export function MeetingView({
   cfg,
   token,
   artists,
@@ -1079,7 +1110,12 @@ function MeetingView({
 }) {
   const [data, setData] = useState<{ meeting: Meeting; content: MeetingContent } | null>(null);
   const [error, setError] = useState('');
-  const [section, setSection] = useState<Section>('summary');
+  const [section, pick] = useState<Section>('summary');
+  const [picked, setPicked] = useState(false);
+  const setSection = (x: Section) => {
+    pick(x);
+    setPicked(true);
+  };
   const audio = useRef<HTMLAudioElement>(null);
   const load = useCallback(
     () =>
@@ -1119,6 +1155,10 @@ function MeetingView({
   }
   const { meeting: m, content } = data;
   const artist = artists.find((a) => a.artistId === m.artistId);
+  const aiOff = aiOffWords(m, (id) => artists.find((a) => a.artistId === id)?.displayName);
+  // Nothing to show and nothing can be made: the tab stays, greyed out (spec 5, 8).
+  // A transcript made before the artist opted out is still shown.
+  const transcriptOff = !!aiOff && content.segments.length === 0;
   const sections: { id: Section; label: string; count?: number }[] = [
     { id: 'summary', label: 'Summary' },
     { id: 'transcript', label: 'Transcript' },
@@ -1128,6 +1168,11 @@ function MeetingView({
     { id: 'details', label: 'Details' },
   ];
   const ctx = { cfg, token, meeting: m, content, reload: load, setData, playAt };
+  // Opens on Details when there's no transcript to make; picking a tab still works.
+  const shown: Section =
+    transcriptOff && (section === 'transcript' || (section === 'summary' && !picked))
+      ? 'details'
+      : section;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1135,7 +1180,7 @@ function MeetingView({
         <Button variant="ghost" size="sm" onClick={onBack}>
           <Icon name="back" size={16} /> Meetings
         </Button>
-        <Tag tone={STATUS_LABEL[m.status][0]}>{STATUS_LABEL[m.status][1]}</Tag>
+        <Tag tone={statusLabel(m)[0]}>{statusLabel(m)[1]}</Tag>
         {m.shared && <Tag tone="n">Shared with {artist?.displayName ?? 'the artist'}</Tag>}
       </div>
       <Card
@@ -1150,28 +1195,34 @@ function MeetingView({
         {m.audioFileId && m.status !== 'uploading' && (
           <Player cfg={cfg} token={token} meeting={m} audio={audio} markers={content.markers} />
         )}
-        <StatusNotice meeting={m} cfg={cfg} token={token} reload={load} />
+        <StatusNotice meeting={m} cfg={cfg} token={token} reload={load} aiOff={aiOff} />
       </Card>
       {error && <Notice tone="error">{error}</Notice>}
       <div role="tablist" aria-label="Meeting sections" className="seg">
-        {sections.map((x) => (
-          <button
-            key={x.id}
-            type="button"
-            role="tab"
-            aria-selected={section === x.id}
-            onClick={() => setSection(x.id)}
-          >
-            {x.label} {x.count ? <span className="cnt cnt-hot">{x.count}</span> : null}
-          </button>
-        ))}
+        {sections.map((x) => {
+          const off = x.id === 'transcript' && transcriptOff;
+          return (
+            <button
+              key={x.id}
+              type="button"
+              role="tab"
+              aria-selected={shown === x.id}
+              aria-disabled={off || undefined}
+              tabIndex={off ? -1 : undefined}
+              title={off ? aiOff!.tooltip : undefined}
+              onClick={off ? undefined : () => setSection(x.id)}
+            >
+              {x.label} {x.count ? <span className="cnt cnt-hot">{x.count}</span> : null}
+            </button>
+          );
+        })}
       </div>
-      {section === 'summary' && <SummarySection {...ctx} />}
-      {section === 'transcript' && <TranscriptSection {...ctx} />}
-      {section === 'plan' && (
+      {shown === 'summary' && <SummarySection {...ctx} />}
+      {shown === 'transcript' && <TranscriptSection {...ctx} />}
+      {shown === 'plan' && (
         <PlanSection {...ctx} artistName={artist?.displayName ?? 'the artist'} />
       )}
-      {section === 'details' && (
+      {shown === 'details' && (
         <DetailsSection {...ctx} artistName={artist?.displayName} onDeleted={onBack} />
       )}
     </div>
@@ -1193,7 +1244,10 @@ function StatusNotice({
   cfg,
   token,
   reload,
-}: Pick<Ctx, 'meeting' | 'cfg' | 'token' | 'reload'>) {
+  aiOff,
+}: Pick<Ctx, 'meeting' | 'cfg' | 'token' | 'reload'> & {
+  aiOff: { notice: string; tooltip: string } | null;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (m.status === 'ready' || m.status === 'recording') return null;
@@ -1208,13 +1262,17 @@ function StatusNotice({
   }
   return (
     <div className="flex flex-col gap-2">
-      <Notice tone={m.status === 'failed' ? 'error' : 'info'}>{m.statusReason}</Notice>
+      <Notice tone={m.status === 'failed' && !aiOff ? 'error' : 'info'}>
+        {aiOff ? aiOff.notice : m.statusReason}
+      </Notice>
       {error && <Notice tone="error">{error}</Notice>}
-      <div>
+      {/* Disabled buttons don't show a tooltip, so the wrapper carries it. */}
+      <div className="self-start" title={aiOff?.tooltip}>
         <Button
           variant="ghost"
           size="sm"
-          disabled={busy}
+          disabled={busy || !!aiOff}
+          aria-describedby={aiOff ? `ai-off-${m.meetingId}` : undefined}
           onClick={() => {
             setBusy(true);
             api(cfg, token, 'POST', `${meetingPath(m)}/transcribe`)
@@ -1225,6 +1283,11 @@ function StatusNotice({
         >
           {m.status === 'failed' ? 'Try again' : 'Transcribe now'}
         </Button>
+        {aiOff && (
+          <span id={`ai-off-${m.meetingId}`} className="sr-only">
+            {aiOff.tooltip}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -2332,7 +2395,7 @@ export function LatestMeetingCard({
           {latest.suggestionsWaiting > 0 ? (
             <Tag tone="c">Waiting on plan review</Tag>
           ) : (
-            <Tag tone={STATUS_LABEL[latest.status][0]}>{STATUS_LABEL[latest.status][1]}</Tag>
+            <Tag tone={statusLabel(latest)[0]}>{statusLabel(latest)[1]}</Tag>
           )}
         </div>
       ) : (

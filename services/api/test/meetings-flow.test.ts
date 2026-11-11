@@ -9,6 +9,8 @@ import type { APIGatewayProxyEvent } from 'aws-lambda';
  */
 
 const items = new Map<string, Record<string, unknown>>();
+/** Event types put on the bus (to check nothing asks for a transcript). */
+const sent: string[] = [];
 const objects = new Map<string, string>();
 const key = (k: { PK: string; SK: string }) => `${k.PK}|${k.SK}`;
 
@@ -64,7 +66,8 @@ vi.mock('@bmg/crypto', async (orig) => {
 vi.mock('@aws-sdk/client-eventbridge', async (orig) => {
   const real = await orig<typeof import('@aws-sdk/client-eventbridge')>();
   class EventBridgeClient {
-    async send() {
+    async send(cmd: { input: { Entries?: { DetailType?: string }[] } }) {
+      for (const e of cmd.input.Entries ?? []) sent.push(e.DetailType ?? '');
       return {};
     }
   }
@@ -252,6 +255,7 @@ async function start(who = staff, body: Record<string, unknown> = {}) {
 beforeEach(() => {
   items.clear();
   objects.clear();
+  sent.length = 0;
 });
 
 describe('starting and opening meetings', () => {
@@ -593,5 +597,62 @@ describe('summaries and plan suggestions', () => {
       }),
     );
     expect(noop.status).toBe(400);
+  });
+});
+
+describe('a meeting that can’t be transcribed (AI off)', () => {
+  const setAi = (on: boolean) =>
+    items.set(`ARTIST#${ARTIST}|AI`, { PK: `ARTIST#${ARTIST}`, SK: 'AI', aiOptIn: on });
+  const noAi = async () => {
+    setAi(false);
+    const id = ((await start()).meeting as { meetingId: string }).meetingId;
+    const k = `ARTIST#${ARTIST}|MEETING#${id}`;
+    items.set(k, {
+      ...items.get(k)!,
+      status: 'no-ai',
+      audioFileId: 'fil_audio',
+      contentVersion: 0,
+    });
+    return id;
+  };
+  const open = async (id: string) =>
+    parse(await req(staff, 'GET', `${ARTIST}/${id}`)).meeting as Record<string, unknown>;
+
+  it('says so on the meeting and in the list', async () => {
+    const id = await noAi();
+    expect(await open(id)).toMatchObject({
+      canTranscribe: false,
+      transcribeBlockedReason: 'ai_opt_out',
+      aiOffArtistIds: [ARTIST],
+    });
+    const list = parse(await req(staff, 'GET', 'items')).meetings as Record<string, unknown>[];
+    expect(list.find((m) => m.meetingId === id)).toMatchObject({ canTranscribe: false });
+  });
+
+  it('refuses Transcribe with 403 and asks for no transcript', async () => {
+    const id = await noAi();
+    const r = parse(await req(staff, 'POST', `${ARTIST}/${id}/transcribe`));
+    expect(r.status).toBe(403);
+    expect(String(r.detail)).toMatch(/AI assistance is off/);
+    expect(sent).not.toContain('meeting.transcribe');
+    expect(items.get(`ARTIST#${ARTIST}|MEETING#${id}`)!.status).toBe('no-ai');
+  });
+
+  it('counts an artist attendee who turned AI off, not just the linked artist', async () => {
+    setAi(false);
+    const r = await start(staff, {
+      artistId: undefined,
+      attendees: [{ kind: 'artist', id: ARTIST, name: 'Chloe Poli' }],
+    });
+    expect(r.meeting).toMatchObject({ canTranscribe: false, aiOffArtistIds: [ARTIST] });
+  });
+
+  it('opens up again as soon as the artist opts in', async () => {
+    const id = await noAi();
+    setAi(true);
+    expect(await open(id)).toMatchObject({ canTranscribe: true, transcribeBlockedReason: null });
+    const r = await req(staff, 'POST', `${ARTIST}/${id}/transcribe`);
+    expect(r.statusCode).toBe(202);
+    expect(sent).toContain('meeting.transcribe');
   });
 });

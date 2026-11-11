@@ -15,8 +15,11 @@ import {
   principalFor,
 } from '../lib.ts';
 import { newId } from '../workspace/model.ts';
+import { aiStates } from '../ai/prompts.ts';
 import {
+  aiOffArtists,
   applyContentPatch,
+  artistsInvolved,
   canDeleteMeeting,
   CONSENT_WORDING,
   isBlueprint,
@@ -79,6 +82,16 @@ async function requestTranscription(m: Pick<Meeting, 'meetingId' | 'artistId'>) 
   );
 }
 
+/**
+ * Who has AI off in each meeting, read from the consent ledger now (one
+ * batch for a whole list), so opting in or out shows on the next load.
+ */
+async function aiOffIn(ms: Pick<Meeting, 'artistId' | 'attendees'>[]) {
+  const involved = [...new Set(ms.flatMap(artistsInvolved))];
+  const states = involved.length ? await aiStates(involved) : {};
+  return (m: Pick<Meeting, 'artistId' | 'attendees'>) => aiOffArtists(m, states);
+}
+
 function ensure(d: { allow: boolean; reason: string }) {
   if (!d.allow) throw new HttpError(403, d.reason);
 }
@@ -103,10 +116,11 @@ async function list(principal: Principal, artistId?: string) {
       Limit: 300,
     }),
   );
-  return ((res.Items ?? []) as Meeting[])
+  const shown = ((res.Items ?? []) as Meeting[])
     .filter((m) => (artistId ? m.artistId === artistId : true))
-    .filter((m) => meetingAllowed(principal, spaceOf(m), 'read').allow)
-    .map((m) => publicMeeting(m, principal));
+    .filter((m) => meetingAllowed(principal, spaceOf(m), 'read').allow);
+  const aiOff = await aiOffIn(shown);
+  return shown.map((m) => publicMeeting(m, principal, aiOff(m)));
 }
 
 /**
@@ -152,7 +166,8 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
   if (action === '' && method === 'GET') {
     const m = await open(principal, space, meetingId);
     const content = await readContent(m, staffRole(principal));
-    return json(200, { meeting: publicMeeting(m, principal), content });
+    const aiOff = await aiOffIn([m]);
+    return json(200, { meeting: publicMeeting(m, principal, aiOff(m)), content });
   }
   if (action === '' && method === 'PATCH') return patch(event, principal, space, meetingId);
   if (action === '' && method === 'DELETE') {
@@ -177,6 +192,15 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
   }
   if (action === 'transcribe' && method === 'POST') {
     const m = await open(principal, space, meetingId, true);
+    // The screens grey the button out, but an old tab or a hand-made request
+    // is refused here too (spec 8). The worker checks again before any job.
+    if ((await aiOffIn([m]))(m).length) {
+      await audit(event, 'meeting.transcribe-requested', 'denied', {
+        ...ids(m),
+        reason: 'ai_opt_out',
+      });
+      throw new HttpError(403, 'AI assistance is off for this artist');
+    }
     if (!m.audioFileId) throw new HttpError(409, 'There’s no recording to transcribe yet');
     if (!['failed', 'off', 'no-ai'].includes(m.status)) {
       throw new HttpError(409, 'This meeting is already transcribed or on its way');
@@ -254,7 +278,8 @@ async function create(event: APIGatewayProxyEvent, principal: Principal) {
   };
   await createMeeting(m);
   await audit(event, 'meeting.create', 'success', { ...ids(m), consent: true });
-  return json(201, { meeting: publicMeeting(m, principal) });
+  const aiOff = await aiOffIn([m]);
+  return json(201, { meeting: publicMeeting(m, principal, aiOff(m)) });
 }
 
 async function patch(
@@ -295,5 +320,6 @@ async function patch(
     }
   }
   const next = { ...m, ...set, contentVersion };
-  return json(200, { meeting: publicMeeting(next, principal) });
+  const aiOff = await aiOffIn([next]);
+  return json(200, { meeting: publicMeeting(next, principal, aiOff(next)) });
 }

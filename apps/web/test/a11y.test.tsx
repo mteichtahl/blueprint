@@ -163,8 +163,22 @@ const meeting = {
   },
   recordedByMe: true,
   canDelete: true,
+  canTranscribe: true,
+  transcribeBlockedReason: null,
+  aiOffArtistIds: [] as string[],
   updatedAt: now,
 };
+/** Serve the meeting as one Chloe has turned AI off for (spec 8). */
+let meetingAiOff = false;
+const aiOffMeeting = () => ({
+  ...meeting,
+  status: 'no-ai',
+  statusReason: 'An artist in this meeting has turned off AI assistance.',
+  suggestionsWaiting: 0,
+  canTranscribe: false,
+  transcribeBlockedReason: 'ai_opt_out',
+  aiOffArtistIds: [ARTIST],
+});
 const meetingContent = {
   notes: 'Push the EP to January',
   markers: [{ at: 61, note: 'budget agreed' }],
@@ -238,8 +252,16 @@ function answer(method: string, path: string): [number, unknown] {
   if (method !== 'GET') return [200, {}];
   const routes: [RegExp, unknown][] = [
     // Meeting notes (rev 11).
-    [/^\/meetings\/items$/, { meetings: [meeting] }],
-    [/^\/meetings\/[^/]+\/[^/]+$/, { meeting, content: meetingContent }],
+    [/^\/meetings\/items$/, { meetings: [meetingAiOff ? aiOffMeeting() : meeting] }],
+    [
+      /^\/meetings\/[^/]+\/[^/]+$/,
+      meetingAiOff
+        ? {
+            meeting: aiOffMeeting(),
+            content: { notes: '', markers: [], speakers: {}, segments: [] },
+          }
+        : { meeting, content: meetingContent },
+    ],
     [/^\/artists$/, { artists: [artist] }],
     [/^\/avatars$/, { artists: { [ARTIST]: CHLOE_PIC }, users: {} }],
     [/^\/artists\/[^/]+$/, artist],
@@ -983,6 +1005,24 @@ describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
       expect(await violations()).toEqual([]);
     },
   );
+
+  it('BMG: a meeting with AI off greys out Transcript and disables Transcribe', async () => {
+    meetingAiOff = true;
+    try {
+      await openMeetings();
+      expect(screen.getByText('Audio only (AI off)')).toBeTruthy();
+      fireEvent.click(screen.getAllByRole('button', { name: 'Meeting with Chloe Poli' })[0]!);
+      await settle();
+      const tab = screen.getByRole('tab', { name: /^Transcript/ });
+      expect(tab.getAttribute('aria-disabled')).toBe('true');
+      expect(
+        (screen.getByRole('button', { name: 'Transcribe now' }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(await violations()).toEqual([]);
+    } finally {
+      meetingAiOff = false;
+    }
+  });
 
   it('BMG: the workspace offers Record meeting and the plan review', async () => {
     render(<Home {...props('bmg-admin')} />);
