@@ -63,7 +63,7 @@ const GROUPS = [
 ] as const;
 type Group = (typeof GROUPS)[number];
 type GroupId = Group['id'];
-type TabId = Group['sections'][number]['id'];
+export type TabId = Group['sections'][number]['id'];
 const groupOf = (s: TabId): Group => GROUPS.find((g) => g.sections.some((x) => x.id === s))!;
 
 /** A count on a tab or section; coral when it's waiting on Blueprint. */
@@ -141,6 +141,7 @@ export function ArtistWorkspace({
   onOpenChat,
   onRecordMeeting,
   onOpenMeeting,
+  initialTab,
 }: {
   cfg: AppConfig;
   token: string;
@@ -154,6 +155,8 @@ export function ArtistWorkspace({
   onRecordMeeting?: () => void;
   /** Opens one of this artist's meetings. */
   onOpenMeeting?: (m: Meeting) => void;
+  /** Open on this section (a notification link, e.g. a plan update). */
+  initialTab?: TabId;
 }) {
   const meetings = useArtistMeetings(cfg, token, artist.artistId);
   const planReview = meetings.reduce((n, m) => n + m.suggestionsWaiting, 0);
@@ -187,14 +190,14 @@ export function ArtistWorkspace({
     ]).then(([submissions, todos]) => setCounts({ submissions, todos }));
   }, [cfg, token, artist.artistId]);
   useEffect(() => {
-    setTabState('summary');
+    setTabState(initialTab ?? 'summary');
     setLastIn({});
     setLibKind('all');
     setChatOpen(false);
     setStartPlan(false);
     loadPlan();
     loadCounts();
-  }, [loadPlan, loadCounts]);
+  }, [loadPlan, loadCounts, initialTab]);
   // Counts follow what's open, so a review or a ticked to-do shows on the tabs.
   useEffect(() => loadCounts(), [tab, loadCounts]);
 
@@ -251,7 +254,25 @@ export function ArtistWorkspace({
           <p className="m-0 text-[17px] text-muted-foreground">
             Joined {shortDate(artist.createdAt)}
             {artist.status ? ` · ${artist.status}` : ''}
+            {/* Plan owner (rev 12); changed from the Plan tab. */}
+            {plan?.exists &&
+              (plan.owner ? (
+                <>
+                  {' · Plan owner '}
+                  <b className="text-foreground">{plan.owner.displayName}</b>
+                </>
+              ) : null)}
           </p>
+          {plan?.exists && plan.ownerNeeded && (
+            <button
+              type="button"
+              className="w-fit"
+              onClick={() => setTab('plan')}
+              title="Open the plan to choose an owner"
+            >
+              <Tag tone="c">Plan needs an owner</Tag>
+            </button>
+          )}
         </div>
       </header>
       <nav
@@ -324,6 +345,7 @@ export function ArtistWorkspace({
                 canEdit
                 autoStart={startPlan}
                 onChanged={loadPlan}
+                meSub={me.sub}
               />
             )}
             {tab === 'todo' && (

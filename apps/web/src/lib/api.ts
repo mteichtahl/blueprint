@@ -63,6 +63,17 @@ export interface ArtistSummary {
   termsVersion?: string | null;
   termsAcceptedAt?: string | null;
   aiOptIn?: boolean | null;
+  /** Blueprint only (rev 12): whether there's a plan, and who owns it. */
+  hasPlan?: boolean;
+  planOwner?: PlanOwner | null;
+  planOwnerNeeded?: boolean;
+}
+
+/** A plan's Blueprint owner, or someone who could be (rev 12). */
+export interface PlanOwner {
+  sub: string;
+  displayName: string;
+  jobTitle: string;
 }
 
 export type MeasureId = 'M1' | 'M2' | 'M3' | 'M4';
@@ -114,6 +125,15 @@ export interface PlanResponse {
   /** Custom stages that apply to this artist (BMG only; empty for artists). */
   stages: CustomStage[];
   exists: boolean;
+  /** Rev 12: the plan's Blueprint owner (null before one is picked). */
+  owner: PlanOwner | null;
+  ownerSince: string | null;
+  /** No owner yet, or the owner left or was unassigned (Blueprint only). */
+  ownerNeeded: boolean;
+  /** Blueprint only: admins and staff assigned to this artist. */
+  ownerCandidates?: PlanOwner[];
+  /** Blueprint only: open to-dos that would move to a new owner. */
+  movableTodos?: number;
 }
 
 /** One saved change to a plan (rev 8): who, when and what, newest first. */
@@ -122,8 +142,8 @@ export interface PlanChange {
   /** The plan version this change produced. */
   version: number;
   at: string;
-  /** `meeting`: from a meeting's suggestions; `undone`: one of those undone (rev 11). */
-  kind: 'created' | 'edited' | 'stage-added' | 'meeting' | 'undone';
+  /** `meeting`: from a meeting's suggestions; `undone`: one of those undone (rev 11); `owner`: only the owner changed (rev 12). */
+  kind: 'created' | 'edited' | 'stage-added' | 'meeting' | 'undone' | 'owner';
   /** "Blueprint", or "Blueprint · <job title>". */
   byName: string;
   changes: string[];

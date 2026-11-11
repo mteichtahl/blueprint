@@ -5,7 +5,18 @@ import { subscribeInbox } from './realtime.ts';
 
 export interface AppNotification {
   id: string;
-  kind: 'review' | 'feedback' | 'message' | 'file' | 'gig' | 'connector';
+  kind:
+    | 'review'
+    | 'feedback'
+    | 'message'
+    | 'file'
+    | 'gig'
+    | 'connector'
+    | 'todo'
+    | 'meeting'
+    | 'plan'
+    /** An artist's plan, for its Blueprint owner (rev 12). */
+    | 'artistPlan';
   title: string;
   body: string;
   link: string;
