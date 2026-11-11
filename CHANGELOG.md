@@ -14,6 +14,18 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.5.0 — 2026-11-11
+
+The assistant has moved to the top bar and is now called Ask BMG.
+
+### Improved
+
+- **Ask BMG** sits in the top bar on every Blueprint screen, so it's one tap
+  away on a phone too. ⌘K still opens it on a computer.
+- It's no longer in the menu, which now starts with Overview.
+- It has a new icon: a speech bubble with a spark. Artists see the same name
+  and icon on their floating button.
+
 ## 1.3.0 — 2026-11-11
 
 Overview is back at the top of the phone menu.

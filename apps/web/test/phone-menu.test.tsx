@@ -62,16 +62,41 @@ function openMenu() {
   return screen.getByRole('dialog', { name: 'Menu' });
 }
 
+describe('Ask BMG', () => {
+  it('sits in the top bar and opens the assistant', () => {
+    let asked = 0;
+    render(
+      <BmgShell
+        sections={sections}
+        current="library"
+        onNavigate={() => undefined}
+        userName="Kyra Teichtahl"
+        roleLabel="BMG admin"
+        theme="light"
+        onTheme={() => undefined}
+        onSignOut={() => undefined}
+        onProfile={() => undefined}
+        onAsk={() => asked++}
+      >
+        <p>Page</p>
+      </BmgShell>,
+    );
+    const bar = screen.getByRole('banner');
+    fireEvent.click(within(bar).getByRole('button', { name: /Ask BMG/ }));
+    expect(asked).toBe(1);
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).queryByText(/Ask/)).toBeNull();
+  });
+});
+
 describe('Phone menu', () => {
   it('puts Overview first, then to-dos and the three most urgent items, most waiting first', () => {
     const menu = openMenu();
     const rows = within(menu)
       .getAllByRole('button')
       .map((b) => b.textContent);
-    const top = rows.slice(
-      rows.indexOf('Ask Blueprint AI⌘K') + 1,
-      rows.indexOf('Ask Blueprint AI⌘K') + 7,
-    );
+    // The assistant is in the top bar now, not the menu.
+    expect(rows.some((r) => r?.includes('Ask'))).toBe(false);
+    const top = rows.slice(rows.indexOf('Overview'), rows.indexOf('Overview') + 6);
     // Contacts is a fourth urgent candidate, so it stays folded.
     expect(top).toEqual([
       'Overview',
