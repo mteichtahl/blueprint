@@ -4,11 +4,15 @@
 
 ## Automated, in CI (`npm test`)
 
-- **`apps/web/test/a11y.test.tsx`** runs axe-core 4.14 with tags wcag2a, wcag2aa, wcag21a, wcag21aa and wcag22aa on **42 screens and states**, rendered with realistic API data:
+- **`apps/web/test/a11y.test.tsx`** runs axe-core 4.14 with tags wcag2a, wcag2aa, wcag21a, wcag21aa and wcag22aa on **66 screens and states** (67 checks at release 1.1.0), rendered with realistic API data:
   - sign-in;
-  - every BMG desktop view and every artist workspace tab;
+  - every BMG desktop view and every artist workspace tab and section;
   - every artist phone screen, including the plan, stats, connectors, submit, profile and brand kit;
-  - open states: notifications, the AI assistant, editing a to-do, the plan in edit mode with Markdown editors, the new-event form, and asset details.
+  - open states: notifications, the AI assistant, the account menu, editing a to-do, the plan in edit mode with Markdown editors, the new-event form, event cards, venue detail with its map, asset details, a document's detail and Edit pages;
+  - folders and the Access panel (rev 10), Access & permissions forms, and profile pictures in place of initials;
+  - phone layouts where tables become row cards, the to-do panel and the gig pages;
+  - meetings (rev 11): the list, consent before recording, Summary, Transcript, Plan update, Details and the workspace entry points.
+- **`phone-menu.test.tsx`** and **`whats-new.test.tsx`** also run axe on the phone menu (1.1.0) and the "What's new" pop-up.
 - **`apps/web/test/contrast.test.ts`** checks **31 colour pairs**, read straight from `index.css`, in light and dark mode. axe can't measure contrast without a layout engine, so this covers it. The pairs are text, tags, buttons, the sidebar, placeholders, field borders and selection indicators.
 
 ## Found and fixed
@@ -30,7 +34,7 @@
 - **2.5.8 Target size (minimum):**
   - Buttons are at least 38px tall, icon buttons are 44px, and tab bars are 46px or more. Checkboxes sit inside a label at least 34px tall.
   - The small underlined text buttons (for example "Remove" under a logo) stand alone, with clear space around them, so the spacing exception applies.
-- **2.5.7 Dragging:** nothing needs dragging yet. When the Gantt timeline (change plan WP4) arrives, it must keep the date-picker alternative already planned.
+- **2.5.7 Dragging:** nothing needs dragging. Library items can be dragged onto folders on wider screens, but **Move to…** (and **Select** for several items) does the same with taps or the keyboard. The plan Timeline has no dragging: dates are set with date pickers.
 - **1.4.10 Reflow:** the layouts are responsive from 320px (phone app, collapsible desktop sidebar), with no fixed-height text containers, and nothing scrolls the page sideways (checked at 320, 375 and 414px in Chrome).
 - **1.4.4 Resize text: a deliberate exception on phones.** At Blueprint's request, pinch and double-tap zoom are turned off on phones and in the installed app, so it behaves like a native app (`user-scalable=no`, `touch-action: pan-x pan-y`, and Safari's gesture events cancelled in `lib/noZoom.ts`). This fails 1.4.4 as axe's `meta-viewport` rule reads it. What's left for people who need larger text: browser zoom on desktop is unaffected, and the layouts reflow without loss down to 320px. iOS doesn't apply its system text size to web text. To restore zoom, remove `maximum-scale=1, user-scalable=no` from `index.html`, the `touch-action` rule in `index.css` and the `preventZoom()` call in `main.tsx`.
 - **1.4.11 Non-text contrast (dark mode):** a toggle's track is coral when on and a grey track with an outline when off, both at least 5:1 against the dark cards. Tick boxes are coral when ticked, and progress fills are light.

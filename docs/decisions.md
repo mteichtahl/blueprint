@@ -1,6 +1,6 @@
 # Design decisions (from the solution design, 8 Nov 2026)
 
-The full design is in the [solution design document](https://claude.ai/artifact/N3KZsLiPgrwHmjRrBMkZm1).
+The full design is in the [solution design document](https://claude.ai/artifact/N3KZsLiPgrwHmjRrBMkZm1). The sections below follow the build in order, from Phase 1 to release 1.1.0 (11 Nov 2026). Each records what was decided and where the build departs from the design or a revision's spec. The specs for revisions 7–12 are project docs in the BMG App project.
 
 | #   | Decision               | Outcome                                                                                                                                                  |
 | --- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -43,7 +43,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 ## Notes from Phase 3 (core workspace)
 
 - **One origin for app and API:** CloudFront serves the web app from a private S3 bucket and forwards `/v1/*` to API Gateway, so the browser never makes cross-origin calls. The CSP allows only this origin and Cognito.
-- **Web client in the web stack:** its callback URL is the CloudFront address, which only exists after the API. The authorizer reads the client id from SSM (`/bmg/<env>/web/client-id`) instead of a stack reference, so there is no cycle. The old client in the identity stack is unused and is removed in the next release, after the API stops importing its export.
+- **Web client in the web stack:** its callback URL is the CloudFront address, which only exists after the API. The authorizer reads the client id from SSM (`/bmg/<env>/web/client-id`) instead of a stack reference, so there is no cycle. The old client in the identity stack has since been removed.
 - **Sign-in in the browser:** oidc-client-ts runs the authorization code flow with PKCE. Tokens are kept in session storage, so closing the tab signs you out.
 - **Fonts are self-hosted** (@fontsource), so no request goes to Google.
 - **Until DNS for blueprintmusic.group is on AWS**, the app uses its `*.cloudfront.net` address with CloudFront's default certificate, and there's no edge WAF. The API behind `/v1` keeps its regional WAF.
@@ -100,7 +100,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Submit for review** lists every ready, non-private file in the artist's library (their own uploads first) and lets them upload a new one in the form; it is attached once the malware scan passes.
 - **Installable app and web push:**
   - The web app is installable: it has a manifest, icons and a service worker. The worker only handles push; there is no offline caching.
-  - The icons are generated from the same waveform stand-in the app shows. **Replace `apps/web/public/icons/*` with the official logo files when they arrive** (Brand Kit: only the supplied logos may be used).
+  - The icons are generated from the same waveform stand-in the app shows. The official white-on-navy logo has been in `apps/web/public/brand/` since 10 Nov, and emails and PDFs use it, but **`apps/web/public/icons/*` and the in-app logo (`Logo` in `components/ui.tsx`, used on the sidebar and sign-in) are still the stand-in.** Replace them with the official files (Brand Kit: only the supplied logos may be used).
   - The VAPID key pair is created once inside AWS by a deploy-time custom resource and kept in Secrets Manager (`bmg/<env>/vapid`, platform key). It is never rotated, because rotating it would cancel every device's subscription.
   - Each person turns push on per device in Profile. The device is stored under a hash of its endpoint and removed when the push service says it's gone (404/410).
   - Pushes carry the notification's title, body and link only, and follow the same quiet hours as email.
@@ -161,7 +161,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
     - The chat function re-validates the checklist and signs a token with a KMS HMAC key. The token is bound to the person, the session and a hash of the checklist; it is single-use and lasts 60 seconds.
     - `POST /ai/actions/confirm` checks the token, burns it, and carries out the ticked actions through the normal API as the person.
   - **Guardrail:** Standard tier through `au.guardrail.v1:0`. It covers prompt attacks (high), harmful content, definitive legal or financial advice, card numbers, keys and passwords (blocked), and phone, email and address (masked in replies). Contextual grounding waits for knowledge bases, and must then use the Classic tier in Sydney.
-  - **Not in this slice:** AgentCore Memory (the runtime session keeps the conversation), streaming replies, and `search_my_content`, which needs knowledge bases (next).
+  - **Not in this slice:** AgentCore Memory (the runtime session keeps the conversation) and streaming replies. `search_my_content` arrived with the knowledge bases (below).
 
 ## Notes: Blueprint's own sign-in (9 Nov 2026)
 
@@ -230,7 +230,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **Socials are kept in the brand kit**, because the profile has no socials fields.
 - **Fonts are names, not files.** The CSP blocks Google Fonts, so the preview uses the font only if the device has it; designers use the real files.
 - **Contrast check:** text, primary and accent on the background, and background on primary, graded against WCAG AA (4.5:1, or 3:1 for large text).
-- **Export PDF** is the browser's print-to-PDF with print styles that show only the kit.
+- **Export PDF** builds a branded A4 PDF in the browser with jsPDF, as the plan PDF does (it was the browser's print-to-PDF at first, which does nothing in the installed phone app). It has the official logo header, logos, logo rules, colour swatches with their contrast checks, fonts, voice, socials and photo style, and includes unsaved edits. To read the kit's images, `artist-data` allows `GET`/`HEAD` CORS from the app origins and the CSP's `connect-src` adds the download origins.
 - **No new Lambdas:** the routes reuse the workspace and files functions, keeping the API stack under 500 resources (now 105 routes).
 
 ## Notes: Phase 6 hardening (10 Nov 2026)
@@ -277,6 +277,31 @@ The full design is in the [solution design document](https://claude.ai/artifact/
   - **Who sees emails:** staff can view the team list, but without email addresses.
 - **One proxy route:** `/access/{proxy+}` on the artists function (which already manages Cognito users), to keep the API stack under CloudFormation's limit. It's now at 448.
 - **Roster Terms and AI columns:** the consent handler (and `GET /me`, for artists who chose earlier) records the accepted terms version and date on `ARTIST#id / AI`, next to the AI choice. The roster shows these to Blueprint only.
+
+## Rev 7: contacts, venues, gigs, events, plans and chat (10 Nov 2026)
+
+Spec: `claude/BMG_Change_Plan_Rev7.md` in the BMG App project. Built one PR per feature (#50–#71) and merged on 10 Nov.
+
+- **Contacts and venues are one shared list** (`address-book` function behind proxy resources, not the `directory` stack the plan suggested).
+  - Everyone reads and adds. Artists edit only what they added; Blueprint edits, archives and deletes everything. Blueprint notes (`bmgNotes`) are never returned to artists. New authorisation matrix rows cover each case.
+  - **Duplicates return 409 with the existing record:** the same email (any case) or phone (any spacing) for contacts, and the same venue name (ignoring "The", case and punctuation) in the same suburb.
+  - Venue managers and bookers are links to contacts (`managerContactId`, `bookerContactId`), so details live in one place. A contact who is a venue's manager or booker can't be deleted.
+  - Gigs and events pick their venue from the list (`venueId` next to the venue name, which is kept so archived venues still show).
+- **Gigs:** start and end times (an end before the start is a late gig past midnight); set duration removed from the UI; deal "Other" takes free text, and "Not set yet" is new (Other used to mean not set); Blueprint can edit gigs from desktop.
+- **Money on gigs and events:** `money: { ticketsSold, takingsCents, costs[] }`, whole cents in AUD, up to 40 cost rows. Profit is calculated, never typed. Gigs start with the presets Venue, Photography, Videography, Content, Support band and Backing band. On events the budget rows are the cost rows, so there's one source. Gig figures are fully shared with the artist.
+- **Events:** `POST /events` requires start and end times; older events without times still load and show a prompt to add them. Run sheet items take notes (up to 1,000 characters).
+- **Crew and volunteers are people, and always in Contacts.** Each crew role has `people[]` with name, email and phone. The API matches each person against Contacts by email, then phone, and links or adds them, tagged Crew or Volunteer (`contact.create` audit, `from: event-crew`). Old free-text names show with a prompt to add each person; nothing was guessed.
+- **Job titles:** `GET /me` returns `jobTitle`, always "Artist" for artists. `PATCH /me { jobTitle }` is for Blueprint people only. Chat still shows Blueprint messages as "Blueprint".
+- **Plan dates and the Timeline:** stages gain optional `start`/`end` (end before start is refused) and milestones `due`; milestone names are editable in edit mode. The Timeline tab is an SVG Gantt (`lib/timeline.ts` is the layout, reused by the PDF) with Weeks / Months / Quarters, a Today line and an Unscheduled list. **Dates are set with date pickers; dragging bars isn't built.** Plan edits stay Blueprint-only.
+- **Plan PDF is built in the browser** with jsPDF and svg2pdf.js, loaded only when someone exports. That replaced the planned Lambda with headless Chromium: no new AWS resources, and the Gantt is drawn as vectors. It's always the whole plan. File name `Plan - <artist> - <YYYY-MM-DD>.pdf` in the person's local date.
+- **Emoji:** a full picker (`components/EmojiPicker.tsx`, `emojibase-data` bundled and lazy-loaded, nothing from a CDN) with search, categories, recently used and skin tones, inserting at the cursor. No reactions and no `:shortcode:` typing.
+- **Uploads in chat** use the normal upload path, then post a file card that downloads through the usual download endpoint.
+  - An artist's upload goes into their files, shared with the other artists in the chat (`sharedWithArtistIds`). In an artist ↔ artist chat it's stored `private`, so Blueprint can't open it.
+  - **Authz change:** an artist may read another artist's item shared with them when it's `normal` or `private` (before: `normal` only). `bmg-only` stays hidden, and BMG roles are still refused `private` by authz and by KMS.
+  - Blueprint's uploads go into the artist's files (direct chats) or the library, shared with the chat's artists (groups and announcements).
+  - If the scan takes longer than about 3 minutes, the file stays in the sender's files with a hint to share it later.
+- **To-do threads** are stored next to the to-do (`TODOC#<todoId>#<createdAt>#<id>`, which doesn't match `TODO#` queries), not as hidden chat conversations. Replies are one level deep; a removed comment stays as "Comment removed". The to-do keeps `commentCount` and `lastCommentAt`. A `todo.commented` event notifies the other side, never the author, and never the artist for BMG-only to-dos.
+- **API stack size:** its guard moved from 420 to 460 resources.
 
 ## Notes: Plan history and branded PDF (rev 8, 10 Nov 2026)
 
@@ -354,7 +379,55 @@ Spec: `claude/BMG_Rev10_Folders_and_Permissions.md` in the BMG App project. Thes
   - The library's seven file routes are now one `/library/{proxy+}`, mapped back to the same templates inside the files function (`files/library-route.ts`). It also serves `/library/folders`.
   - Artists' folders are `/artists/{artistId}/folders` and `/{proxy+}`.
   - This keeps the API stack under its 460-resource guardrail: 113 methods, down from 117.
-- **Not built yet:** Copy to…, Download as ZIP, "new access" notifications, and drag and drop between the tree and the table. Moves use Move to….
+- **Not built yet:** Copy to…, Download as ZIP, "new access" notifications, AI assistant folder actions, folder navigation in the chat and review pickers, and Folder details as its own page. Moves use Move to…, or drag and drop onto a folder, the tree or the breadcrumbs on wider screens.
+- **After a move** the library opens the folder the items went to, and the document page says where it went ("Moved to “Contracts”" with Open the folder). The move dialog's access check is keyed on what's being moved, so a redraw can't switch its button off.
+
+## Venue logos (10 Nov 2026)
+
+- **Upload, or "Automatically get logo" (on by default).** With no upload and a website, `POST /venues/logo-lookup` fetches the home page and tries, best first: schema.org `logo`, an `<img>` marked logo (header first), `apple-touch-icon`, larger icons, an `og:image` that is a logo, then `/favicon.ico`. At most 6 tries in 8 seconds; sponsor, payment and social badges are skipped.
+- **SSRF protection:** http/https on ports 80 and 443 only, no credentials. Every hostname is resolved through our own lookup, which refuses private, loopback, link-local (metadata and the Lambda runtime), CGNAT, multicast and IPv4-mapped addresses **at connect time**, so DNS rebinding can't get round it. IP literals and every redirect are checked too. Pages are capped at 1.5 MB and images at 1 MB, and bytes are sniffed, never trusted by Content-Type.
+- **Storage:** the browser shrinks the image to at most 256px and saves PNG or WebP (`PUT /venues/:id/logo`). The server only accepts PNG, JPEG or WebP data URLs up to 160 KB whose bytes match, so **SVG is never stored**. The logo is its own item (`VENUELOGO#<id>`), so the venue list stays small. The address-book function's timeout went from 10 to 20 seconds.
+- **Bookings and map:** venues show how many times they've been booked (shared artist gigs that are confirmed, booked or played, plus Blueprint events), counted from the shared-gigs index and the events list. The venue detail embeds a Google map of the address through the keyless embed URL; the CSP allows `frame-src https://www.google.com` only.
+
+## Library: names, file types and thumbnails (10 Nov 2026)
+
+- **Names:** uploads take an optional name (up to 200 characters) shown instead of the file name everywhere; downloads keep the file name.
+- **File type is detected from the bytes** after the malware scan: the promoter reads the first 64 KB (Office files by what's inside the ZIP, OLE, ISO brands, text, CSV, SVG and more) and stores `fileType { kind, label, ext, mime, detected }`. Before the scan the API guesses from the name (`detected: false`).
+- **Thumbnails are drawn in the browser** when a file is picked (an image scaled down, a video frame, or a PDF's first page through pdf.js, loaded only for PDFs), at most 320px and 64 KB. The preview goes through the same quarantine, scan and promote path as the file (`<key>.thumb`) and is stored with the same encryption, so a private file's preview is as private as the file. The promoter keeps it only if the scan is clean and the bytes are a PNG, JPEG or WebP of the declared size. Previews are served as 5-minute signed links and are never indexed. The CSP's `media-src` allows `blob:` so a picked video can be read locally.
+- **Phones:** an Upload document button opens its own upload page.
+
+## Look and navigation (10 Nov 2026)
+
+- **Loading:** every loading state shows the waveform logo with its bars moving like a sound wave, with a status label for screen readers, slower under reduced motion.
+- **Account menu on the header avatar** (Blueprint and artist apps): name and role, Profile & preferences, Sign out, and My connectors for artists. It replaced the name and profile block at the bottom of the sidebar.
+- **Invite artist** moved from every page's top bar to an admin-only sidebar item with its own page.
+- **Profile pictures:** upload one, or pick an image from the library (and, for artists, their own files and assets). The browser crops a centred square, shrinks it to 384px and re-encodes it as JPEG; `PATCH /me { avatar }` re-checks it's a real PNG, JPEG or WebP within limits. **Everyone's picture shows wherever their avatar does:** `GET /avatars?artists=…&users=…` returns up to 50 of each per call, and an artist's picture is also kept on `ARTIST#<id> / AVATAR` so artist lists never carry the image. Anyone signed in can fetch them, the same people who see the names next to them. Blueprint (the organisation) and announcements keep their own marks.
+- **Events:** All events is a page of event cards (Upcoming and Past) that open the event.
+- **Gigs:** the workspace Gigs section shows only stats, the list and Add a gig; the editor (with help request, checklist, money and photos) opens on Edit. On phones, adding or editing a gig is its own page with a way back, for Blueprint and for artists.
+- **To-dos on phones** open in a full-screen panel (`PhonePanel`); the artist's to-dos are row cards in "From Blueprint" and "My own".
+- **The plan outcome card** sits on the workspace Overview, not above every tab.
+
+## Documents: owner, who can edit, versions and in-use (rev 8, 10 Nov 2026)
+
+Spec: the rev 8 section of the screens & features doc. Built in #97–#100.
+
+- **Owner = the uploader** (older records fall back to `uploadedBy`). The owner can hand it to anyone who can see it.
+- **Who can edit:** `editAccess` is `owner` (locked), `chosen` (plus `editorIds`) or `everyone`. Library documents default to `everyone` (anyone at Blueprint could already rename them); everything else starts locked. Private artist files are always owner-only.
+- **Edit** means rename and new versions. **Owner only:** sharing, who can edit, ownership and delete. A Blueprint admin can manage Blueprint-owned documents (for when someone leaves) but **never overrides an artist's lock**.
+- **Every file carries `ownerName`, `ownedByMe`, `locked`, `canEdit` and `canManage`,** so the web app follows the API instead of copying the rules. People who can be chosen as editors come from the Cognito groups and profiles, cached for 60 seconds (`files/people.ts`).
+- **Tapping a document opens its detail page;** rows have no buttons. Edit is its own screen, with Delete at the bottom.
+- **New versions** go through quarantine, the scan and the promoter (`<key>.vN`). When clean, the promoter copies the current bytes to `<stored>.v<old>` and writes the new bytes to the plain key, so downloads, chat cards and the knowledge base keep working unchanged. Up to 50 versions are kept. **Restore** writes `file.restore`, and a rule runs the promoter to make the copy, because a 500 MB copy doesn't fit in API Gateway's 29 seconds. Restored versions come back without a preview.
+- **Submissions keep the version that was sent** (`fileVersions`), and the review screen says when a newer one exists.
+- **Where it's used:** submissions, the brand kit, the asset library and chats. Chat posts are recorded when a file card is posted (`FILEUSE#…`, ids only, never the message), so posts from before rev 8 aren't listed. Places the viewer can't open are counted, and artist ↔ artist chats are never shown to Blueprint. The rows are a list, not links yet.
+- **Delete is refused (409) while the document is used outside chat:** an asset, the brand kit or a submission waiting for review. A reviewed submission doesn't hold it, or it could never be deleted. A chat card for a deleted file says "This file was deleted".
+- **Not built yet:** the "new version" email and the in-app notice when someone is made an editor.
+
+## Artist workspace: four tabs (rev 9, 10 Nov 2026)
+
+- **Four tabs with a section switch:** Overview (Summary · Stats), Plan (Outcome and stages · To-dos), Work (Submissions · Gigs) and Files (Library · Brand kit). Each tab reopens on the section last used. Counts show open to-dos and submissions waiting (coral, because they wait on Blueprint).
+- **Chat is a side panel,** opened from a chat icon on the artist's name line, with "Open in Chat". Full screen on phones. The unread count on that icon isn't built.
+- **Assets are merged into Library** with a Type filter (All files · Documents · Assets). Assets were already files with extra details, so nothing about storage changed.
+- The plan's own sections (Outcome & measures, stages, Timeline, Alignment, History) keep their own row inside "Outcome and stages".
 
 ## Gig photos and videos (10 Nov 2026)
 
@@ -447,3 +520,12 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **To-do emails meant for Blueprint** go to the to-do's Blueprint person (their profile email), else the shared address as before.
 - **Fix on the way:** the API notifier lacked `dynamodb:Query` and `DeleteItem`, which push delivery already needed. It now has `GetItem`, `Query` and `DeleteItem` on the main table.
 - **No new AWS resources:** policy statements, an environment variable and event patterns only.
+
+## Releases and the phone menu (1.0.0 and 1.1.0, 11 Nov 2026)
+
+- **Semantic versions.** `VERSION` is the single source of truth and `CHANGELOG.md` holds a note per release, written for artists and the Blueprint team. Staging shows `beta-X.Y.Z`, production `X.Y.Z`, local and CI builds `dev-X.Y.Z`. The process is in [releases.md](releases.md).
+- **What's new** shows the current release's note once per device after sign-in and consent (`bmg-seen-release` in local storage), with up to four earlier releases below. Staging and production share the number, so a note seen on beta isn't shown again on production on the same device.
+- **The version is recorded at deploy** in SSM (`/bmg/<env>/foundation/release`) and the `DeployedRelease` output, checked by the smoke test and shown by `blueprint status`.
+- **No git tags:** the deploy workflow's token is read-only by design.
+- **The artist app has no menu,** so it has no version footer; the pop-up still shows.
+- **Phone menu (1.1.0):** Blueprint's phone menu opens with "Needs attention": Tasks & to-dos (always, with the overdue count) plus the three busiest of unread Chat, the open review queue and gigs that need help (ties go Chat → To-dos → Review queue → Gigs). Everything else sits under headings that start folded every time the menu opens; a folded heading shows how much is waiting and a dot when the current page is inside. Pinned items aren't repeated. Headings are buttons with `aria-expanded`, and the menu's focus trap still holds. The desktop sidebar is unchanged.
