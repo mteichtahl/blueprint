@@ -14,6 +14,15 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.3.1 — 2026-11-11
+
+The top of the app on a phone is one solid navy.
+
+### Fixed
+
+- On a phone, the strip behind the clock and battery at the very top no longer
+  fades from grey to navy; it is the same solid navy as the header.
+
 ## 1.3.0 — 2026-11-11
 
 Overview is back at the top of the phone menu.
