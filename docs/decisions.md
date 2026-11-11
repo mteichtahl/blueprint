@@ -505,6 +505,12 @@ Spec: section 17 of the project doc `BMG_Rev11_Meeting_Notes.md`.
 - **A transcript made before the artist opted out stays visible**: the tab is only greyed when there's nothing in it. (The spec's section 17 read as greying it regardless; hiding kept content seemed wrong.)
 - **Only an explicit `canTranscribe: false` blocks** in the web app, so a response from an older API mid-deploy leaves the screens as they were.
 
+## Meeting notes: recovering after the AI opt-out (rev 11 fix, 11 Nov 2026)
+
+- **Meetings saved as `off`** (before the account's AI services opt-out was in place) used to stay that way, showing the old "switched off" message, until someone pressed **Transcribe now**. The worker now runs every 15 minutes (EventBridge schedule in the meetings stack) and, once the account is opted out, moves each `off` meeting with a recording back to `uploading` and puts `meeting.transcribe` on the bus, the same path as Transcribe now. `no-ai` meetings (an artist turned AI off) are never retried this way. Needs `dynamodb:Query` on the main table's GSI3.
+- **Only a "yes, opted out" is cached** (10 minutes). A "no" was cached too, so a warm worker kept refusing for up to 10 minutes after the policy took effect. A "no" now also logs `meetings.opt-out.not-opted-out` (whether AWS returned a policy at all), next to the existing `meetings.opt-out.unknown` for errors.
+- The `off` message now says it will be transcribed automatically once the opt-out takes effect.
+
 ## Plan owner and plan update notifications (rev 12, 11 Nov 2026)
 
 Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, notifications, screens).

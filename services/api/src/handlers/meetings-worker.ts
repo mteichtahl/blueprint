@@ -39,10 +39,12 @@ import {
 } from '../meetings/plan-changes.ts';
 import { loadPlan } from '../workspace/plan-store.ts';
 import { storedKey, type FileRecord } from '../files/model.ts';
-import { env } from '../lib.ts';
+import { QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { db, env } from '../lib.ts';
 import {
   artistsInvolved,
   jobName,
+  MEETINGS_GSI3PK,
   mediaFormat,
   meetingFromJob,
   segmentsFromTranscribe,
@@ -101,12 +103,18 @@ type WorkerEvent =
       detail: { meetingId?: string; artistId?: string; requestId?: string };
     }
   | {
+      source: 'aws.events';
+      'detail-type': 'Scheduled Event';
+      detail: Record<string, never>;
+    }
+  | {
       source: 'aws.transcribe';
       'detail-type': 'Transcribe Job State Change';
       detail: { TranscriptionJobName?: string; TranscriptionJobStatus?: string };
     };
 
 export async function handler(event: WorkerEvent): Promise<void> {
+  if (event.source === 'aws.events') return retryWaiting();
   if (event.source === 'aws.transcribe') {
     return finish(event.detail.TranscriptionJobName ?? '', event.detail.TranscriptionJobStatus);
   }
@@ -142,10 +150,12 @@ export async function handler(event: WorkerEvent): Promise<void> {
   return start(m);
 }
 
-// ── AWS AI opt-out: checked before every job, cached briefly ──
-let optOut: { at: number; ok: boolean } | undefined;
+// ── AWS AI opt-out: checked before every job ──
+// Only a yes is remembered (10 minutes). A no is asked again next time, so
+// meetings work as soon as `blueprint ai opt-out` takes effect.
+let optOut: { at: number } | undefined;
 async function awsOptedOut(): Promise<boolean> {
-  if (optOut && Date.now() - optOut.at < 10 * 60_000) return optOut.ok;
+  if (optOut && Date.now() - optOut.at < 10 * 60_000) return true;
   let ok = false;
   try {
     const res = await orgs.send(
@@ -155,12 +165,69 @@ async function awsOptedOut(): Promise<boolean> {
       }),
     );
     ok = optedOutOf('transcribe', res.EffectivePolicy?.PolicyContent);
+    if (!ok) log('meetings.opt-out.not-opted-out', { hasPolicy: !!res.EffectivePolicy });
   } catch (err) {
     // Not in an organization, no policy, or no answer: transcription stays off.
     log('meetings.opt-out.unknown', { error: (err as Error).name });
   }
-  optOut = { at: Date.now(), ok };
+  optOut = ok ? { at: Date.now() } : undefined;
   return ok;
+}
+
+/** For tests: forget the remembered answer. */
+export const resetOptOutCache = () => (optOut = undefined);
+
+/**
+ * Every 15 minutes: once the account is opted out, meetings that were saved
+ * while it wasn't (`off`) are sent for transcription, the same way
+ * **Transcribe now** does. Meetings an artist turned AI off for (`no-ai`)
+ * are left alone.
+ */
+async function retryWaiting(): Promise<void> {
+  if (!(await awsOptedOut())) return;
+  let from: Record<string, unknown> | undefined;
+  let retried = 0;
+  do {
+    const res = await db.send(
+      new QueryCommand({
+        TableName: env('MAIN_TABLE'),
+        IndexName: 'GSI3',
+        KeyConditionExpression: 'GSI3PK = :pk',
+        FilterExpression: '#st = :off',
+        ExpressionAttributeNames: { '#st': 'status' },
+        ExpressionAttributeValues: { ':pk': MEETINGS_GSI3PK, ':off': 'off' },
+        ...(from ? { ExclusiveStartKey: from } : {}),
+      }),
+    );
+    for (const m of (res.Items ?? []) as Meeting[]) {
+      if (!m.audioFileId) continue;
+      const moved = await updateMeeting(
+        m,
+        { status: 'uploading' },
+        { expect: { status: 'off' }, remove: ['statusReason'] },
+      );
+      if (!moved) continue;
+      await events.send(
+        new PutEventsCommand({
+          Entries: [
+            {
+              EventBusName: env('EVENT_BUS'),
+              Source: 'bmg.meetings',
+              DetailType: 'meeting.transcribe',
+              Detail: JSON.stringify({
+                id: randomUUID(),
+                meetingId: m.meetingId,
+                ...(m.artistId ? { artistId: m.artistId } : {}),
+              }),
+            },
+          ],
+        }),
+      );
+      retried++;
+    }
+    from = res.LastEvaluatedKey;
+  } while (from);
+  if (retried) log('meetings.retried-after-opt-out', { count: retried });
 }
 
 async function processed(m: Meeting, outcome: 'ready' | 'failed' | 'no-ai' | 'off') {

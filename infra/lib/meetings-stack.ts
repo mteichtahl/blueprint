@@ -2,7 +2,7 @@ import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
 import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
-import { Rule, type IEventBus } from 'aws-cdk-lib/aws-events';
+import { Rule, Schedule, type IEventBus } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Key, type IKey } from 'aws-cdk-lib/aws-kms';
@@ -132,6 +132,8 @@ export class MeetingsStack extends BmgStack {
       ],
       [main],
     );
+    // Meetings saved before the AI opt-out took effect, retried every 15 minutes.
+    allow('WaitingMeetings', ['dynamodb:Query'], [`${main}/index/GSI3`]);
     allow('ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
     // Blueprint-only meetings: their recordings (library/) and content (meetings/) in org-data.
     const libraryRecordings = `arn:aws:s3:::${bucket('org-data')}/library/*`;
@@ -271,6 +273,12 @@ export class MeetingsStack extends BmgStack {
         },
       },
       targets: [target()],
+    });
+    new Rule(this, 'RetryAfterOptOut', {
+      description:
+        'Every 15 minutes: send meetings saved before the AWS AI opt-out took effect for transcription',
+      schedule: Schedule.rate(Duration.minutes(15)),
+      targets: [new LambdaFunction(fn, { retryAttempts: 0 })],
     });
     new Alarm(this, 'MeetingsFailures', {
       alarmName: `${p}-meetings-failures`,

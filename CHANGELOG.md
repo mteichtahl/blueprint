@@ -14,6 +14,19 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.2.1 — 2026-11-11
+
+Meetings recorded before transcription was set up now get transcribed.
+
+### Fixed
+
+- Meetings saved while transcription was waiting for the AWS AI opt-out are
+  now transcribed automatically within 15 minutes of `blueprint ai opt-out`
+  taking effect. Before, they stayed "Audio only" until someone pressed
+  Transcribe now.
+- New recordings are transcribed as soon as the opt-out takes effect, instead
+  of up to 10 minutes later.
+
 ## 1.2.0 — 2026-11-11
 
 Meetings now say clearly when they can't be transcribed because an artist has
