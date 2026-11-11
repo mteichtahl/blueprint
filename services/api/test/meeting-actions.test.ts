@@ -95,7 +95,7 @@ describe('looking again', () => {
 });
 
 describe('what Do it calls', () => {
-  const meeting = { title: 'Meeting with Chloe Poli', date: '2026-11-11' };
+  const meeting = { title: 'Meeting with Chloe Poli', date: '2026-11-11', shared: true };
   it('adds a to-do through the normal API, noting the meeting, without a past due date', () => {
     const todo: MeetingAction = {
       id: 'a1',
@@ -113,6 +113,22 @@ describe('what Do it calls', () => {
         notes: 'From the meeting “Meeting with Chloe Poli”, 2026-11-11.',
       },
     });
+  });
+
+  it('keeps a to-do BMG-only when the meeting isn’t shared with the artist', () => {
+    const todo: MeetingAction = {
+      id: 'a1',
+      kind: 'todo',
+      why: 'x',
+      refs: [],
+      status: 'waiting',
+      todo: { title: 'Send stems' },
+    };
+    const step = stepFor(todo, 'art_aaaaaaaaaaaa', { ...meeting, shared: false }, '2026-11-11');
+    expect(step.body).toMatchObject({ bmgOnly: true });
+    expect(stepFor(todo, 'art_aaaaaaaaaaaa', meeting, '2026-11-11').body).not.toHaveProperty(
+      'bmgOnly',
+    );
   });
 
   it('creates a gig as an idea, with staff’s edits re-checked', () => {

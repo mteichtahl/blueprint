@@ -133,7 +133,9 @@ describe('actions from a meeting', () => {
     expect(screen.getByText('Add to-do')).toBeTruthy();
     expect(screen.getByText('Create gig')).toBeTruthy();
     expect(screen.getByText(/I’ll send the stems Friday/)).toBeTruthy();
-    expect(screen.getByText(/added to Chloe Poli’s to-dos/)).toBeTruthy();
+    // The meeting isn't shared with Chloe, so its to-dos are BMG only.
+    expect(screen.getByText(/added to Chloe Poli’s to-dos \(BMG only\)/)).toBeTruthy();
+    expect(screen.getByText(/its to-dos are BMG only/)).toBeTruthy();
   });
 
   it('Do it asks the server to carry the action out', async () => {

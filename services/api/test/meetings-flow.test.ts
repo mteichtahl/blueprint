@@ -725,7 +725,11 @@ describe('actions from a meeting (Do it, Ignore)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toMatch(new RegExp(`/artists/${ARTIST}/todos$`));
     expect(calls[0]!.init.method).toBe('POST');
-    expect(JSON.parse(calls[0]!.init.body)).toMatchObject({ title: 'Send the stems' });
+    // The meeting isn't shared with the artist, so neither is the to-do.
+    expect(JSON.parse(calls[0]!.init.body)).toMatchObject({
+      title: 'Send the stems',
+      bmgOnly: true,
+    });
     expect((await content(id)).find((a) => a.id === 'a1')).toMatchObject({
       status: 'done',
       resultId: 't1',

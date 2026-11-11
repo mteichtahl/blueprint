@@ -519,7 +519,7 @@ Spec: the project doc `BMG_Meeting_Actions.md`.
 - **When:** the worker starts an `actions` AI job (prompt `meetings.actions`, editable) as soon as a transcript is ready, as whoever recorded it, through the same `requestAi` path (AI choices checked, one job at a time). **Look again** reruns it: done, ignored and in-progress actions keep their ids; new ones that repeat a decided title are dropped.
 - **Do it** (`POST …/actions/{id}/do`) claims the action (`waiting` → `doing`, so two presses can't make two to-dos), then makes one call to the app's own API with the caller's token, like the assistant's Do it: `POST /artists/{id}/todos` or `POST /artists/{id}/gigs` (status `idea`). The normal rules, notifications and audit apply. Success → `done` with the new id; a refusal → back to `waiting` with the API's reason (HTTP 422). A `doing` older than 2 minutes counts as free again. Staff edits are re-validated on the server.
 - **Ignore / Bring back** (`PATCH …/actions`). `actionsWaiting` on the meeting drives the coral count on the tab (plus one while plan suggestions wait).
-- To-dos made this way have normal visibility, like **Create to-dos**: the artist sees them. Past due dates are dropped. Notes end with "From the meeting …".
+- **To-dos follow the meeting's sharing:** from a meeting that isn't shared with the artist (the default), they're BMG-only (`bmgOnly: true`); from a shared meeting, the artist sees them. Summary's **Create to-dos** does the same. Gigs are always shared, as for any gig Blueprint adds. Past due dates are dropped. Notes end with "From the meeting …".
 - No new routes or AWS resources (it's all under `/meetings/{proxy+}`).
 
 ## Plan owner and plan update notifications (rev 12, 11 Nov 2026)

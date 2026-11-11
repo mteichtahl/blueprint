@@ -188,7 +188,7 @@ const fromLine = (meeting: { title: string; date: string }) =>
 export function stepFor(
   a: MeetingAction,
   artistId: string,
-  meeting: { title: string; date: string },
+  meeting: { title: string; date: string; shared: boolean },
   today: string,
 ): { method: 'POST'; path: string; body: Record<string, unknown> } {
   const notes = (own: string | undefined) =>
@@ -202,6 +202,8 @@ export function stepFor(
         notes: notes(a.todo.notes),
         // A date already gone isn't a due date any more.
         due: a.todo.due && a.todo.due >= today ? a.todo.due : undefined,
+        // From a meeting the artist can't see: the to-do stays BMG-only too.
+        bmgOnly: meeting.shared ? undefined : true,
       }),
     };
   }

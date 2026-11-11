@@ -130,7 +130,12 @@ export async function doAction(
   let resultId: string | undefined;
   try {
     const res = await call(
-      stepFor(claimed, m.artistId, { title: m.title, date: meetingDate(m.startedAt) }, today),
+      stepFor(
+        claimed,
+        m.artistId,
+        { title: m.title, date: meetingDate(m.startedAt), shared: m.shared },
+        today,
+      ),
     );
     ok = res.ok;
     if (ok) resultId = resultIdFrom(claimed.kind, res.out);

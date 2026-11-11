@@ -1543,6 +1543,7 @@ function ActionsSection(
         <p className="src m-0">
           Things this meeting agreed that the app can do for {artistName}. Nothing happens until you
           press Do it.
+          {!m.shared && ' This meeting isn’t shared with them, so its to-dos are BMG only.'}
         </p>
         {aiOff && !items.length && <Notice>{aiOff.notice}</Notice>}
         {ai.working === 'actions' && <Notice>{WORKING.actions}</Notice>}
@@ -1599,7 +1600,7 @@ function ActionsSection(
                   {ACTION_LABEL[a.kind]}: <b>{a.todo?.title ?? a.gig?.title}</b>
                   {a.status === 'done' &&
                     (a.kind === 'todo'
-                      ? ` · added to ${artistName}’s to-dos`
+                      ? ` · added to ${artistName}’s to-dos${m.shared ? '' : ' (BMG only)'}`
                       : ` · added to ${artistName}’s gigs as an idea`)}
                 </span>
                 {a.status === 'ignored' && (
@@ -1772,10 +1773,14 @@ function SummarySection(ctx: Ctx) {
           title: a.text.slice(0, 200),
           notes: `From the meeting “${m.title}”${a.owner ? ` (${a.owner})` : ''}`.slice(0, 2000),
           ...(a.due && a.due >= new Date().toISOString().slice(0, 10) ? { due: a.due } : {}),
+          // From a meeting the artist can't see: the to-do stays BMG-only too.
+          ...(m.shared ? {} : { bmgOnly: true }),
         });
         n++;
       }
-      setMade(`${n} to-do${n === 1 ? '' : 's'} added to the artist’s list.`);
+      setMade(
+        `${n} to-do${n === 1 ? '' : 's'} added to the artist’s list${m.shared ? '' : ', BMG only (this meeting isn’t shared with them)'}.`,
+      );
       setTicked(new Set());
     } catch (e) {
       setTodoError(`${n ? `${n} added, then: ` : ''}${problemText(e)}`);

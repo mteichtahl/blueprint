@@ -26,6 +26,9 @@ Meetings now list what they agreed, ready to add to the app with one tap.
 - Each action has **Do it** and **Ignore**. Do it adds the to-do to the
   artist's list, or the gig to their gigs as an idea. You can **Edit** the
   wording or dates first. Nothing is added until you press Do it.
+- To-dos from a meeting that isn't shared with the artist are BMG only, so
+  the artist doesn't see them. This also applies to **Create to-dos** in the
+  meeting notes.
 - The plan update opens the usual review, so each plan change is still
   checked before the plan changes.
 - Ignored actions can be brought back, and **Look again** finds new ones
