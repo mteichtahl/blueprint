@@ -453,17 +453,20 @@ export class ApiStack extends BmgStack {
     // Who can own a plan: the admin and staff groups (rev 12).
     allow(workspace, 'ListPeople', ['cognito-idp:ListUsersInGroup'], [props.userPool.userPoolArn]);
     const reminderSchedules = `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/todo-*`;
+    // Plan update roll-ups (rev 12): one 10-minute one-off per artist and editor.
+    const digestSchedules = `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/plan-*`;
     allow(
       workspace,
       'ReminderSchedules',
       ['scheduler:CreateSchedule', 'scheduler:UpdateSchedule', 'scheduler:DeleteSchedule'],
-      [reminderSchedules],
+      [reminderSchedules, digestSchedules],
     );
     allow(workspace, 'PassReminderRole', ['iam:PassRole'], [reminderRole.roleArn]);
     acknowledge(
       workspace.role!,
-      "One reminder schedule per to-do, named todo-<artistId>-<todoId>, in this environment's reminder group.",
+      "One reminder schedule per to-do, named todo-<artistId>-<todoId>, and one plan update roll-up per artist and editor, named plan-<hash>, in this environment's reminder group.",
       `AwsSolutions-IAM5[Resource::${reminderSchedules}]`,
+      `AwsSolutions-IAM5[Resource::${digestSchedules}]`,
     );
     // Roster (GSI1) and all-artist to-dos (GSI2); GSI3 is the review queue (review function).
     allow(
@@ -798,7 +801,20 @@ export class ApiStack extends BmgStack {
       ['cognito-idp:ListUsersInGroup'],
       [props.userPool.userPoolArn],
     );
-    allow(notifier, 'WriteNotifications', ['dynamodb:PutItem', 'dynamodb:BatchGetItem'], [main]);
+    allow(
+      notifier,
+      'WriteNotifications',
+      [
+        'dynamodb:PutItem',
+        'dynamodb:BatchGetItem',
+        // Push subscriptions (read, and dropped when gone), and plan roll-ups and
+        // handover summaries (plan, history, to-dos, submissions; rev 12).
+        'dynamodb:GetItem',
+        'dynamodb:Query',
+        'dynamodb:DeleteItem',
+      ],
+      [main],
+    );
     mailQueue.grantSendMessages(notifier);
     acknowledge(
       notifier.role!,
@@ -830,6 +846,9 @@ export class ApiStack extends BmgStack {
           'connector.needsReauth',
           'meeting.processed',
           'plan.updated',
+          // Rev 12: the 10-minute roll-up schedule, and a plan changing owner.
+          'plan.digest',
+          'plan.handover',
         ],
       },
       targets: [

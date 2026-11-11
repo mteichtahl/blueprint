@@ -21,6 +21,8 @@ export interface TodoItem {
   remindAt?: string;
   done?: boolean;
   visibility?: 'normal' | 'bmg-only';
+  /** The Blueprint person looking after it (rev 12): the plan owner. */
+  bmgOwnerSub?: string;
 }
 
 export interface TodoUpdated {

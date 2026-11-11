@@ -80,14 +80,9 @@ describe('to-dos that move with the plan', () => {
 });
 
 describe('owner change in the history', () => {
-  it('says who handed over to whom, and what moved', () => {
-    expect(ownerChangeLine('Kyra', 'Sam', 4)).toBe(
-      'Changed the plan owner from Kyra to Sam (4 open to-dos moved)',
-    );
-    expect(ownerChangeLine('Kyra', 'Sam', 1)).toBe(
-      'Changed the plan owner from Kyra to Sam (1 open to-do moved)',
-    );
-    expect(ownerChangeLine(undefined, 'Sam', 0)).toBe('Set the plan owner to Sam');
+  it('says who handed over to whom, without counting to-dos (artists read it)', () => {
+    expect(ownerChangeLine('Kyra', 'Sam')).toBe('Changed the plan owner from Kyra to Sam');
+    expect(ownerChangeLine(undefined, 'Sam')).toBe('Set the plan owner to Sam');
   });
 });
 

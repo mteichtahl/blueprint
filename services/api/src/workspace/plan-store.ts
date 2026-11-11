@@ -81,6 +81,8 @@ export async function savePlan(input: {
   lead?: string[];
   /** A new owner (rev 12). Otherwise the plan keeps the one it has. */
   owner?: string;
+  /** The handover note for the new owner; kept on the plan, off the event bus. */
+  ownerNote?: string;
   /** Written in the same transaction, e.g. to-dos moving to a new owner (rev 12). */
   extra?: NonNullable<TransactWriteCommandInput['TransactItems']>;
 }): Promise<{ version: number; at: string; changes: string[]; changeId?: string }> {
@@ -118,6 +120,14 @@ export async function savePlan(input: {
                 // Kept on every save, including meeting updates (rev 12).
                 ...(ownerSub ? { ownerSub } : {}),
                 ...(ownerSince ? { ownerSince } : {}),
+                // Each handover has its own note (or none).
+                ...(ownerChanged
+                  ? input.ownerNote
+                    ? { handoverNote: input.ownerNote }
+                    : {}
+                  : current?.handoverNote
+                    ? { handoverNote: current.handoverNote }
+                    : {}),
                 updatedBy: principal.sub,
               },
               ConditionExpression: from === 0 ? 'attribute_not_exists(PK)' : 'version = :v',

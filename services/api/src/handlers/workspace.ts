@@ -75,6 +75,8 @@ import {
   ownerChangeLine,
   ownerStatus,
   ownerView,
+  PLAN_DIGEST_MINUTES,
+  planDigestScheduleName,
 } from '../workspace/plan-owner.ts';
 import { people, type Person } from '../files/people.ts';
 import {
@@ -341,6 +343,45 @@ async function consentSummaries(artistIds: string[]) {
     }
   }
   return out;
+}
+
+/**
+ * Plan update notifications (rev 12): the first save by a person opens a
+ * 10-minute window with a one-off schedule that puts `plan.digest` on the
+ * bus; the notifier then tells the owner and the artist everything that
+ * person changed in it. A save while the window is open finds the schedule
+ * already there. Never fails the save.
+ */
+async function scheduleDigest(artistId: string, bySub: string, since: string) {
+  const fireAt = new Date(Date.now() + PLAN_DIGEST_MINUTES * 60_000).toISOString();
+  try {
+    await scheduler.send(
+      new CreateScheduleCommand({
+        Name: planDigestScheduleName(artistId, bySub),
+        GroupName: env('REMINDER_GROUP'),
+        ScheduleExpression: `at(${fireAt.slice(0, 19)})`,
+        ScheduleExpressionTimezone: 'UTC',
+        FlexibleTimeWindow: { Mode: 'OFF' },
+        ActionAfterCompletion: 'DELETE',
+        Target: {
+          Arn: env('EVENT_BUS_ARN'),
+          RoleArn: env('REMINDER_ROLE_ARN'),
+          EventBridgeParameters: { DetailType: 'plan.digest', Source: 'bmg.workspace' },
+          Input: JSON.stringify({ artistId, bySub, since }),
+          RetryPolicy: { MaximumRetryAttempts: 10, MaximumEventAgeInSeconds: 3600 },
+        },
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConflictException) return;
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'plan.digestNotScheduled',
+        name: (err as Error).name,
+      }),
+    );
+  }
 }
 
 /** Every to-do in an artist's workspace (the TODO# prefix holds no comments). */
@@ -642,7 +683,8 @@ export const handler = handle(async (event) => {
         ...(ownerChanged
           ? {
               owner: ownerSub,
-              lead: [ownerChangeLine(previous, owner!.displayName, moving.length)],
+              ...(body.handoverNote ? { ownerNote: body.handoverNote } : {}),
+              lead: [ownerChangeLine(previous, owner!.displayName)],
               extra: moving.slice(0, MAX_TODOS_IN_MOVE).map(moveItem),
             }
           : {}),
@@ -657,6 +699,18 @@ export const handler = handle(async (event) => {
       }
       if (ownerChanged && current) {
         await audit(event, 'plan.owner', 'success', { artistId, moved: moving.length });
+      }
+      // The owner and the artist hear about it, rolled up over 10 minutes (rev 12).
+      if (saved.changeId) await scheduleDigest(artistId, principal.sub, saved.at);
+      // The new owner gets a handover summary (also for a new plan someone else will own).
+      if (ownerChanged && (current || ownerSub !== principal.sub)) {
+        await domainEvent('plan.handover', {
+          artistId,
+          ...(current?.ownerSub ? { fromSub: current.ownerSub } : {}),
+          toSub: ownerSub,
+          bySub: principal.sub,
+          moved: moving.length,
+        });
       }
       const next = { ...content, version: saved.version };
       return json(200, {
@@ -817,6 +871,7 @@ export const handler = handle(async (event) => {
           throw err;
         }
         result.added.push(artistId);
+        await scheduleDigest(artistId, principal.sub, at);
       }
       return json(200, result);
     }
