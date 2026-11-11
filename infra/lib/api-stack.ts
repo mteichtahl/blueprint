@@ -181,6 +181,8 @@ export class ApiStack extends BmgStack {
       }),
     );
     const workspace = fn('Workspace', 'workspace', 'artists, plans and to-dos', {
+      // Plan owners (rev 12): the Blueprint team, from the user pool groups.
+      USER_POOL_ID: props.userPool.userPoolId,
       EVENT_BUS_ARN: props.bus.eventBusArn,
       REMINDER_GROUP: reminderGroup.name!,
       REMINDER_ROLE_ARN: reminderRole.roleArn,
@@ -448,6 +450,8 @@ export class ApiStack extends BmgStack {
     );
     // To-do edits are announced on the bus so the notifier can tell the right person.
     putEvents(workspace);
+    // Who can own a plan: the admin and staff groups (rev 12).
+    allow(workspace, 'ListPeople', ['cognito-idp:ListUsersInGroup'], [props.userPool.userPoolArn]);
     const reminderSchedules = `arn:aws:scheduler:${this.region}:${this.account}:schedule/${p}-reminders/todo-*`;
     allow(
       workspace,

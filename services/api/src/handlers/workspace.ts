@@ -66,7 +66,17 @@ import {
   publicChange,
   type PlanChange,
 } from '../workspace/plan-history.ts';
-import { changeEntry, planConflict, savePlan } from '../workspace/plan-store.ts';
+import { changeEntry, loadPlan, planConflict, savePlan } from '../workspace/plan-store.ts';
+import {
+  canOwnPlan,
+  MAX_TODOS_IN_MOVE,
+  movesWithOwner,
+  ownerCandidates,
+  ownerChangeLine,
+  ownerStatus,
+  ownerView,
+} from '../workspace/plan-owner.ts';
+import { people, type Person } from '../files/people.ts';
 import {
   audit,
   authContext,
@@ -333,6 +343,66 @@ async function consentSummaries(artistIds: string[]) {
   return out;
 }
 
+/** Every to-do in an artist's workspace (the TODO# prefix holds no comments). */
+async function allTodos(artistId: string): Promise<Todo[]> {
+  const out: Todo[] = [];
+  let ExclusiveStartKey: Record<string, unknown> | undefined;
+  do {
+    const res = await db.send(
+      new QueryCommand({
+        TableName: table(),
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :todo)',
+        ExpressionAttributeValues: { ':pk': artistPk(artistId), ':todo': 'TODO#' },
+        ExclusiveStartKey,
+      }),
+    );
+    out.push(...((res.Items ?? []) as Todo[]));
+    ExclusiveStartKey = res.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return out;
+}
+
+/**
+ * The Blueprint team, for plan owners (rev 12). If the user pool can't be
+ * read, plans still load: owners just show as unknown.
+ */
+const team = () => people().catch(() => [] as Person[]);
+
+/** Owner as shown; with no team list, a plan with an owner isn't flagged. */
+function ownerFor(ownerSub: string | undefined, everyone: Person[], artistId: string) {
+  if (everyone.length === 0) return { owner: null, ownerNeeded: !ownerSub };
+  return ownerStatus(ownerSub, everyone, artistId);
+}
+
+/** Each listed artist's plan owner, for Studio HQ and Artists & access (BMG only). */
+async function planOwners(artistIds: string[]) {
+  const plans = new Map<string, { ownerSub?: string }>();
+  for (let i = 0; i < artistIds.length; i += 100) {
+    const res = await db.send(
+      new BatchGetCommand({
+        RequestItems: {
+          [table()]: {
+            Keys: artistIds.slice(i, i + 100).map((id) => ({ PK: artistPk(id), SK: PLAN_SK })),
+            ProjectionExpression: 'artistId, ownerSub',
+          },
+        },
+      }),
+    );
+    for (const item of res.Responses?.[table()] ?? []) {
+      plans.set(String(item.artistId), { ownerSub: item.ownerSub as string | undefined });
+    }
+  }
+  const everyone = plans.size ? await team() : [];
+  return Object.fromEntries(
+    artistIds.map((id) => {
+      const plan = plans.get(id);
+      if (!plan) return [id, { hasPlan: false, planOwner: null, planOwnerNeeded: false }];
+      const s = ownerFor(plan.ownerSub, everyone, id);
+      return [id, { hasPlan: true, planOwner: s.owner, planOwnerNeeded: s.ownerNeeded }];
+    }),
+  );
+}
+
 const publicProfile = (p: Record<string, unknown>) => ({
   artistId: p.artistId,
   displayName: p.displayName,
@@ -373,8 +443,9 @@ export const handler = handle(async (event) => {
     case 'GET /artists': {
       const items = await roster(principal);
       if (principal.role === 'artist') return json(200, { artists: items.map(publicProfile) });
-      // Artists & access: each artist's terms acceptance and AI status.
-      const consent = await consentSummaries(items.map((i) => String(i.artistId)));
+      // Artists & access: each artist's terms acceptance and AI status, and (rev 12) plan owner.
+      const ids = items.map((i) => String(i.artistId));
+      const [consent, owners] = await Promise.all([consentSummaries(ids), planOwners(ids)]);
       return json(200, {
         artists: items.map((i) => ({
           ...publicProfile(i),
@@ -383,6 +454,7 @@ export const handler = handle(async (event) => {
             termsAcceptedAt: null,
             aiOptIn: null,
           }),
+          ...owners[String(i.artistId)],
         })),
       });
     }
@@ -480,12 +552,22 @@ export const handler = handle(async (event) => {
       const res = await db.send(
         new GetCommand({ TableName: table(), Key: { PK: artistPk(artistId), SK: PLAN_SK } }),
       );
-      const plan = (res.Item as Plan | undefined) ?? templatePlan();
+      const stored = res.Item as Plan | undefined;
+      const plan = stored ?? templatePlan();
+      const bmg = principal.role !== 'artist';
       // BMG edits plans, so only BMG gets the stages it can add to this one.
-      const stages =
-        principal.role === 'artist'
-          ? []
-          : (await listStages()).filter((st) => stageAppliesTo(st, artistId)).map(publicStage);
+      const stages = !bmg
+        ? []
+        : (await listStages()).filter((st) => stageAppliesTo(st, artistId)).map(publicStage);
+      // Plan owner (rev 12). BMG also gets who could own it and what would move.
+      const everyone = await team();
+      const status = stored
+        ? ownerFor(stored.ownerSub, everyone, artistId)
+        : { owner: null, ownerNeeded: false };
+      const movableTodos =
+        bmg && stored
+          ? (await allTodos(artistId)).filter((t) => movesWithOwner(t, stored.ownerSub)).length
+          : 0;
       return json(200, {
         plan: {
           outcome: plan.outcome,
@@ -498,6 +580,10 @@ export const handler = handle(async (event) => {
         phaseLibrary: PHASE_LIBRARY,
         stages,
         exists: !!res.Item,
+        owner: status.owner,
+        ownerSince: stored?.ownerSince ?? null,
+        ownerNeeded: bmg && status.ownerNeeded,
+        ...(bmg ? { ownerCandidates: ownerCandidates(everyone, artistId), movableTodos } : {}),
       });
     }
 
@@ -514,9 +600,71 @@ export const handler = handle(async (event) => {
         throw new HttpError(409, 'Someone else changed this plan. Reload and try again.');
       }
       const content = { outcome: body.outcome, measures: body.measures, phases: body.phases };
-      const saved = await savePlan({ principal, artistId, current, content, kind: 'edited' });
+
+      // Every plan has a Blueprint owner (rev 12): required for a new plan and
+      // for one without an owner; a different one hands the plan over.
+      const everyone = await people();
+      const ownerSub = body.ownerSub ?? current?.ownerSub;
+      if (!ownerSub) throw new HttpError(400, 'Choose a plan owner');
+      const owner = everyone.find((p) => p.sub === ownerSub);
+      if (!canOwnPlan(owner, artistId)) {
+        throw new HttpError(
+          400,
+          body.ownerSub
+            ? 'The plan owner must be a Blueprint admin, or staff assigned to this artist'
+            : "This plan's owner can't look after it any more. Choose a new plan owner.",
+        );
+      }
+      const ownerChanged = ownerSub !== current?.ownerSub;
+      // The previous owner's open to-dos (and unlooked-after ones) move with the plan.
+      const moving =
+        ownerChanged && current
+          ? (await allTodos(artistId)).filter((t) => movesWithOwner(t, current.ownerSub))
+          : [];
+      const moveItem = (t: Todo) => ({
+        Update: {
+          TableName: table(),
+          Key: { PK: artistPk(artistId), SK: todoSk(t.todoId) },
+          UpdateExpression: 'SET bmgOwnerSub = :o',
+          ConditionExpression: 'attribute_exists(PK)',
+          ExpressionAttributeValues: { ':o': ownerSub },
+        },
+      });
+      const previous = current?.ownerSub
+        ? (everyone.find((p) => p.sub === current.ownerSub)?.displayName ?? 'a former team member')
+        : undefined;
+      const saved = await savePlan({
+        principal,
+        artistId,
+        current,
+        content,
+        kind: 'edited',
+        ...(ownerChanged
+          ? {
+              owner: ownerSub,
+              lead: [ownerChangeLine(previous, owner!.displayName, moving.length)],
+              extra: moving.slice(0, MAX_TODOS_IN_MOVE).map(moveItem),
+            }
+          : {}),
+      });
+      // More to-dos than fit in one transaction: the rest follow straight after.
+      for (const t of moving.slice(MAX_TODOS_IN_MOVE)) {
+        try {
+          await db.send(new UpdateCommand(moveItem(t).Update));
+        } catch (err) {
+          if ((err as Error).name !== 'ConditionalCheckFailedException') throw err;
+        }
+      }
+      if (ownerChanged && current) {
+        await audit(event, 'plan.owner', 'success', { artistId, moved: moving.length });
+      }
       const next = { ...content, version: saved.version };
-      return json(200, { version: next.version, gaps: alignmentGaps(next) });
+      return json(200, {
+        version: next.version,
+        gaps: alignmentGaps(next),
+        owner: ownerView(owner!),
+        moved: moving.length,
+      });
     }
 
     case 'GET /artists/{artistId}/plan/history': {
@@ -708,6 +856,8 @@ export const handler = handle(async (event) => {
       if (body.bmgOnly && principal.role === 'artist')
         throw new HttpError(403, 'Only Blueprint can add BMG-only to-dos');
       const todoId = newId();
+      // Looked after on Blueprint's side by the plan owner (rev 12).
+      const planOwner = (await loadPlan(artistId))?.ownerSub;
       const todo: Todo = withReminder(
         {
           todoId,
@@ -723,6 +873,7 @@ export const handler = handle(async (event) => {
           visibility: body.bmgOnly ? 'bmg-only' : 'normal',
           createdBy: principal.sub,
           createdAt: new Date().toISOString(),
+          ...(planOwner ? { bmgOwnerSub: planOwner } : {}),
         },
         true,
       );

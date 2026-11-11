@@ -64,10 +64,23 @@ export const PlanBody = z.object({
   phases: z.array(Phase).min(1).max(12),
   /** Optimistic concurrency: the version the editor started from (0 for a new plan). */
   version: z.number().int().min(0),
+  /**
+   * The plan's Blueprint owner (rev 12). Required for a new plan and when the
+   * plan has no owner yet; a different one hands the plan over.
+   */
+  ownerSub: z
+    .string()
+    .regex(/^[0-9a-f-]{36}$/, 'Choose a plan owner from the Blueprint team')
+    .optional(),
+  /** Shown to the new owner in the handover summary. */
+  handoverNote: z.string().trim().max(500).optional(),
 });
-export type Plan = Omit<z.infer<typeof PlanBody>, 'version'> & {
+export type Plan = Omit<z.infer<typeof PlanBody>, 'version' | 'ownerSub' | 'handoverNote'> & {
   version: number;
   updatedAt: string;
+  /** Rev 12. Plans from before then have none until someone picks one. */
+  ownerSub?: string;
+  ownerSince?: string;
 };
 
 /** Phase library from the plan templates screen. */
@@ -236,6 +249,12 @@ export interface Todo {
   createdAt: string;
   updatedAt?: string;
   updatedBy?: string;
+  /**
+   * The Blueprint person looking after this to-do (rev 12): the plan owner
+   * when it was made, and the new owner when the plan changes hands. Blueprint
+   * is told about the artist's changes through them.
+   */
+  bmgOwnerSub?: string;
 }
 
 /** Offset of `timeZone` from UTC at `instant`, in ms (positive east of UTC). */
