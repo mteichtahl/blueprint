@@ -36,6 +36,15 @@ Meetings now list what they agreed, ready to add to the app with one tap.
 - Ignored actions can be brought back, and **Look again** finds new ones
   without repeating what's already done.
 
+## 1.3.1 — 2026-11-11
+
+The top of the app on a phone is one solid navy.
+
+### Fixed
+
+- On a phone, the strip behind the clock and battery at the very top no longer
+  fades from grey to navy; it is the same solid navy as the header.
+
 ## 1.3.0 — 2026-11-11
 
 Overview is back at the top of the phone menu.
