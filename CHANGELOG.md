@@ -14,6 +14,21 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.1.0 — 2026-11-11
+
+The phone menu is shorter and puts what needs you first.
+
+### Improved
+
+- On a phone, the BMG menu opens with the three most urgent places at the top
+  under "Needs attention": unread chat, the review queue and gigs that need
+  help, with the busiest first.
+- Everything else sits under headings (Studio HQ, Artist workspaces, Shared
+  with artists, BMG only) that start folded each time the menu opens. Tap a
+  heading to open it; a folded heading shows how much is waiting inside and a
+  dot when the page you're on is in it.
+- The desktop sidebar is unchanged.
+
 ## 1.0.0 — 2026-11-11
 
 The first numbered release of the BMG App. Everything built so far is now

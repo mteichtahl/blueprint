@@ -178,6 +178,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           icon: 'mic',
           badge: gigHelp ? `${gigHelp} need help` : undefined,
           badgeTone: 'w',
+          urgent: { waiting: gigHelp, priority: 3 },
         },
         {
           id: 'artists',
@@ -201,6 +202,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           icon: 'chat',
           coral: true,
           badge: unread || undefined,
+          urgent: { waiting: unread, priority: 1 },
         },
         { id: 'todos', label: 'Tasks & to-dos', icon: 'todo' },
         { id: 'library', label: 'Document library', icon: 'folder' },
@@ -210,6 +212,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
           icon: 'music',
           badge: openReviews.length || undefined,
           badgeTone: 'w',
+          urgent: { waiting: openReviews.length, priority: 2 },
         },
         { id: 'insights', label: 'Insights', icon: 'chart' },
         { id: 'contacts', label: 'Contacts', icon: 'users' },
