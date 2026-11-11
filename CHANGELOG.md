@@ -14,6 +14,16 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.3.0 — 2026-11-11
+
+Overview is back at the top of the phone menu.
+
+### Improved
+
+- On a phone, **Overview** is the first item in the BMG menu, above "Needs
+  attention", so Studio HQ is always one tap away.
+- The folded "Studio HQ" heading is gone; Overview was the only thing in it.
+
 ## 1.2.1 — 2026-11-11
 
 Meetings recorded before transcription was set up now get transcribed.

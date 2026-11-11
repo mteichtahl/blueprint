@@ -304,8 +304,9 @@ export function BmgShell({
     };
   }, [open]);
 
-  // Phone menu: to-dos and the three most urgent items on top, everything else folded
-  // under headings that start collapsed each time the menu opens.
+  // Phone menu: the unheaded items (Overview) first, then to-dos and the three most
+  // urgent items, then everything else folded under headings that start collapsed
+  // each time the menu opens.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const openMenu = () => {
     setExpanded(new Set());
@@ -330,9 +331,14 @@ export function BmgShell({
       .slice(0, 3),
   ].sort(byUrgency);
   const pinnedIds = new Set(pinned.map((item) => item.id));
+  const lead = sections
+    .filter((section) => !section.label)
+    .flatMap((section) => section.items)
+    .filter((item) => !pinnedIds.has(item.id));
   const folded = sections
+    .filter((section): section is NavSection & { label: string } => !!section.label)
     .map((section) => ({
-      label: section.label ?? 'STUDIO HQ',
+      label: section.label,
       items: section.items.filter((item) => !pinnedIds.has(item.id)),
     }))
     .filter((section) => section.items.length > 0);
@@ -391,6 +397,11 @@ export function BmgShell({
       </button>
       {phone ? (
         <>
+          {lead.length > 0 && (
+            <div className="mb-1 flex flex-col gap-0.5">
+              {lead.map((item) => navButton(item, false))}
+            </div>
+          )}
           {pinned.length > 0 && (
             <div className="flex flex-col gap-0.5">
               <div className="navlabel">NEEDS ATTENTION</div>
