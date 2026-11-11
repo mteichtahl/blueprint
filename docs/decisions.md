@@ -15,7 +15,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 | D9  | External pen test      | No. Automated scans plus a policy review instead                                                                                                         |
 | D10 | GitHub                 | Personal account, public repo on GitHub Free, Dependabot allowed                                                                                         |
 | D11 | App email              | Sent as kyra@blueprintmusic.group through Gmail SMTP (smtp.gmail.com:587, STARTTLS) with a Gmail app password stored in Secrets Manager. No Google Cloud |
-| D12 | AWS accounts           | One account, no AWS Organizations. Permission boundary instead of SCPs                                                                                   |
+| D12 | AWS accounts           | One account. Permission boundary instead of SCPs. Organizations is on only to hold the AI services opt-out policy (rev 11, below)                        |
 | D13 | AI knowledge           | One Bedrock knowledge base per artist plus one for BMG. Artists never see each other's content; BMG sees everything except items marked private          |
 | D14 | Repository             | github.com/mteichtahl/blueprint                                                                                                                          |
 | D15 | AI prompts             | Every prompt editable by a BMG admin, versioned, with preview and rollback. Safety rules stay in code                                                    |
@@ -368,3 +368,12 @@ Spec: `claude/BMG_Rev10_Folders_and_Permissions.md` in the BMG App project. Thes
 - **Routes:** no new routes, so the stack stays under its guardrail.
   - Listing uses `GET /artists/{id}/files?gigId=`.
   - Uploads use `POST /artists/{id}/files` with `{ gigId, files: [...] }`, up to 20 files per request; the page sends larger selections in batches.
+
+## Meeting notes: AWS AI services opt-out (rev 11, 11 Nov 2026)
+
+Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project, section 12.
+
+- **Why:** Amazon Transcribe may keep and use audio and transcripts to improve the service unless the account opts out, and the only opt-out is an AWS Organizations AI services opt-out policy. A standalone account can't have one.
+- **What changed from D12:** `blueprint ai opt-out` turns on AWS Organizations (all features) with this account as its only account, enables the `AISERVICES_OPT_OUT_POLICY` type on the root and attaches `bmg-ai-services-opt-out`, which opts out of every AI service and stops child policies opting back in. No other accounts, OUs or SCPs are created; the permission boundary still does the job SCPs would. The command checks each step first, so it's safe to re-run, and it refuses to touch an account that belongs to someone else's organization.
+- **Transcription fails closed:** before each job the meetings worker reads the account's effective opt-out policy (`DescribeEffectivePolicy`). If Transcribe isn't opted out, or the call fails, no audio is sent and the meeting says transcription is off. `blueprint ai status` shows the same check.
+- **Bedrock isn't affected:** it doesn't use customer content for service improvement, so summaries and plan suggestions don't depend on this.

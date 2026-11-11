@@ -27,7 +27,7 @@ The platform for **Blueprint Music Group**: a web app (installable as a PWA) for
 GitHub (code, PRs) ──queues jobs──▶ CodeBuild runners in AWS ──cdk deploy──▶ staging ──approval──▶ prod
 ```
 
-- One AWS account, no AWS Organizations. Staging and prod are separated by bootstrap qualifiers (`bmgstg`, `bmgprd`), `bmg:env` tags, and a permission boundary on every role (design section 4).
+- One AWS account. AWS Organizations is on only to hold the AI services opt-out policy (`blueprint ai opt-out`); there are no other accounts or SCPs. Staging and prod are separated by bootstrap qualifiers (`bmgstg`, `bmgprd`), `bmg:env` tags, and a permission boundary on every role (design section 4).
 - **No AWS credentials are stored in GitHub.** Runners take credentials from their CodeBuild project role. Only the `bmg-deploy-prod` project can assume the prod deploy roles.
 - **The repo is public,** so runners only start for the GitHub user ids in `bmg.config.json`. Fork pull requests also need approval before any workflow runs (design 16.4).
 
