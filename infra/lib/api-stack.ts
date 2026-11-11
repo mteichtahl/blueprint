@@ -842,6 +842,8 @@ export class ApiStack extends BmgStack {
           'file.rejected',
           'gig.helpRequested',
           'todo.commented',
+          // A meeting shared with the artist: the to-dos its actions made (rev 11 change).
+          'todo.shared',
           'connector.reminder',
           'connector.needsReauth',
           'meeting.processed',
