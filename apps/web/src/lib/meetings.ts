@@ -43,6 +43,11 @@ export interface Meeting {
   consent: { at: string; wording: string };
   recordedByMe: boolean;
   canDelete: boolean;
+  /** False while an artist in it has AI off (spec 8): Transcribe and the Transcript tab are greyed out. */
+  canTranscribe: boolean;
+  transcribeBlockedReason: 'ai_opt_out' | null;
+  /** The artists in it who have AI off right now. */
+  aiOffArtistIds: string[];
   updatedAt: string;
 }
 
@@ -136,9 +141,37 @@ export const STATUS_LABEL: Record<MeetingStatus, [tone: 'c' | 's' | 'n' | 'k', t
   transcribing: ['s', 'Transcribing'],
   ready: ['n', 'Ready'],
   failed: ['k', 'Not transcribed'],
-  'no-ai': ['s', 'Audio only'],
+  'no-ai': ['s', 'Audio only (AI off)'],
   off: ['s', 'Audio only'],
 };
+
+/** The status tag for a meeting: "AI off" only while someone in it still has AI off. */
+export function statusLabel(
+  m: Pick<Meeting, 'status' | 'canTranscribe'>,
+): [tone: 'c' | 's' | 'n' | 'k', text: string] {
+  if (m.status === 'no-ai' && m.canTranscribe) return ['s', 'Audio only'];
+  return STATUS_LABEL[m.status];
+}
+
+/**
+ * Why a meeting can't be transcribed, in words, or `null` when it can. Names
+ * the artist when it's one person ("Chloe Poli has turned off…").
+ */
+export function aiOffWords(
+  m: Pick<Meeting, 'canTranscribe' | 'aiOffArtistIds' | 'attendees'>,
+  nameOf: (artistId: string) => string | undefined,
+): { notice: string; tooltip: string } | null {
+  // Only an explicit `false` blocks, so an older API that doesn't send it changes nothing.
+  if (m.canTranscribe !== false) return null;
+  const names = (m.aiOffArtistIds ?? []).map(
+    (id) => nameOf(id) ?? m.attendees.find((a) => a.kind === 'artist' && a.id === id)?.name,
+  );
+  const who = names.length === 1 && names[0] ? names[0] : 'An artist in this meeting';
+  return {
+    notice: `${who} has turned off AI assistance, so this meeting can’t be transcribed. You can keep the recording and your notes.`,
+    tooltip: `Transcripts are off because ${who} has turned off AI assistance.`,
+  };
+}
 
 export const KIND_LABEL: Record<ChangeKind, string> = {
   'outcome.edit': 'Edit outcome',

@@ -586,7 +586,21 @@ export function noteMarkdown(
 }
 
 /** What the meetings list and page show about a meeting (no content). */
-export function publicMeeting(m: Meeting, viewer: Pick<Principal, 'sub' | 'role'>) {
+/**
+ * The artists in a meeting who have AI turned off right now, from their
+ * current AI choices (`aiStates`). Any of them means it can't be transcribed.
+ */
+export const aiOffArtists = (
+  m: Pick<Meeting, 'artistId' | 'attendees'>,
+  states: Record<string, boolean>,
+) => artistsInvolved(m).filter((id) => states[id] !== true);
+
+export function publicMeeting(
+  m: Meeting,
+  viewer: Pick<Principal, 'sub' | 'role'>,
+  /** Who in the meeting has AI off right now (see `aiOffArtists`); decides `canTranscribe`. */
+  aiOff: string[],
+) {
   return {
     meetingId: m.meetingId,
     space: m.artistId ? m.artistId : 'library',
@@ -612,6 +626,10 @@ export function publicMeeting(m: Meeting, viewer: Pick<Principal, 'sub' | 'role'
     consent: { at: m.consent.at, wording: m.consent.wording },
     recordedByMe: m.createdBy === viewer.sub,
     canDelete: canDeleteMeeting(viewer, m),
+    /** False while an artist in it has AI off: the screens grey out Transcribe and the Transcript tab. */
+    canTranscribe: aiOff.length === 0,
+    transcribeBlockedReason: aiOff.length ? ('ai_opt_out' as const) : null,
+    aiOffArtistIds: aiOff,
     updatedAt: m.updatedAt,
   };
 }

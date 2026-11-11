@@ -495,6 +495,16 @@ Spec: `claude/BMG_Rev11_Meeting_Notes.md` in the BMG App project. These are the 
 - **Saving names or transcript fixes refiles the meeting note** as its next version.
 - **Not built yet (rev 11):** the custom word list for names; deleting audio after 90 days and its setting; starting a meeting from the assistant; the Timeline preview on the plan review; the plan under the note's "Where it's used"; "[recording paused]" in the transcript; the staging gate additions (a real Transcribe job across two artists' keys).
 
+## Meeting notes: opted-out meetings in the screens (rev 11 change, 11 Nov 2026)
+
+Spec: section 17 of the project doc `BMG_Rev11_Meeting_Notes.md`.
+
+- **The meeting response says whether it can be transcribed:** `canTranscribe`, `transcribeBlockedReason` (`ai_opt_out` or null) and `aiOffArtistIds`. They're read from the consent ledger (`aiStates`) on every response, one batch per list, so opting in or out shows on the next load. Same artists as the worker: the linked artist and artist attendees. No new route.
+- **`POST …/transcribe` refuses an opted-out meeting with 403** ("AI assistance is off for this artist") and audits the denial, before any status check, so nothing reaches the bus. The worker's own check stays.
+- **Screens:** the Transcript tab is greyed (`aria-disabled`, out of the tab order, tooltip) and the page opens on Details; **Transcribe now** / **Try again** are disabled with the reason as visible text, a tooltip on a wrapper (disabled buttons don't show one) and a screen-reader description. An unfinished recording offers **Finish and save** with **Finish and transcribe** disabled.
+- **A transcript made before the artist opted out stays visible**: the tab is only greyed when there's nothing in it. (The spec's section 17 read as greying it regardless; hiding kept content seemed wrong.)
+- **Only an explicit `canTranscribe: false` blocks** in the web app, so a response from an older API mid-deploy leaves the screens as they were.
+
 ## Plan owner and plan update notifications (rev 12, 11 Nov 2026)
 
 Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, notifications, screens).

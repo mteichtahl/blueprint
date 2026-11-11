@@ -14,6 +14,23 @@ How to release (see `docs/releases.md`):
 3. Commit both files with the change and merge to `main`. Staging (beta)
    shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
 
+## 1.2.0 — 2026-11-11
+
+Meetings now say clearly when they can't be transcribed because an artist has
+turned off AI assistance.
+
+### Improved
+
+- When an artist in a meeting has turned off AI assistance, **Transcribe now**
+  and **Try again** are greyed out and the **Transcript** tab is greyed out
+  too, with the reason shown. The meeting opens on Details, and the recording
+  and your notes are kept.
+- An unfinished recording for that artist offers **Finish and save** instead
+  of Finish and transcribe.
+- The Meetings list shows these meetings as "Audio only (AI off)".
+- If the artist turns AI back on, transcribing is available again straight
+  away. A transcript made before they turned it off is still shown.
+
 ## 1.1.0 — 2026-11-11
 
 The phone menu is shorter and puts what needs you first.
