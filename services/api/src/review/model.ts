@@ -52,6 +52,9 @@ export interface Submission {
   noteCipher?: Uint8Array;
   feedbackCipher?: Uint8Array;
   feedbackTodoIds?: string[];
+  /** When feedback was sent. Feedback no longer ends the review: Complete review does. */
+  feedbackAt?: string;
+  /** `reviewed` = the review is complete (reviewedAt/reviewedBy say when and who). */
   status: SubmissionStatus;
   createdBy: string;
   createdAt: string;
@@ -103,6 +106,8 @@ export const SubmissionPatch = z
     /** Artists can still edit these while the submission is open. */
     title: Title.optional(),
     note: Note.optional(),
+    /** Blueprint completes the review; the person who asked for it is told. */
+    complete: z.literal(true).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to change');
 
@@ -118,6 +123,8 @@ export const FeedbackBody = z
       )
       .max(20, 'Up to 20 action points at a time')
       .default([]),
+    /** Send the feedback and complete the review in one step. */
+    complete: z.boolean().default(false),
   })
   .refine((v) => v.comment || v.points.length > 0, 'Add a comment or at least one action point');
 
@@ -127,7 +134,12 @@ export function patchAllowed(
   status: SubmissionStatus,
   patch: z.infer<typeof SubmissionPatch>,
 ): string | undefined {
-  if (status !== 'open') return 'This submission has already been reviewed';
+  if (status !== 'open') return 'This review is already complete';
+  if (patch.complete) {
+    if (role === 'artist') return 'Blueprint completes the review';
+    if (Object.keys(patch).length > 1) return 'Complete the review on its own';
+    return undefined;
+  }
   if (role !== 'artist' && (patch.title !== undefined || patch.note !== undefined)) {
     return 'Only the artist can change the title or note';
   }
@@ -163,6 +175,8 @@ export function publicSubmission(s: Submission) {
     createdAt: s.createdAt,
     changedByBmgAt: s.changedByBmgAt ?? null,
     reviewedAt: s.reviewedAt ?? null,
+    feedbackAt:
+      s.feedbackAt ?? (s.status === 'reviewed' && s.feedbackCipher ? s.reviewedAt : null) ?? null,
     feedbackTodoIds: s.feedbackTodoIds ?? [],
   };
 }

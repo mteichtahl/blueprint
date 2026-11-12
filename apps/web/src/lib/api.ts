@@ -222,7 +222,10 @@ export interface SubmissionSummary {
   status: 'open' | 'reviewed';
   createdAt: string;
   changedByBmgAt: string | null;
+  /** When the review was completed (status `reviewed`). */
   reviewedAt: string | null;
+  /** When feedback was sent; the review stays open until it's completed. */
+  feedbackAt?: string | null;
   feedbackTodoIds: string[];
 }
 

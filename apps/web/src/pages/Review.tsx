@@ -38,6 +38,12 @@ const TYPE_LABEL = Object.fromEntries(SUBMISSION_TYPES.map((t) => [t.id, t.label
 const date = shortDate;
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
+/** Where a review stands, in words. */
+function reviewState(s: SubmissionSummary): string {
+  if (s.status === 'reviewed') return `Completed ${date(s.reviewedAt!)}`;
+  return s.feedbackAt ? 'Feedback sent · review open' : 'Waiting for review';
+}
+
 function PriorityBadge({ p }: { p: Priority }) {
   return <Tag tone={PRIORITY_TAG[p][0]}>{PRIORITY_TAG[p][1]}</Tag>;
 }
@@ -372,9 +378,9 @@ function SubmissionTable({
               .join(' · ')}
             tags={
               <span className="src">
-                {s.status === 'open'
+                {s.status === 'open' && !s.feedbackAt
                   ? `Needed by ${date(s.neededBy)}`
-                  : `Reviewed ${date(s.reviewedAt!)}`}
+                  : reviewState(s)}
               </span>
             }
             onOpen={() => onOpen(s)}
@@ -416,9 +422,7 @@ function SubmissionTable({
                 <PriorityBadge p={s.priority} />
               </td>
               <td>{date(s.neededBy)}</td>
-              <td className="src">
-                {s.status === 'open' ? 'Waiting for review' : `Reviewed ${date(s.reviewedAt!)}`}
-              </td>
+              <td className="src">{reviewState(s)}</td>
             </tr>
           ))}
         </tbody>
@@ -549,6 +553,12 @@ function SubmissionView({
         )}
       </Card>
       {sub.status === 'reviewed' && (
+        <Notice tone="success">
+          Review completed {date(sub.reviewedAt!)}.
+          {isBmg ? ' The person who asked for it has been told.' : ''}
+        </Notice>
+      )}
+      {(sub.feedbackAt || sub.feedback) && (
         <Card title="Feedback">
           {sub.feedback && <p className="whitespace-pre-wrap text-sm">{sub.feedback}</p>}
           <p className="mt-2 text-sm text-muted-foreground">
@@ -558,11 +568,23 @@ function SubmissionView({
           </p>
         </Card>
       )}
-      {isBmg && open && (
+      {isBmg && open && !sub.feedbackAt && (
         <FeedbackForm
           cfg={cfg}
           token={token}
           path={path}
+          onDone={() => {
+            void load();
+            onChanged();
+          }}
+        />
+      )}
+      {isBmg && open && (
+        <CompleteReview
+          cfg={cfg}
+          token={token}
+          path={path}
+          hasFeedback={!!sub.feedbackAt}
           onDone={() => {
             void load();
             onChanged();
@@ -589,6 +611,8 @@ function FeedbackForm({
   const [points, setPoints] = useState<{ title: string; due: string }[]>([{ title: '', due: '' }]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Most feedback finishes the review; untick to keep it open for another look.
+  const [complete, setComplete] = useState(true);
   const filled = points.filter((p) => p.title.trim());
   const update = (i: number, patch: Partial<{ title: string; due: string }>) =>
     setPoints((ps) => ps.map((p, j) => (j === i ? { ...p, ...patch } : p)));
@@ -600,6 +624,7 @@ function FeedbackForm({
       await api(cfg, token, 'POST', `${path}/feedback`, {
         comment,
         points: filled.map((p) => ({ title: p.title.trim(), ...(p.due ? { due: p.due } : {}) })),
+        complete,
       });
       onDone();
     } catch (e) {
@@ -639,6 +664,15 @@ function FeedbackForm({
           </div>
         ))}
       </div>
+      <label className="mt-4 flex min-h-9 items-center gap-2.5 text-[15px]">
+        <input
+          type="checkbox"
+          className="chk"
+          checked={complete}
+          onChange={(e) => setComplete(e.target.checked)}
+        />
+        Complete the review when I send this
+      </label>
       <div className="mt-3 flex gap-2">
         <Button
           variant="ghost"
@@ -652,7 +686,63 @@ function FeedbackForm({
           disabled={busy || (!comment.trim() && filled.length === 0)}
           onClick={() => void send()}
         >
-          {busy ? 'Sending…' : 'Send feedback'}
+          {busy ? 'Sending…' : complete ? 'Send feedback and complete' : 'Send feedback'}
+        </Button>
+      </div>
+      {error && (
+        <div className="mt-3">
+          <Notice tone="error">{error}</Notice>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Complete review: ends the review (with or without feedback) and tells whoever
+ * asked for it. Feedback can't be added afterwards.
+ */
+function CompleteReview({
+  cfg,
+  token,
+  path,
+  hasFeedback,
+  onDone,
+}: {
+  cfg: AppConfig;
+  token: string;
+  path: string;
+  hasFeedback: boolean;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <Card title="Complete review">
+      <p className="m-0 text-sm">
+        {hasFeedback
+          ? 'Your feedback has been sent. Complete the review when you’re done with it.'
+          : 'Done with this one? Complete it without feedback, or send feedback above first.'}{' '}
+        Whoever asked for the review is told it’s complete.
+      </p>
+      <div className="mt-3">
+        <Button
+          variant={hasFeedback ? 'cta' : 'ghost'}
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await api(cfg, token, 'PATCH', path, { complete: true });
+              onDone();
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Completing…' : 'Complete review'}
         </Button>
       </div>
       {error && (
@@ -745,10 +835,14 @@ export function ArtistSubmissions({
             <b className="block">{s.title}</b>
             <span className="src">
               {TYPE_LABEL[s.type]} ·{' '}
-              {s.status === 'open' ? `needed by ${date(s.neededBy)}` : 'Feedback ready'}
+              {s.status === 'reviewed'
+                ? 'Review complete'
+                : s.feedbackAt
+                  ? 'Feedback ready'
+                  : `needed by ${date(s.neededBy)}`}
             </span>
           </span>
-          {s.status === 'open' ? <PriorityBadge p={s.priority} /> : <Tag tone="n">Reviewed</Tag>}
+          {s.status === 'open' ? <PriorityBadge p={s.priority} /> : <Tag tone="n">Completed</Tag>}
         </button>
       ))}
     </div>
@@ -821,7 +915,7 @@ export function ReviewQueue({
           }}
           options={[
             { id: 'open', label: 'Waiting for review' },
-            { id: 'reviewed', label: 'Reviewed' },
+            { id: 'reviewed', label: 'Completed' },
           ]}
         />
       }
@@ -831,7 +925,7 @@ export function ReviewQueue({
         subs={subs}
         names={names}
         onOpen={setOpened}
-        empty={status === 'open' ? 'Nothing waiting for review.' : 'Nothing reviewed yet.'}
+        empty={status === 'open' ? 'Nothing waiting for review.' : 'No completed reviews yet.'}
       />
     </Card>
   );
