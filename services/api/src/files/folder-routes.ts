@@ -17,13 +17,16 @@
 import { DeleteCommand, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import type { Principal } from '@bmg/authz';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { audit, db, env, HttpError, json, parseBody } from '../lib.ts';
+import { audit, db, env, HttpError, json, parseBody, publish } from '../lib.ts';
 import { newId } from '../workspace/model.ts';
 import { can, entriesFor, fileAccess, folderAccess, rootAccess, type Viewer } from './access.ts';
 import { loadAllFiles, loadFolders, type StoredFile, type StoredFolder } from './folder-store.ts';
 import {
   AccessBody,
   ancestors,
+  CopyBody,
+  copyName,
+  MAX_COPY_FILES,
   cleanGrants,
   compareAccess,
   descendants,
@@ -60,6 +63,12 @@ export interface SpaceCtx {
 /** What the files function lends the folder routes. */
 export interface Deps {
   removeFile: (principal: Principal, f: StoredFile) => Promise<void>;
+  /** Copy to… (rev 10): a new file with the same bytes, owned by `principal`. */
+  copyFile: (
+    principal: Principal,
+    f: StoredFile,
+    to: { folderId: string | null; title?: string },
+  ) => Promise<FileRecord>;
 }
 
 const table = () => env('MAIN_TABLE');
@@ -396,6 +405,139 @@ export async function folderRoutes(
     return json(200, { moved: items.length, ...summary });
   }
 
+  // ── Copy to… (rev 10) ──
+  // View access is enough to copy something; the copy is yours and lands
+  // where you can add things, taking that folder's access. Nothing is copied
+  // between spaces (each artist's files are under their own key).
+  if (method === 'POST' && rest === 'copy') {
+    const body = parseBody(event, CopyBody);
+    const to = body.to;
+    if (to) {
+      const dest = map.get(to);
+      if (!dest) throw new HttpError(404, 'No such folder');
+      need(folderAccess(principal, dest, map, space), 'edit', 'folder');
+    } else if (!can(rootAccess(principal, map, space), 'edit')) {
+      throw new HttpError(403, 'You can’t add things here');
+    }
+    const items = await Promise.all(body.items.map((r) => loadItem(ctx, map, r)));
+    const files = await loadAllFiles(ctx.pk);
+    const sees = (f: StoredFile) => can(fileAccess(principal, f, map), 'view');
+    // Plan the copy first, so nothing is half-copied when it's refused.
+    const plan: { file: StoredFile; folderKey: string | null; title?: string }[] = [];
+    const newFolders: { key: string; name: string; parentKey: string | null }[] = [];
+    let skipped = 0;
+    let n = 0;
+    const planned = [...folders];
+    for (const it of items) {
+      need(accessOf(principal, it, map, space), 'view', it.kind);
+      if (it.kind === 'file') {
+        if (it.file.status !== 'available') {
+          throw new HttpError(409, `“${it.file.title || it.file.name}” isn’t ready to copy yet`);
+        }
+        const here = (it.file.folderId ?? null) === to;
+        const name = it.file.title || it.file.name;
+        plan.push({ file: it.file, folderKey: to, ...(here ? { title: `Copy of ${name}` } : {}) });
+        continue;
+      }
+      if (to && isInside(map, to, it.folder.folderId)) {
+        throw new HttpError(409, 'A folder can’t be copied into itself');
+      }
+      const inner = subtree(folders, files, it.folder);
+      // Folders this person can't open aren't copied, nor anything inside them.
+      const visibleFolders = new Set(
+        inner.folders
+          .filter((f) => can(folderAccess(principal, f, map, space), 'view'))
+          .map((f) => f.folderId),
+      );
+      // A folder is copied only if its parent was (parents come first).
+      const copying = new Set<string>();
+      for (const f of inner.folders) {
+        const top = f.folderId === it.folder.folderId;
+        if (!visibleFolders.has(f.folderId) || (!top && !copying.has(f.parentId!))) {
+          skipped++;
+          continue;
+        }
+        copying.add(f.folderId);
+        const parentKey = top ? to : `new:${n}:${f.parentId}`;
+        const name = top ? copyName(planned, to, f.name) : f.name;
+        const key = `new:${n}:${f.folderId}`;
+        newFolders.push({ key, name, parentKey });
+        // Reserve the name so a second copy in the same request gets "(2)".
+        if (top) planned.push({ ...f, folderId: key, parentId: to, name });
+      }
+      for (const f of inner.files) {
+        if (!copying.has(f.folderId!) || !sees(f)) {
+          skipped++;
+          continue;
+        }
+        if (f.status !== 'available') {
+          skipped++;
+          continue;
+        }
+        plan.push({ file: f, folderKey: `new:${n}:${f.folderId}` });
+      }
+      n++;
+    }
+    if (plan.length > MAX_COPY_FILES) {
+      throw new HttpError(
+        413,
+        `That’s ${plan.length} files. Copy up to ${MAX_COPY_FILES} at a time.`,
+      );
+    }
+
+    // Folders first (each copy is yours, inheriting from where it lands).
+    const now = new Date().toISOString();
+    const ids = new Map<string | null, string | null>([[to, to]]);
+    for (const nf of newFolders) {
+      const folderId = newId();
+      ids.set(nf.key, folderId);
+      const parentId = nf.parentKey === to ? to : (ids.get(nf.parentKey) ?? to);
+      const folder: FolderRecord = {
+        folderId,
+        name: nf.name,
+        parentId,
+        ownerId: principal.sub,
+        ownerRole: principal.role,
+        createdAt: now,
+        createdBy: principal.sub,
+      };
+      await db.send(
+        new PutCommand({
+          TableName: table(),
+          Item: { PK: ctx.pk, SK: folderSk(folderId), type: 'folder', ...folder },
+          ConditionExpression: 'attribute_not_exists(PK)',
+        }),
+      );
+    }
+    const copied: FileRecord[] = [];
+    for (const p of plan) {
+      const folderId = p.folderKey === to ? to : (ids.get(p.folderKey) ?? to);
+      copied.push(
+        await deps.copyFile(principal, p.file, {
+          folderId,
+          ...(p.title ? { title: p.title } : {}),
+        }),
+      );
+    }
+    // Each copy is a new document for the knowledge base, like a finished upload.
+    for (const c of copied) {
+      await audit(event, 'file.available', 'success', { ...where, fileId: c.fileId, copy: true });
+    }
+    await audit(event, 'folder.copy', 'success', {
+      ...where,
+      to: to ?? 'top',
+      folders: newFolders.length,
+      files: copied.length,
+      skipped,
+    });
+    return json(201, {
+      files: copied.length,
+      folders: newFolders.length,
+      skipped,
+      ...(newFolders[0] ? { firstFolderId: ids.get(newFolders[0].key) } : {}),
+    });
+  }
+
   // ── Access panel ──
   if (rest === 'access' && method === 'GET') {
     const it = await loadItem(ctx, map, refFromQuery(event));
@@ -610,6 +752,20 @@ export async function folderRoutes(
       losses: changes.reduce((n, c) => n + c.loses, 0),
     });
     await resync(event, space, it.kind === 'file' ? [it.file] : inner.files);
+    // Rev 10: people who can now open it hear about it ("shared with you").
+    // Nobody is told when access is taken away (rev 10 decision).
+    const gained = changes.filter((c) => c.gains > 0 && c.sub !== principal.sub).map((c) => c.sub);
+    if (gained.length) {
+      await publish('item.shared', {
+        space: space.kind === 'library' ? 'library' : space.artistId,
+        kind: it.kind,
+        id: it.kind === 'folder' ? it.folder.folderId : it.file.fileId,
+        name: nameOf(it),
+        toSubs: gained,
+        bySub: principal.sub,
+        byName: names.get(principal.sub) ?? 'Someone',
+      });
+    }
     return json(200, { saved: true, ...summary });
   }
 

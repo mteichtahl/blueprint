@@ -1,7 +1,8 @@
 import { KMSClient, VerifyMacCommand } from '@aws-sdk/client-kms';
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
-import { actionsHash, ActionList, type Action } from '@bmg/prompts/actions';
+import { actionsHash, ActionList, foldersPath, type Action } from '@bmg/prompts/actions';
 import { z } from 'zod';
+import type { Step } from '../ai/folder-actions.ts';
 import { checkClaims, claimsBytes, decodeToken, jtiKey } from '../ai/model.ts';
 import { audit, authContext, db, env, handle, HttpError, json, parseBody } from '../lib.ts';
 
@@ -22,8 +23,6 @@ const ConfirmBody = z
     selected: z.array(z.number().int().min(0).max(9)).max(10).optional(),
   })
   .strict();
-
-type Step = { method: string; path: string; body: unknown };
 
 /** The API calls each action makes, in order. */
 export function stepsFor(action: Action, role: string): Step[] {
@@ -63,6 +62,47 @@ export function stepsFor(action: Action, role: string): Step[] {
           method: 'PATCH',
           path: `/artists/${action.artistId}/submissions/${encodeURIComponent(action.submissionId)}`,
           body: { priority: action.priority },
+        },
+      ];
+    // Folder actions (rev 10): the folder routes, exactly as the screens call them.
+    case 'createFolder':
+      return [
+        {
+          method: 'POST',
+          path: foldersPath(action.space),
+          body: { name: action.name, parentId: action.parentId ?? null },
+        },
+      ];
+    case 'renameFolder':
+      return [
+        {
+          method: 'PATCH',
+          path: `${foldersPath(action.space)}/${action.folderId}`,
+          body: { name: action.name },
+        },
+      ];
+    case 'moveItems':
+      return [
+        {
+          method: 'POST',
+          path: `${foldersPath(action.space)}/move`,
+          body: { items: action.items, to: action.to },
+        },
+      ];
+    case 'copyItems':
+      return [
+        {
+          method: 'POST',
+          path: `${foldersPath(action.space)}/copy`,
+          body: { items: action.items, to: action.to },
+        },
+      ];
+    case 'setAccess':
+      return [
+        {
+          method: 'PUT',
+          path: `${foldersPath(action.space)}/access`,
+          body: { item: action.item, grants: action.grants },
         },
       ];
   }

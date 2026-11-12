@@ -1,5 +1,5 @@
 import type { Principal } from '@bmg/authz';
-import { actionsHash, type Action } from '@bmg/prompts/actions';
+import { actionsHash, ActionList, type Action } from '@bmg/prompts/actions';
 import { describe, expect, it } from 'vitest';
 import {
   aiCanRead,
@@ -143,6 +143,103 @@ describe('carrying out actions', () => {
     const msg = stepsFor({ type: 'sendMessage', summary: 's', text: 'Hi' }, 'artist');
     expect(msg[0]).toEqual({ method: 'POST', path: '/conversations', body: { kind: 'direct' } });
     expect(msg[1]!.path).toBe('/conversations/{conversationId}/messages');
+  });
+});
+
+describe('folder actions (rev 10)', () => {
+  const F = 'fold000000001';
+  const D = 'file000000001';
+  it('go through the folder routes of the right library', () => {
+    expect(
+      stepsFor({ type: 'createFolder', summary: 's', space: 'library', name: 'Tour' }, 'bmg-admin'),
+    ).toEqual([
+      { method: 'POST', path: '/library/folders', body: { name: 'Tour', parentId: null } },
+    ]);
+    expect(
+      stepsFor(
+        { type: 'renameFolder', summary: 's', space: A, folderId: F, name: 'Demos' },
+        'artist',
+      ),
+    ).toEqual([{ method: 'PATCH', path: `/artists/${A}/folders/${F}`, body: { name: 'Demos' } }]);
+    const items = [{ kind: 'file' as const, id: D }];
+    expect(
+      stepsFor({ type: 'moveItems', summary: 's', space: A, items, to: F }, 'artist')[0],
+    ).toEqual({ method: 'POST', path: `/artists/${A}/folders/move`, body: { items, to: F } });
+    expect(
+      stepsFor(
+        { type: 'copyItems', summary: 's', space: 'library', items, to: null },
+        'bmg-staff',
+      )[0]!.path,
+    ).toBe('/library/folders/copy');
+    expect(
+      stepsFor(
+        {
+          type: 'setAccess',
+          summary: 's',
+          space: 'library',
+          item: { kind: 'folder', id: F },
+          grants: { 'g:artists': 'view' },
+        },
+        'bmg-admin',
+      )[0],
+    ).toEqual({
+      method: 'PUT',
+      path: '/library/folders/access',
+      body: { item: { kind: 'folder', id: F }, grants: { 'g:artists': 'view' } },
+    });
+  });
+
+  it('only accept real ids, grant keys and levels', () => {
+    const bad = [
+      { type: 'createFolder', summary: 's', space: 'everything', name: 'x' },
+      {
+        type: 'moveItems',
+        summary: 's',
+        space: A,
+        items: [{ kind: 'file', id: '../x' }],
+        to: null,
+      },
+      {
+        type: 'setAccess',
+        summary: 's',
+        space: 'library',
+        item: { kind: 'file', id: D },
+        grants: { 'g:everyone': 'view' },
+      },
+      {
+        type: 'setAccess',
+        summary: 's',
+        space: 'library',
+        item: { kind: 'file', id: D },
+        grants: { 'g:team': 'owner' },
+      },
+    ];
+    for (const a of bad) expect(ActionList.safeParse([a]).success).toBe(false);
+  });
+
+  it('preview moves and access changes, and say who gains and who loses', async () => {
+    const { previewStep, effectText } = await import('../src/ai/folder-actions.ts');
+    expect(
+      previewStep({
+        type: 'setAccess',
+        summary: 's',
+        space: A,
+        item: { kind: 'file', id: D },
+        grants: { 'g:team': null },
+      }),
+    ).toMatchObject({ method: 'PUT', body: { preview: true } });
+    expect(
+      previewStep({ type: 'createFolder', summary: 's', space: A, name: 'x' }),
+    ).toBeUndefined();
+    expect(
+      effectText({
+        changes: [
+          { name: 'Sam Lee', gains: 3, loses: 0 },
+          { name: 'Chloe Poli', gains: 0, loses: 1 },
+        ],
+      }),
+    ).toBe('Sam Lee gains access to 3 items · Chloe Poli loses access to 1 item');
+    expect(effectText({ changes: [] })).toBe('Nobody gains or loses access');
   });
 });
 

@@ -121,6 +121,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [asking, setAsking] = useState(false);
   // A document opened from a Studio HQ card shows its page in the library (rev 8).
   const [libraryFile, setLibraryFile] = useState<string | null>(null);
+  // A folder opened from a "shared with you" notification (rev 10).
+  const [libraryFolder, setLibraryFolder] = useState<{ id: string; n: number } | null>(null);
 
   const load = useCallback(async () => {
     const [roster, queue, help, openTodos] = await Promise.all([
@@ -172,6 +174,13 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
       return setView('library');
     }
     if (doc) return openWorkspace(doc[1]!, { tab: 'library', fileId: doc[2]! });
+    // Rev 10: a folder shared with them.
+    const folder = /^folder:(library|art_[a-z0-9]+)\/([a-z0-9]+)$/.exec(link);
+    if (folder?.[1] === 'library') {
+      setLibraryFolder({ id: folder[2]!, n: Date.now() });
+      return setView('library');
+    }
+    if (folder) return openWorkspace(folder[1]!, { tab: 'library', folderId: folder[2]! });
     const sub = /^submission:(art_[a-z0-9]+)\/([A-Za-z0-9_-]+)$/.exec(link);
     if (sub) {
       setReviewTarget({ artistId: sub[1]!, submissionId: sub[2]! });
@@ -573,6 +582,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
               isAdmin={me.role === 'bmg-admin'}
               artists={artists}
               openFileId={libraryFile}
+              openFolderId={libraryFolder?.id ?? null}
               onClosed={() => setLibraryFile(null)}
             />
           </>
@@ -1177,6 +1187,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [chatTarget, setChatTarget] = useState<string | null>(null);
   // A document of their own opened from a link (rev 8), and a submission.
   const [myFile, setMyFile] = useState<string | null>(null);
+  const [myFolder, setMyFolder] = useState<string | null>(null);
+  const [sharedFolder, setSharedFolder] = useState<string | null>(null);
   const [subTarget, setSubTarget] = useState<{ submissionId: string; n: number } | null>(null);
   useDeepLink((link) => {
     const doc = /^doc:(library|art_[a-z0-9]+)\/([a-z0-9]+)$/.exec(link);
@@ -1184,6 +1196,13 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
       setLibTab('all');
       if (doc[1] === 'library') setLibraryFile(doc[2]!);
       else setMyFile(doc[2]!);
+      return setView('library');
+    }
+    const folder = /^folder:(library|art_[a-z0-9]+)\/([a-z0-9]+)$/.exec(link);
+    if (folder) {
+      setLibTab('all');
+      if (folder[1] === 'library') setSharedFolder(folder[2]!);
+      else setMyFolder(folder[2]!);
       return setView('library');
     }
     const sub = /^submission:art_[a-z0-9]+\/([A-Za-z0-9_-]+)$/.exec(link);
@@ -1365,6 +1384,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                   kind={libTab}
                   onOpenChange={mineOpen}
                   openFileId={myFile}
+                  openFolderId={myFolder}
                 />
               </div>
               <div className={docOpen === 'mine' ? 'hidden' : 'contents'}>
@@ -1377,6 +1397,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                   isBmg={false}
                   artists={[]}
                   openFileId={libraryFile}
+                  openFolderId={sharedFolder}
                   onClosed={() => setLibraryFile(null)}
                   onOpenChange={sharedOpen}
                 />

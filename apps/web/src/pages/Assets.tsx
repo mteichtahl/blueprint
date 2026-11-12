@@ -16,12 +16,15 @@ import {
   Button,
   Card,
   Field,
+  Icon,
   Notice,
   Select,
   Tag,
   shortDate,
   WaveLoader,
 } from '../components/ui.tsx';
+import { useFolders } from '../components/Folders.tsx';
+import { pickerLevel } from '../lib/folders.ts';
 
 /**
  * Asset library (screens doc "Assets"): an artist's press photos, artwork,
@@ -187,6 +190,8 @@ export function AssetLibrary({
   const [keepPrivate, setKeepPrivate] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [addAt, setAddAt] = useState<string | null>(null);
+  const { list: folderList } = useFolders(cfg, token, `/artists/${artistId}/folders`);
   const picker = useRef<HTMLInputElement>(null);
   const first = artistName.split(' ')[0];
 
@@ -261,6 +266,11 @@ export function AssetLibrary({
   }
 
   const otherFiles = (files ?? []).filter((f) => !f.asset && f.status === 'available');
+  // Rev 10: "Add from files" browses the Library's folders, one level at a time.
+  const level = pickerLevel(folderList?.folders ?? [], otherFiles, addAt);
+  const parentName = level.here?.parentId
+    ? (folderList?.folders.find((f) => f.folderId === level.here!.parentId)?.name ?? '…')
+    : 'Library';
 
   return (
     <div className="flex flex-wrap items-start gap-5">
@@ -329,7 +339,34 @@ export function AssetLibrary({
         </div>
         {adding && (
           <div className="flex flex-col rounded-lg border border-input p-2">
-            {otherFiles.map((f) => (
+            {level.here && (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setAddAt(level.here!.parentId ?? null)}
+                >
+                  ← {parentName}
+                </Button>
+                <b className="min-w-0 truncate">{level.here.name}</b>
+              </div>
+            )}
+            {level.folders.map((f) => (
+              <button
+                key={f.folderId}
+                type="button"
+                className="li flex items-center gap-2 text-left"
+                onClick={() => setAddAt(f.folderId)}
+              >
+                <Icon name="folder" size={16} />
+                <span className="flex-1 font-bold">{f.name}</span>
+                <span aria-hidden="true">›</span>
+              </button>
+            ))}
+            {level.files.length === 0 && level.folders.length === 0 && (
+              <p className="src">Nothing in this folder.</p>
+            )}
+            {level.files.map((f) => (
               <button
                 key={f.fileId}
                 type="button"

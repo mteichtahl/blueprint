@@ -362,3 +362,40 @@ describe('documents (rev 8)', () => {
     ]);
   });
 });
+
+describe('shared with you (rev 10)', () => {
+  it('tells the people who can open it now, linking a folder or a document', () => {
+    const folder = plan(
+      {
+        type: 'item.shared',
+        space: A,
+        kind: 'folder',
+        id: 'fold000000001',
+        name: 'Contracts',
+        toSubs: ['staffB', 'kyra'],
+        bySub: 'kyra',
+        byName: 'Kyra',
+      },
+      people,
+    );
+    expect(subs(folder)).toEqual(['staffB']);
+    expect(folder!.draft).toMatchObject({
+      title: 'Kyra shared “Contracts” with you',
+      link: `folder:${A}/fold000000001`,
+    });
+    const doc = plan(
+      {
+        type: 'item.shared',
+        space: 'library',
+        kind: 'file',
+        id: 'f9',
+        name: 'Rider',
+        toSubs: ['chloe'],
+        bySub: 'kyra',
+        byName: 'Kyra',
+      },
+      people,
+    );
+    expect(doc!.draft.link).toBe('doc:library/f9');
+  });
+});

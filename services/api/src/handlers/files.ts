@@ -1,4 +1,10 @@
-import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  S3Client,
+  type CopyObjectCommandInput,
+} from '@aws-sdk/client-s3';
 import {
   DeleteCommand,
   GetCommand,
@@ -9,7 +15,7 @@ import {
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { authorize, type Principal } from '@bmg/authz';
-import { DataAccessSessions, isArtistId } from '@bmg/crypto';
+import { artistKeyAlias, DataAccessSessions, encryptionContext, isArtistId } from '@bmg/crypto';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { z } from 'zod';
 import {
@@ -431,6 +437,36 @@ async function tellNewEditors(principal: Principal, before: FileRecord, next: Pa
 }
 
 /**
+ * "Shared with you" (rev 10) for a library document's own sharing (Share
+ * with): the artists who can open it now and couldn't before.
+ */
+async function tellNewlyShared(
+  principal: Principal,
+  f: FileRecord,
+  sharing: FileRecord['sharing'],
+  ids: string[],
+) {
+  const reaches = (s: FileRecord['sharing'], list: string[] | undefined) => (artistId: string) =>
+    s === 'all-artists' || (s === 'selected' && (list ?? []).includes(artistId));
+  const before = reaches(f.sharing, f.sharedWithArtistIds);
+  const after = reaches(sharing, ids);
+  const all = await people().catch(() => [] as Person[]);
+  const to = all
+    .filter((p) => p.role === 'artist' && p.artistId && after(p.artistId) && !before(p.artistId))
+    .map((p) => p.sub);
+  if (!to.length) return;
+  await publish('item.shared', {
+    space: 'library',
+    kind: 'file',
+    id: f.fileId,
+    name: f.title || f.name,
+    toSubs: to,
+    bySub: principal.sub,
+    byName: all.find((p) => p.sub === principal.sub)?.displayName ?? 'Blueprint',
+  });
+}
+
+/**
  * One file. `?include=` adds, for the document's own page (rev 8):
  * - `people`: who can be given edit access or ownership (owner and managers
  *   only; left out for anyone else), so the picker needs no route of its own;
@@ -812,7 +848,118 @@ async function removeThumb(principal: Principal, f: Stored) {
 }
 
 /** What the folder routes need from here (rev 10). */
-const deps = { removeFile };
+/**
+ * Where a copy of an artist file is written, and how it's encrypted: in a
+ * data-access session for that artist and the caller's role, under the
+ * artist's key with the file's own context, so KMS still refuses a private
+ * file to anyone but the artist (design 9.1).
+ */
+async function artistWriter(principal: Principal, artistId: string, visibility?: string) {
+  const credentials = await sessions.credentials({
+    roleArn: env('DATA_ACCESS_ROLE_ARN'),
+    artistId,
+    role: principal.role,
+  });
+  const context = encryptionContext(artistId, visibility === 'private' ? 'private' : 'normal');
+  const alias = artistKeyAlias(env('PROJECT'), env('BMG_ENV'), artistId);
+  return {
+    client: new S3Client({ credentials, requestChecksumCalculation: 'WHEN_REQUIRED' }),
+    sse: {
+      ServerSideEncryption: 'aws:kms',
+      SSEKMSKeyId: `arn:aws:kms:${env('AWS_REGION')}:${env('ACCOUNT_ID')}:${alias}`,
+      SSEKMSEncryptionContext: Buffer.from(JSON.stringify(context)).toString('base64'),
+      BucketKeyEnabled: false,
+    } satisfies Partial<CopyObjectCommandInput>,
+  };
+}
+
+/**
+ * Copy to… (rev 10). A new document with the current version's bytes (a
+ * server-side copy: nothing leaves S3 and it was scanned already) and its
+ * preview, owned by whoever copied it. Versions, asset details, gig links
+ * and its own access settings stay with the original: inside a folder the
+ * copy takes the folder's access; at the top of Blueprint's library it's
+ * Blueprint only, so a copy never reaches more people than the original.
+ */
+async function copyFile(
+  principal: Principal,
+  f: FileRecord,
+  to: { folderId: string | null; title?: string },
+): Promise<FileRecord> {
+  const fileId = newId();
+  const now = new Date().toISOString();
+  const artistId = f.scope === 'artist' ? f.artistId! : undefined;
+  const rec: FileRecord = {
+    fileId,
+    scope: f.scope,
+    ...(artistId ? { artistId } : {}),
+    name: f.name,
+    ...((to.title ?? f.title) ? { title: (to.title ?? f.title)!.slice(0, 200) } : {}),
+    ...(f.fileType ? { fileType: f.fileType } : {}),
+    size: f.size,
+    contentType: f.contentType,
+    status: 'available',
+    ...(f.scope === 'artist'
+      ? { visibility: f.visibility ?? 'normal' }
+      : to.folderId
+        ? {}
+        : { sharing: 'bmg-only' as const, sharedWithArtistIds: [] }),
+    uploadedBy: principal.sub,
+    uploaderRole: principal.role,
+    ownerId: principal.sub,
+    ownerRole: principal.role,
+    editAccess:
+      f.visibility === 'private' ? 'owner' : to.folderId ? 'everyone' : defaultEditAccess(f.scope),
+    ...(to.folderId ? { folderId: to.folderId } : {}),
+    createdAt: now,
+    availableAt: now,
+  };
+  const keyOf = (id: string, part: 'file' | 'thumb' = 'file', v = 1) =>
+    storedKey(f.scope, id, artistId, part, v);
+  const writer =
+    f.scope === 'artist'
+      ? await artistWriter(principal, artistId!, f.visibility)
+      : { client: s3, sse: {} as Partial<CopyObjectCommandInput> };
+  const bucket = f.scope === 'artist' ? env('ARTIST_BUCKET') : env('LIBRARY_BUCKET');
+  const copy = (from: string, toKey: string) =>
+    writer.client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        Key: toKey,
+        CopySource: `${bucket}/${encodeURI(from)}`,
+        MetadataDirective: 'COPY',
+        ...writer.sse,
+      }),
+    );
+  await copy(keyOf(f.fileId), keyOf(fileId));
+  if (f.thumb?.status === 'available') {
+    const ok = await copy(keyOf(f.fileId, 'thumb', f.thumb.v ?? 1), keyOf(fileId, 'thumb', 1))
+      .then(() => true)
+      .catch(() => false);
+    if (ok)
+      rec.thumb = {
+        status: 'available',
+        size: f.thumb.size,
+        contentType: f.thumb.contentType,
+        v: 1,
+      };
+  }
+  await db.send(
+    new PutCommand({
+      TableName: table(),
+      Item: {
+        PK: artistId ? artistPk(artistId) : LIBRARY_PK,
+        SK: fileSk(fileId),
+        type: 'file',
+        ...rec,
+      },
+      ConditionExpression: 'attribute_not_exists(PK)',
+    }),
+  );
+  return rec;
+}
+
+const deps = { removeFile, copyFile };
 export type FolderDeps = typeof deps;
 // ── Gig media: photos and videos added on a gig's page ─────────────────────
 /**
@@ -1630,6 +1777,7 @@ export const handler = handle(async (raw) => {
           sharing: patch.sharing,
           artists: ids.length,
         });
+      if (patch.sharing !== undefined) await tellNewlyShared(principal, f, patch.sharing, ids);
       if (patch.title !== undefined)
         await audit(event, 'file.rename', 'success', { library: true, fileId: f.fileId });
       if (owned.sets.length) await tellNewEditors(principal, f, owned.next);

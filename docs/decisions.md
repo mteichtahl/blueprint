@@ -598,3 +598,30 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **The "new version" email.** When a new version is scanned and becomes current, or an earlier one is brought back, the promoter publishes `file.versionAdded`. The owner and the chosen editors hear about it (in app, and by email and push per their settings), never whoever uploaded it. The version note is free text, so it isn't put in notifications. "Everyone who can see it" isn't told about every version: that could be the whole team or every artist.
 - **Editor-added notifications.** Giving people edit access (Who can edit → chosen people) or handing someone the document publishes `file.editorsAdded`: new editors read "<name> gave you edit access to …", a new owner "<name> handed you …". The person who made the change isn't told. Both events open the document's page.
 - **`publish()`** in `services/api/src/lib.ts` puts a `bmg.workspace` event on the bus, so handlers no longer need their own EventBridge boilerplate for notifications.
+
+## Files gaps from rev 10 (12 Nov 2026)
+
+- **Copy to…** (Select mode, Folder details and the document page) uses the folder picker from Move to…, then `POST {space}/folders/copy { items, to }` (inside the existing folder proxy routes, so no new API resource).
+  - **View access is enough to copy.** The destination needs edit access, as for uploads.
+  - **A copy is a new document owned by whoever copied it**, with the current version's bytes and preview. It's a server-side `CopyObject`, so nothing leaves S3 and there's no second scan.
+  - **What stays with the original:** versions, asset details, gig links and its own access settings.
+  - **Access of the copy:** in a folder it takes the folder's access. At the top of Blueprint's library it's Blueprint only, so a copy never reaches more people than the original. At the top of an artist's Library it keeps the original's visibility.
+  - **Artist copies** are written in a data-access session for that artist and the caller's role, under the artist's key and the file's own encryption context. KMS still refuses a private file to anyone but the artist.
+  - **Names:** a copy in the same folder is "Copy of …". A copied folder that lands beside one with the same name becomes "Copy of …", then "(2)" and so on.
+  - **Folders** copy with everything inside that the person can open. Folders they can't open, and files still being scanned, are left out and counted.
+  - **Limits:** at most 50 files per copy, so it finishes inside one API call. The whole copy is planned before anything is written, so a refused copy leaves nothing half-done. Nothing is copied between spaces.
+  - Each copy is announced as `file.available`, so knowledge bases pick it up like an upload.
+  - The files function gains `s3:PutObject` on `org-data/library/*`, the platform key's `Decrypt`/`GenerateDataKey`, and `PROJECT`/`BMG_ENV`/`ACCOUNT_ID` for the artist key alias. The resource count is unchanged.
+- **Download as ZIP** (Select mode and Folder details) is built in the browser with `fflate` (now a direct dependency; it was already installed through jsPDF).
+  - Each file is fetched through its normal short-lived download link, so the API checks every file, and KMS checks private ones, exactly as for a single download. Nothing new is stored.
+  - Folders keep their paths inside the ZIP, and repeated names get "(2)".
+  - Files are stored, not recompressed, since most are already compressed.
+  - Up to 200 files and 500 MB per ZIP. Files still being scanned are left out and counted.
+- **This folder / Everywhere search.** A search box above every library list matches every word typed in names, ignoring case and accents. Inside a folder, **This folder** (the folder and everything in it) and **Everywhere** switch the scope. Matching folders open on tap; matching documents use the list's own rows. Search is in the browser over what's already loaded: no new call.
+- **Folders in pickers.** The chat's Document picker, submit for review's Files and the asset library's "Add from files" browse folders one level at a time, with Back stepping out of a folder first. Files in folders the person can't open show at the top, as in Shared with me.
+- **"Shared with you" notifications** (`item.shared`). People who can open a folder or document after an Access change, and couldn't before, are told "<name> shared “…” with you". So are artists newly given a library document through Share with. A folder link (`folder:<space>/<folderId>`) opens that folder; a document link opens its page. Nobody is told when access is taken away (rev 10 decision), and the person who made the change isn't told.
+- **Assistant folder actions.**
+  - **New checklist actions:** `createFolder`, `renameFolder`, `moveItems`, `copyItems` and `setAccess`. Each is carried out through the folder routes with the person's own token, so every rule is re-checked.
+  - **Ids:** a new read tool, `list_folders`, gives the agent folder and document ids with the person's level on each. Artists only ever get their own Library.
+  - **Review before commit (P6):** before the checklist is shown, moves and access changes are previewed with the API's own preview. The checklist says who gains and who loses access (or "Nobody gains or loses access"), or why it can't be done.
+  - The prompt and the `tools.list_folders` description are in `@bmg/prompts`, so admins can edit them like the others.

@@ -3,6 +3,7 @@ import { api, type ArtistSummary, type Me, type Todo } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { EmojiPicker } from '../components/EmojiPicker.tsx';
 import { formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
+import { foldersBase, listFolders, pickerLevel, type Folder } from '../lib/folders.ts';
 import { inboxChannels, subscribeInbox } from '../lib/realtime.ts';
 import { Avatar, Icon, WaveLoader } from '../components/ui.tsx';
 import type { Gig } from './Gigs.tsx';
@@ -1155,6 +1156,9 @@ function SharePanel({
     { key: string; title: string; subtitle: string; attachment: ChatAttachment }[] | null
   >(null);
   const [status, setStatus] = useState<string | null>(null);
+  // Documents (rev 10): browse the library's folders, one level at a time.
+  const [docs, setDocs] = useState<{ files: FileItem[]; folders: Folder[] } | null>(null);
+  const [docAt, setDocAt] = useState<string | null>(null);
   const [accept, setAccept] = useState('image/*');
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -1191,16 +1195,22 @@ function SharePanel({
     try {
       if (kind === 'document') {
         const path = ctx.isBmg ? '/library/files' : `/artists/${ctx.me.artistId}/files`;
-        const files = (await api<{ files: FileItem[] }>(ctx.cfg, ctx.token, 'GET', path)).files;
+        const [files, folders] = await Promise.all([
+          api<{ files: FileItem[] }>(ctx.cfg, ctx.token, 'GET', path).then((r) => r.files),
+          listFolders(ctx.cfg, ctx.token, foldersBase(path))
+            .then((r) => r.folders)
+            .catch(() => [] as Folder[]),
+        ]);
+        const usable = files.filter((f) => f.status === 'available' && f.visibility !== 'private');
+        setDocAt(null);
+        setDocs({ files: usable, folders });
         setItems(
-          files
-            .filter((f) => f.status === 'available' && f.visibility !== 'private')
-            .map((f) => ({
-              key: f.fileId,
-              title: f.displayName,
-              subtitle: `${f.fileType.label} · ${formatSize(f.size)}`,
-              attachment: fileAttachment(f),
-            })),
+          usable.map((f) => ({
+            key: f.fileId,
+            title: f.displayName,
+            subtitle: `${f.fileType.label} · ${formatSize(f.size)}`,
+            attachment: fileAttachment(f),
+          })),
         );
       } else if (kind === 'gig' && artistId) {
         const gigs = (
@@ -1325,6 +1335,12 @@ function SharePanel({
   );
 
   if (picking) {
+    // Documents show one folder level at a time; Back steps out of a folder first.
+    const level =
+      picking === 'document' && docs ? pickerLevel(docs.folders, docs.files, docAt) : null;
+    const shown = level
+      ? (items ?? []).filter((it) => level.files.some((f) => f.fileId === it.key))
+      : items;
     return (
       <div
         className={phone ? 'wa-tray wa-tray-pick' : 'wa-share wa-share-pick'}
@@ -1332,20 +1348,52 @@ function SharePanel({
         aria-label={SHARE[picking].label}
       >
         <div className="wa-share-hd">
-          <button type="button" className="ibtn" aria-label="Back" onClick={() => setPicking(null)}>
+          <button
+            type="button"
+            className="ibtn"
+            aria-label={
+              level?.here
+                ? `Back to ${level.here.parentId ? (docs!.folders.find((f) => f.folderId === level.here!.parentId)?.name ?? 'the folder above') : 'all documents'}`
+                : 'Back'
+            }
+            onClick={() => (level?.here ? setDocAt(level.here.parentId ?? null) : setPicking(null))}
+          >
             <Icon name="back" />
           </button>
-          <b>Share a {SHARE[picking].label.toLowerCase()}</b>
+          <b className="min-w-0 truncate">
+            {level?.here ? level.here.name : `Share a ${SHARE[picking].label.toLowerCase()}`}
+          </b>
         </div>
         <div className="wa-share-list">
           {!items && <WaveLoader />}
-          {items?.length === 0 && !status && <p className="wa-empty">Nothing to share yet.</p>}
+          {level?.folders.map((f) => (
+            <button
+              key={f.folderId}
+              type="button"
+              className="wa-share-item"
+              onClick={() => setDocAt(f.folderId)}
+            >
+              <span className="wa-tag">
+                <Icon name="folder" size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <b className="block truncate">{f.name}</b>
+                <span className="wa-sub block truncate">Folder</span>
+              </span>
+              <span aria-hidden="true">›</span>
+            </button>
+          ))}
+          {shown?.length === 0 && !level?.folders.length && !status && (
+            <p className="wa-empty">
+              {level?.here ? 'Nothing in this folder.' : 'Nothing to share yet.'}
+            </p>
+          )}
           {status && (
             <p className="wa-empty" role="status">
               {status}
             </p>
           )}
-          {items?.map((it) => (
+          {shown?.map((it) => (
             <button
               key={it.key}
               type="button"

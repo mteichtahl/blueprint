@@ -10,9 +10,12 @@ import {
   ACTION_TOKEN_SECONDS,
   actionsHash,
   ActionList,
+  type Action,
   type AgentFailure,
   type AgentReply,
 } from '@bmg/prompts/actions';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { effectText, previewStep } from '../ai/folder-actions.ts';
 import {
   canUseAssistant,
   ChatBody,
@@ -200,6 +203,9 @@ export const handler = handle(async (event) => {
   // Re-validate what the agent proposed: anything malformed is dropped.
   const parsed = ActionList.safeParse(reply.actions ?? []);
   const actions = parsed.success ? parsed.data : [];
+  // P6: a move or an access change says who gains and who loses access,
+  // from the API's own preview with the person's token (nothing changes).
+  const effects = await Promise.all(actions.map((a) => effectOf(event, a)));
   let actionToken: string | undefined;
   if (actions.length) {
     const claims = {
@@ -251,6 +257,28 @@ export const handler = handle(async (event) => {
     sessionId: sid,
     reply: reply.reply,
     actions,
+    ...(effects.some(Boolean) ? { effects } : {}),
     ...(actionToken ? { actionToken } : {}),
   });
 });
+
+/** What a proposed folder action would change, or null (see `previewStep`). */
+async function effectOf(event: APIGatewayProxyEvent, action: Action): Promise<string | null> {
+  const step = previewStep(action);
+  if (!step) return null;
+  const auth = event.headers?.Authorization ?? event.headers?.authorization ?? '';
+  const base = `https://${event.requestContext.domainName}/${event.requestContext.stage}`;
+  try {
+    const res = await fetch(`${base}${step.path}`, {
+      method: step.method,
+      headers: { authorization: auth, 'content-type': 'application/json' },
+      body: JSON.stringify(step.body),
+      signal: AbortSignal.timeout(5000),
+    });
+    const out = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return `Can’t be done: ${String(out.detail ?? out.title ?? 'not allowed')}`;
+    return effectText(out as Parameters<typeof effectText>[0]);
+  } catch {
+    return null;
+  }
+}

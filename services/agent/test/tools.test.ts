@@ -33,6 +33,7 @@ describe('agent tools', () => {
     expect(tools.map((t) => t.name)).toEqual([
       'get_workspace',
       'search_my_content',
+      'list_folders',
       'propose_actions',
     ]);
     await byName(tools, 'get_workspace').invoke({ artistId: 'art_bbbbbbbbbbbb' });
@@ -53,6 +54,7 @@ describe('agent tools', () => {
       'list_artists',
       'get_workspace',
       'search_my_content',
+      'list_folders',
       'propose_actions',
     ]);
     expect(await byName(tools, 'get_workspace').invoke({})).toMatchObject({
@@ -88,5 +90,61 @@ describe('agent tools', () => {
         actions: [{ type: 'deleteEverything', summary: 'x' }],
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('list_folders (rev 10)', () => {
+  it("lists an artist's own Library whatever space they name, trimmed to ids and rights", async () => {
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const served = (async (url: URL, init?: RequestInit) => {
+      calls.push({ url: String(url), headers: init?.headers as Record<string, string> });
+      const body = String(url).endsWith('/folders')
+        ? {
+            root: { level: 'manage' },
+            folders: [
+              {
+                folderId: 'fold000000001',
+                name: 'Contracts',
+                parentId: null,
+                level: 'manage',
+                ownerName: 'X',
+              },
+            ],
+          }
+        : {
+            files: [
+              {
+                fileId: 'file000000001',
+                displayName: 'Rider',
+                folderId: 'fold000000001',
+                level: 'edit',
+                status: 'available',
+                thumbnailUrl: 'https://signed',
+              },
+              {
+                fileId: 'file000000002',
+                displayName: 'Scanning',
+                folderId: null,
+                status: 'pending',
+              },
+            ],
+          };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const tools = buildTools(() => ctx(), served);
+    const out = await byName(tools, 'list_folders').invoke({ space: 'library' });
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual([
+      '/v1/artists/art_aaaaaaaaaaaa/folders',
+      '/v1/artists/art_aaaaaaaaaaaa/files',
+    ]);
+    expect(calls[0]!.headers['x-bmg-context']).toBe('ai');
+    expect(out).toEqual({
+      space: 'art_aaaaaaaaaaaa',
+      top: { level: 'manage' },
+      folders: [{ folderId: 'fold000000001', name: 'Contracts', parentId: null, level: 'manage' }],
+      documents: [
+        { fileId: 'file000000001', name: 'Rider', folderId: 'fold000000001', level: 'edit' },
+      ],
+    });
   });
 });

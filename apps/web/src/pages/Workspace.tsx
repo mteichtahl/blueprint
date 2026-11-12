@@ -82,6 +82,7 @@ export interface WorkspaceTarget {
   tab: TabId;
   libKind?: LibraryKind;
   fileId?: string;
+  folderId?: string;
   n: number;
 }
 const groupOf = (s: TabId): Group => GROUPS.find((g) => g.sections.some((x) => x.id === s))!;
@@ -414,6 +415,7 @@ export function ArtistWorkspace({
                     isAdmin={me.role === 'bmg-admin'}
                     kind={libKind}
                     openFileId={target?.fileId ?? null}
+                    openFolderId={target?.folderId ?? null}
                   />
                 )}
               </>

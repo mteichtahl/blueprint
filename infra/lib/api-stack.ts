@@ -203,6 +203,10 @@ export class ApiStack extends BmgStack {
         DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
         // Owners and editors are people: names and who can be chosen (rev 8).
         USER_POOL_ID: props.userPool.userPoolId,
+        // Copy to… (rev 10) writes artist copies under the artist's key alias.
+        PROJECT: cfg.project,
+        BMG_ENV: env,
+        ACCOUNT_ID: this.account,
       },
       // The S3 presigners aren't guaranteed to be in the Lambda runtime.
       true,
@@ -509,6 +513,9 @@ export class ApiStack extends BmgStack {
     // downloads with a data-access session for the artist.
     const libraryObjects = objects('org-data', 'library/*');
     allow(files, 'SignLibraryDownloads', ['s3:GetObject'], [libraryObjects]);
+    // Copy to… (rev 10): a server-side copy within library/ (platform key).
+    allow(files, 'CopyLibraryFiles', ['s3:PutObject'], [libraryObjects]);
+    props.platformKey.grant(files, 'kms:Decrypt', 'kms:GenerateDataKey');
     allow(files, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
     putEvents(files);
     // Who can own or edit a document: the artist, admin and staff groups (rev 8).
@@ -857,6 +864,8 @@ export class ApiStack extends BmgStack {
           // Rev 8: a new version of a document, and new editors or a new owner.
           'file.versionAdded',
           'file.editorsAdded',
+          // Rev 10: "shared with you" (access given, or a library document shared).
+          'item.shared',
         ],
       },
       targets: [
