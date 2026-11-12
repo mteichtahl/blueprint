@@ -2076,10 +2076,18 @@ nav,
   -webkit-touch-callout: none;
 }
 
-/* Artist app: a frame exactly the height of the screen. */
+/* Artist app: a frame exactly the height of the screen, or of what's visible
+   above the keyboard (--app-height, lib/viewport.ts), so the chat's message box
+   stays locked to the bottom. */
 .app-frame {
   height: 100vh;
   height: 100dvh;
+  height: var(--app-height, 100dvh);
+}
+/* In a conversation the keyboard brings the message box up; the tabs give way so
+   it sits right above the keyboard, as in WhatsApp. */
+.app-frame:has(.wa-compose .wa-input:focus) .tabbar {
+  display: none;
 }
 /* Chat fills the space between the header and the tabs, edge to edge, with the
    composer pinned above the tabs (no page scrolling to reach it). */
@@ -2110,6 +2118,7 @@ nav,
   .bmg-frame:has(.wa-phone) {
     height: 100vh;
     height: 100dvh;
+    height: var(--app-height, 100dvh);
     min-height: 0;
     overflow: hidden;
   }
