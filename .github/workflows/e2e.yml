@@ -1,0 +1,79 @@
+name: Staging E2E
+
+# End-to-end tests against staging (docs/e2e.md). Deploy staging calls this after
+# every deploy, so each merge to main is tested where it runs. It can also be
+# run by hand against whatever staging runs now.
+#
+# It runs on the deploy-staging runner because only that role can read the test
+# accounts (Secrets Manager, bmg/staging/e2e-accounts, under the tooling key).
+# Nothing about the accounts is stored in GitHub. The tests only touch data the
+# E2E accounts own.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      grep:
+        description: 'Only tests whose title matches (Playwright --grep), e.g. "privacy|S-0"'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Staging E2E
+    runs-on: codebuild-bmg-deploy-staging-${{ github.run_id }}-${{ github.run_attempt }}
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+
+      # Amazon Linux 2023 (the CodeBuild image) isn't a Playwright platform, so
+      # `--with-deps` can't help: install Chromium's libraries with dnf, then
+      # Playwright's own build of Chromium.
+      - name: Install Chromium
+        run: |
+          SUDO=$(command -v sudo >/dev/null && [ "$(id -u)" != 0 ] && echo sudo || true)
+          $SUDO dnf install -y -q --setopt=skip_missing_names_on_install=True \
+            nss nspr atk at-spi2-atk at-spi2-core cups-libs libdrm libxkbcommon \
+            libXcomposite libXdamage libXfixes libXrandr libXext libX11 libxcb \
+            mesa-libgbm pango cairo alsa-lib libxshmfence expat dbus-libs \
+            liberation-fonts google-noto-sans-fonts
+          npm run browsers -w @bmg/e2e
+
+      - name: Run the tests
+        env:
+          CI: 'true'
+          E2E_SECRET_ID: bmg/staging/e2e-accounts
+          E2E_CHANNEL: beta
+          GREP: ${{ inputs.grep || '' }}
+        run: |
+          if [ -n "$GREP" ]; then
+            npm run e2e -w @bmg/e2e -- --grep "$GREP"
+          else
+            npm run e2e -w @bmg/e2e
+          fi
+
+      - name: Upload the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/e2e/playwright-report
+            apps/e2e/test-results
+          retention-days: 14
+          if-no-files-found: ignore

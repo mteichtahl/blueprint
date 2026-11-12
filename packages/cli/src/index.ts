@@ -5,6 +5,7 @@ import { aiOptOut, aiStatus } from './commands/ai.ts';
 import { adminCreate } from './commands/admin.ts';
 import { bootstrap } from './commands/bootstrap.ts';
 import { doctor } from './commands/doctor.ts';
+import { e2eSetup } from './commands/e2e.ts';
 import { connectorsSetup, connectorsStatus } from './commands/connectors.ts';
 import { emailSetup } from './commands/email.ts';
 import { githubConnect, githubProtect } from './commands/github.ts';
@@ -120,6 +121,15 @@ admin
   .option('--email <email>', 'admin email address')
   .option('--env <env>', 'staging or prod', 'prod')
   .action(wrap((o: { email?: string; env: 'staging' | 'prod' }) => adminCreate({ ...g(), ...o })));
+
+program
+  .command('e2e')
+  .description('end-to-end tests (docs/e2e.md)')
+  .command('setup')
+  .description('create or repair the E2E test accounts on staging and store them for the pipeline')
+  .option('--email <email>', 'inbox the accounts are plus-addresses of (you@example.com)')
+  .option('--env <env>', 'staging only', 'staging')
+  .action(wrap((o: { email?: string; env: string }) => e2eSetup({ ...g(), ...o })));
 
 program
   .command('stacks')
