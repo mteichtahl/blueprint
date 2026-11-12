@@ -1,3 +1,4 @@
+import { BackLink } from '../components/patterns.tsx';
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
@@ -132,6 +133,7 @@ function TodoEditor({
   isBmg,
   onClose,
   onSaved,
+  onToggle,
 }: {
   cfg: AppConfig;
   token: string;
@@ -139,7 +141,13 @@ function TodoEditor({
   isBmg: boolean;
   onClose: () => void;
   onSaved: (msg: string) => void;
+  /** Mark done / not done (rev 13: on the to-do, not a tick on its row). */
+  onToggle: (t: Todo) => Promise<void>;
 }) {
+  // Rev 13 (P3): the to-do opens to read and act on; Edit details shows the fields.
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [done, setDone] = useState(todo.done);
+  const [toggling, setToggling] = useState(false);
   const [title, setTitle] = useState(todo.title);
   const [notes, setNotes] = useState(todo.notes ?? '');
   const [due, setDue] = useState(todo.due ?? '');
@@ -214,19 +222,62 @@ function TodoEditor({
         <Button variant="cta" disabled={busy || !title.trim()} onClick={() => void save()}>
           {busy ? 'Saving…' : 'Save'}
         </Button>
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="ghost" onClick={() => setMode('view')}>
           Cancel
         </Button>
       </div>
     </>
   );
 
-  // Phones: the editor gets its own full-screen panel over the list.
+  const view = (
+    <>
+      <div className="flex flex-col gap-1.5">
+        <b
+          className={`text-[17px] leading-snug ${done ? 'text-muted-foreground line-through' : ''}`}
+        >
+          {todo.title}
+        </b>
+        <span className="flex flex-wrap items-center gap-1.5">
+          {done && <Tag tone="s">Done</Tag>}
+          {todo.bmgOnly && <Tag tone="n">BMG only</Tag>}
+          {todo.due && <DueTag t={todo} />}
+        </span>
+        {todo.notes && <p className="m-0 whitespace-pre-line">{todo.notes}</p>}
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant={done ? 'ghost' : 'cta'}
+          disabled={toggling}
+          onClick={async () => {
+            setToggling(true);
+            await onToggle({ ...todo, done });
+            setDone(!done);
+            setToggling(false);
+          }}
+        >
+          {done ? 'Mark not done' : 'Mark done'}
+        </Button>
+        <Button variant="ghost" onClick={() => setMode('edit')}>
+          <Icon name="pencil" size={16} />
+          Edit details
+        </Button>
+      </div>
+    </>
+  );
+  const heading = mode === 'edit' ? 'Edit to-do' : 'To-do';
+  const body = mode === 'edit' ? fields : view;
+
+  // Phones: the to-do gets its own full-screen panel over the list.
   if (phone)
     return (
-      <PhonePanel title="Edit to-do" aside={SOURCE_LABEL[todo.source]} onClose={onClose}>
-        <section className="card gap-3" aria-label={`Edit "${todo.title}"`}>
-          {fields}
+      <PhonePanel
+        title={heading}
+        aside={SOURCE_LABEL[todo.source]}
+        onClose={mode === 'edit' ? () => setMode('view') : onClose}
+      >
+        <section className="card gap-3" aria-label={`${heading}: ${todo.title}`}>
+          {body}
         </section>
         <section className="card gap-3" aria-label="Conversation">
           <TodoThread cfg={cfg} token={token} todo={todo} isBmg={isBmg} ruled={false} />
@@ -237,14 +288,15 @@ function TodoEditor({
   return (
     <section
       className="card gap-3 border-[#9AA4B0]"
-      aria-label={`Edit "${todo.title}"`}
-      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+      aria-label={`${heading}: ${todo.title}`}
+      onKeyDown={(e) => e.key === 'Escape' && (mode === 'edit' ? setMode('view') : onClose())}
     >
       <div className="card-hd">
-        <h3 className="t text-[17px]">Edit to-do</h3>
+        <h3 className="t text-[17px]">{heading}</h3>
         <span className="src ml-auto">{SOURCE_LABEL[todo.source]}</span>
+        <BackLink to="To-dos" onClick={onClose} />
       </div>
-      {fields}
+      {body}
       <TodoThread cfg={cfg} token={token} todo={todo} isBmg={isBmg} />
     </section>
   );
@@ -468,14 +520,13 @@ function useEditing(load: () => Promise<void>) {
   };
 }
 
+/** P1 (rev 13): the whole row opens the to-do; Mark done is on the to-do. */
 function TodoRows({
   todos,
-  onToggle,
   onEdit,
   artistName,
 }: {
   todos: Todo[];
-  onToggle: (t: Todo) => void;
   onEdit: (t: Todo) => void;
   artistName?: (id: string) => string;
 }) {
@@ -488,55 +539,37 @@ function TodoRows({
           key={t.todoId}
           accent={overdue(t)}
           muted={t.done}
-          lead={
-            <input
-              className="chk"
-              type="checkbox"
-              checked={t.done}
-              onChange={() => onToggle(t)}
-              aria-label={`Mark "${t.title}" done`}
-            />
-          }
+          status={t.done ? <Tag tone="s">Done</Tag> : undefined}
           title={t.title}
           sub={[artistName?.(t.artistId), SOURCE_LABEL[t.source], t.bmgOnly ? 'BMG only' : '']
             .filter(Boolean)
             .join(' · ')}
           tags={t.due ? <DueTag t={t} /> : undefined}
           onOpen={() => onEdit(t)}
-          openLabel={`Edit "${t.title}"`}
+          openLabel={`Open "${t.title}"`}
         />
       ))}
     >
       <thead>
         <tr>
-          <th scope="col" className="w-7">
-            <span className="sr-only">Done</span>
-          </th>
           <th scope="col">To-do</th>
           {artistName && <th scope="col">Artist</th>}
           <th scope="col">From</th>
           <th scope="col">Due</th>
-          <th scope="col">
-            <span className="sr-only">Edit</span>
-          </th>
         </tr>
       </thead>
       <tbody>
         {todos.map((t) => (
-          <tr key={t.todoId}>
+          <tr key={t.todoId} className="cursor-pointer" onClick={() => onEdit(t)}>
             <td>
-              <input
-                className="chk"
-                type="checkbox"
-                checked={t.done}
-                onChange={() => onToggle(t)}
-                aria-label={`Mark "${t.title}" done`}
-              />
-            </td>
-            <td>
-              <b className={`block ${t.done ? 'text-muted-foreground line-through' : ''}`}>
+              <button
+                type="button"
+                className={`block text-left font-bold ${t.done ? 'text-muted-foreground line-through' : ''}`}
+              >
+                <span className="sr-only">Open </span>
                 {t.title}
-              </b>
+                {t.done && <span className="sr-only"> (done)</span>}
+              </button>
               {(t.notes || t.bmgOnly) && (
                 <span className="src">
                   {t.bmgOnly ? 'BMG only' : ''}
@@ -558,12 +591,6 @@ function TodoRows({
             </td>
             <td>
               <DueTag t={t} />
-            </td>
-            <td className="text-right">
-              <Button size="sm" variant="ghost" onClick={() => onEdit(t)}>
-                <Icon name="pencil" size={14} />
-                Edit
-              </Button>
             </td>
           </tr>
         ))}
@@ -600,6 +627,7 @@ export function ArtistTodos({
       isBmg={isBmg}
       onClose={ed.close}
       onSaved={ed.done}
+      onToggle={toggle}
     />
   );
 
@@ -608,7 +636,6 @@ export function ArtistTodos({
       <PhoneTodos
         todos={todos}
         error={error}
-        onToggle={toggle}
         onEdit={ed.open}
         editor={editor}
         saved={ed.saved}
@@ -646,7 +673,7 @@ export function ArtistTodos({
       ) : todos.length === 0 ? (
         <p className="src">Nothing here.</p>
       ) : (
-        <TodoRows todos={todos} onToggle={toggle} onEdit={ed.open} />
+        <TodoRows todos={todos} onEdit={ed.open} />
       )}
       {editor}
       <AddTodo
@@ -684,7 +711,6 @@ function useAllCounts(cfg: AppConfig, token: string, artistId: string, trigger: 
 function PhoneTodos({
   todos,
   error,
-  onToggle,
   onEdit,
   editor,
   saved,
@@ -692,7 +718,6 @@ function PhoneTodos({
 }: {
   todos: Todo[] | null;
   error: string | null;
-  onToggle: (t: Todo) => void;
   onEdit: (t: Todo) => void;
   editor: React.ReactNode;
   saved: string | null;
@@ -707,15 +732,7 @@ function PhoneTodos({
       key={t.todoId}
       accent={t.source !== 'artist' || overdue(t)}
       muted={t.done}
-      lead={
-        <input
-          className="chk"
-          type="checkbox"
-          checked={t.done}
-          aria-label={`Mark "${t.title}" done`}
-          onChange={() => onToggle(t)}
-        />
-      }
+      status={t.done ? <Tag tone="s">Done</Tag> : undefined}
       title={t.title}
       sub={
         [
@@ -727,7 +744,7 @@ function PhoneTodos({
       }
       tags={t.due || t.commentCount ? <DueTag t={t} /> : undefined}
       onOpen={() => onEdit(t)}
-      openLabel={`Edit "${t.title}"`}
+      openLabel={`Open "${t.title}"`}
     />
   );
   const list = (label: string, items: Todo[]) => (
@@ -807,12 +824,7 @@ export function AllTodos({
           ) : todos.length === 0 ? (
             <p className="src">Nothing here.</p>
           ) : (
-            <TodoRows
-              todos={todos}
-              onToggle={toggle}
-              onEdit={ed.open}
-              artistName={(id) => names[id] ?? 'Artist'}
-            />
+            <TodoRows todos={todos} onEdit={ed.open} artistName={(id) => names[id] ?? 'Artist'} />
           )}
         </div>
         {ed.saved && <Notice tone="success">{ed.saved}</Notice>}
@@ -826,6 +838,7 @@ export function AllTodos({
               isBmg
               onClose={ed.close}
               onSaved={ed.done}
+              onToggle={toggle}
             />
           </div>
         )}
