@@ -147,7 +147,7 @@ describe('Rev 13 source guards', () => {
       .filter((f) => f.endsWith('.tsx'))
       .map((f) => `${d}/${f}`),
   );
-  const KNOWN_BACK = new Set(['components/Folders.tsx', 'pages/Review.tsx', 'pages/Events.tsx']);
+  const KNOWN_BACK = new Set(['components/Folders.tsx', 'pages/Review.tsx']);
 
   it('P8: no "← Back" or "Back to …" links (name the page instead)', () => {
     const offenders = files.filter(

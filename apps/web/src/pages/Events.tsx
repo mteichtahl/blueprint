@@ -1,9 +1,11 @@
+import { BackLink } from '../components/patterns.tsx';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
   Bar,
   Button,
+  Icon,
   Card,
   DataTable,
   Field,
@@ -106,6 +108,7 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
     }
   }, [cfg, token]);
   useEffect(() => void loadList(), [loadList]);
+  const openEvent = events?.find((e) => e.eventId === openId);
 
   const actions = (
     <>
@@ -125,6 +128,7 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
         <EventForm
           cfg={cfg}
           token={token}
+          back={listing ? 'All events' : (openEvent?.name ?? 'Events')}
           onCancel={() => setCreating(false)}
           onSaved={(id) => {
             setCreating(false);
@@ -134,7 +138,7 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
           }}
         />
       )}
-      {listing && events && (
+      {!creating && listing && events && (
         <>
           <PageHeader
             eyebrow="BMG only · Events"
@@ -142,11 +146,7 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
             sub={`${events.length} event${events.length === 1 ? '' : 's'}`}
             actions={
               <>
-                {openId && (
-                  <Button variant="default" onClick={() => setListing(false)}>
-                    ← Back to event
-                  </Button>
-                )}
+                {openEvent && <BackLink to={openEvent.name} onClick={() => setListing(false)} />}
                 <Button variant="cta" onClick={() => setCreating(true)}>
                   New event
                 </Button>
@@ -167,13 +167,13 @@ export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
         </>
       )}
       {events === null && <WaveLoader />}
-      {events?.length === 0 && !creating && !listing && (
+      {!creating && events?.length === 0 && !listing && (
         <>
           <PageHeader eyebrow="BMG only · Events" title="Events" actions={actions} />
           <Notice>No events yet. Start with the Industry Mixer Night.</Notice>
         </>
       )}
-      {openId && !listing && (
+      {!creating && openId && !listing && (
         <EventDetail
           key={openId}
           cfg={cfg}
@@ -278,12 +278,15 @@ function EventForm({
   cfg,
   token,
   event,
+  back,
   onCancel,
   onSaved,
 }: {
   cfg: AppConfig;
   token: string;
   event?: EventInfo;
+  /** P8: where Back goes (the event, or the page New event was opened from). */
+  back: string;
   onCancel: () => void;
   onSaved: (id: string) => void;
 }) {
@@ -347,7 +350,11 @@ function EventForm({
     }
   }
   return (
-    <Card title={event ? 'Event details' : 'New event'}>
+    // Rev 13: Edit details is its own screen (P4), with Back to the event.
+    <Card
+      title={event ? 'Edit event' : 'New event'}
+      action={<BackLink to={back} onClick={onCancel} />}
+    >
       {error && <Notice tone="error">{error}</Notice>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
@@ -493,6 +500,22 @@ function EventDetail({
     );
   const { event: e, summary: s } = d;
   const days = daysTo(e.date);
+  if (editingDetails) {
+    return (
+      <EventForm
+        cfg={cfg}
+        token={token}
+        event={e}
+        back={e.name}
+        onCancel={() => setEditingDetails(false)}
+        onSaved={() => {
+          setEditingDetails(false);
+          void load();
+          onChanged();
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -509,7 +532,8 @@ function EventDetail({
           .join(' · ')}
         actions={
           <>
-            <Button variant="ghost" onClick={() => setEditingDetails((v) => !v)}>
+            <Button variant="ghost" onClick={() => setEditingDetails(true)}>
+              <Icon name="pencil" size={16} />
               Edit details
             </Button>
             {actions}
@@ -517,7 +541,7 @@ function EventDetail({
         }
       />
       {error && <Notice tone="error">{error}</Notice>}
-      {!editingDetails && (!e.startTime || !e.endTime) && (
+      {(!e.startTime || !e.endTime) && (
         <Notice>
           This event has no start and end time yet.{' '}
           <button
@@ -528,19 +552,6 @@ function EventDetail({
             Add them
           </button>
         </Notice>
-      )}
-      {editingDetails && (
-        <EventForm
-          cfg={cfg}
-          token={token}
-          event={e}
-          onCancel={() => setEditingDetails(false)}
-          onSaved={() => {
-            setEditingDetails(false);
-            void load();
-            onChanged();
-          }}
-        />
       )}
 
       <div className="flex flex-wrap gap-5">

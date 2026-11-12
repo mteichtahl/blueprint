@@ -384,7 +384,33 @@ function answer(method: string, path: string): [number, unknown] {
     [/^\/review-queue$/, { submissions: [] }],
     [/^\/artists\/[^/]+\/submissions$/, { submissions: [] }],
     [/^\/gigs$/, { gigs: [] }],
-    [/^\/artists\/[^/]+\/gigs$/, { gigs: [] }],
+    [
+      /^\/artists\/[^/]+\/gigs$/,
+      {
+        gigs: [
+          {
+            gigId: 'gig000000001',
+            artistId: ARTIST,
+            title: 'Corner Hotel launch',
+            date: '2026-12-05',
+            startTime: '19:30',
+            endTime: '23:00',
+            venue: 'Corner Hotel',
+            status: 'booked',
+            deal: 'door-split',
+            checklist: [{ id: 'c1', title: 'Confirm set list', done: false }],
+            plannedBy: 'artist',
+            shared: true,
+            help: {
+              text: 'Can you help with promo?',
+              topics: ['promo'],
+              askedAt: now,
+              status: 'open',
+            },
+          },
+        ],
+      },
+    ],
     [/^\/notifications$/, { notifications: [], unread: 0 }],
     [/^\/conversations$/, { conversations: [] }],
     [
@@ -769,7 +795,11 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /^Events/ })[0]!);
     await settle();
     await click(/^All events/);
-    const card = screen.getByRole('button', { name: /Industry Mixer Night/ });
+    // The back link ("← Industry Mixer Night") names the event too.
+    expect(screen.getByRole('button', { name: '← Industry Mixer Night' })).toBeTruthy();
+    const card = screen
+      .getAllByRole('button', { name: /Industry Mixer Night/ })
+      .find((b) => !b.textContent?.startsWith('←'))!;
     expect(await violations()).toEqual([]);
     fireEvent.click(card);
     await settle();
@@ -978,6 +1008,28 @@ describe('WCAG 2.2 AA (axe-core): phone layouts (tables as row cards)', () => {
     fireEvent.click(screen.getByRole('button', { name: '← Gigs' }));
     await settle();
     expect(screen.getByRole('heading', { name: 'All gigs' })).toBeTruthy();
+  });
+
+  it('BMG: a gig opens its work page, and Edit details opens the edit screen (rev 13)', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    await openWorkspace('Gigs');
+    expect(screen.queryByRole('button', { name: /^Edit Corner/ })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: /Corner Hotel launch/ })[0]!);
+    await settle();
+    expect(screen.getByRole('heading', { name: 'Gig' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /^Checklist/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Tickets, takings and profit' })).toBeTruthy();
+    expect(screen.getByText(/Help request/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '← Gigs' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+    await settle();
+    expect(screen.getByRole('heading', { name: 'Edit gig' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '← Corner Hotel launch' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
   });
 
   it('artist phone: Plan a gig is its own page with a way back', async () => {
