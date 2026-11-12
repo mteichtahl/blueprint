@@ -76,8 +76,12 @@ blueprint release ship → tag vX.Y.Z → Release to production → approve → 
    matches `VERSION` at that commit, the commit is on `main`, and that exact
    commit passed its staging deploy. The job summary lists what the release
    holds. Approve the `production` environment and the deploy runs.
-5. **Start the next release** with another `blueprint release …` bump. `ship`
-   refuses a version that already has a tag.
+5. **Start the next release** in the next PR with another `blueprint release …`
+   bump. CI insists on it: the **CI checks** job fails a pull request whose
+   `VERSION` isn't newer than both production's version and the newest
+   release tag (`tools/release/version-check.mjs`). Without the bump, staging
+   would keep showing the version production already has. `ship` also
+   refuses a version that already has a tag or that production already runs.
 
 Staging keeps deploying while a release waits for approval or deploys: the
 two workflows have separate concurrency groups (`deploy-staging`,
@@ -108,6 +112,8 @@ it first.
 - The workflow policy (`npm run policy`) rejects any workflow with a
   production job that starts from a branch push, a pull request or a schedule.
 - Commits on `main` are signed, so the tagged commit is too.
+- Pull requests must carry a `VERSION` newer than the last release
+  (Dependabot PRs are exempt and deploy under the current version).
 
 Release tags only start a workflow if the tagged commit contains
 `release-prod.yml`, so the first release is a commit after that file landed.

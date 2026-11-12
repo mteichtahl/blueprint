@@ -608,3 +608,10 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **Shared staging.** The tests only touch data the test accounts own, delete any contacts they add, and never change global settings. To-dos and gigs have no delete in the API, so each run's are left done or cancelled.
 - **Amazon Linux 2023** isn't a Playwright platform, so the job installs Chromium's libraries with dnf, then Playwright's Chromium.
 - **Not a release gate yet.** A failed E2E run fails the Deploy staging run but doesn't stop `blueprint release ship` or the release guard, which still look at the staging deployment. Once the suite has proved stable, the release guard can also require a green Staging E2E for the commit.
+
+## Release trains: the version moves after every release (12 Nov 2026)
+
+- **Problem:** after 1.5.1 shipped, 15 PRs (#132–#149) merged without starting a new release, so staging kept showing `beta-1.5.1`, the same as production, and "What's new" had nothing new to show. The bump was a convention only.
+- **Now enforced:** the **CI checks** job runs `tools/release/version-check.mjs` on pull requests. It fails unless `VERSION` is newer than both the `VERSION` at production's last successful deployment and the newest `vX.Y.Z` tag, and says to run `blueprint release minor|major|hotfix`. Merges to `main` and Dependabot PRs skip it. The job now needs `deployments: read`, granted by the Deploy staging call too.
+- **`blueprint release ship`** also refuses a version production already runs, even when it was never tagged.
+- **1.6.0** starts the next release, with notes for #132–#147.

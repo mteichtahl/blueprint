@@ -29,6 +29,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
+      deployments: read
       pull-requests: read
       security-events: write
 
