@@ -1114,6 +1114,19 @@ describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
     },
   );
 
+  it('BMG: a meeting’s Edit details has the title, sharing and the danger area (rev 13)', async () => {
+    await openMeetings();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Meeting with Chloe Poli' })[0]!);
+    await settle();
+    expect(screen.getByRole('button', { name: '← Meetings' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Edit details/ }));
+    await settle();
+    expect(screen.getByRole('heading', { name: 'Edit meeting' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '← Meeting with Chloe Poli' })).toBeTruthy();
+    expect(screen.getByLabelText('Title')).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
   it('BMG: a meeting with AI off greys out Transcript and disables Transcribe', async () => {
     meetingAiOff = true;
     try {
