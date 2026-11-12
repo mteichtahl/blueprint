@@ -684,3 +684,11 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
   - One campaign per issue is reused for tests and the send, and an issue is sent only once.
   - The Mailchimp token is opened only on the server, and Mailchimp's error bodies (which can echo what was sent) are cut down to their short title.
   - The Newsroom now shows whether Mailchimp is connected. Before, it always said it wasn't.
+
+## Artist workspaces: a searchable dropdown in the side menu (12 Nov 2026)
+
+- **One row, not one per artist.** The side menu's ARTIST WORKSPACES section no longer lists artists (it showed the first 8). It has one dropdown row instead: it reads **Choose an artist**, or the open artist's name and picture. Opening it shows a search box and every artist, A to Z; typing narrows the list to names with every word typed, ignoring case and accents. Picking one opens their workspace.
+- **Same in the phone menu**, inside the folded ARTIST WORKSPACES heading, so a long roster doesn't push the rest of the menu down.
+- **Reviews waiting** show on each artist in the list, and the closed dropdown shows the total.
+- **Accessible:** the search box is a combobox over a listbox (↑/↓ to move, Enter to open, Esc to close and return to the row). `NavSection.picker` in `components/Shell.tsx`; tests in `test/artist-picker.test.tsx`.
+- The rest of the section (Artist gigs, Artists & applications, Invite artist, Plan templates) is unchanged.

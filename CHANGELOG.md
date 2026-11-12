@@ -53,6 +53,9 @@ Plus invitation tracking, finished reviews, and a smarter library.
   is Outcome · Stages · Timeline · History.
 - Picking a chat on the overview's Chat card opens that conversation.
 - The waveform logo shows while things load, instead of "Loading…".
+- **Artist workspaces** in the side menu are one dropdown: type an
+  artist's name to find and open their workspace, however many artists
+  there are.
 
 ### Fixed
 
