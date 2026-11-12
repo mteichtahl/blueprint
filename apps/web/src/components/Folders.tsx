@@ -17,6 +17,7 @@ import {
   type Summary,
 } from '../lib/folders.ts';
 import { Button, Field, Icon, Notice, PhonePanel, Tag, usePhone, WaveLoader } from './ui.tsx';
+import { DangerArea, EditScreen, RecordPage } from './patterns.tsx';
 
 /**
  * Folders and folder permissions (rev 10): the folder browser (tree,
@@ -896,8 +897,6 @@ export function AccessPanel({
 // ── Folder rows and the browser ───────────────────────────────────────────
 type Dialogs =
   | { kind: 'new' }
-  | { kind: 'rename'; folder: Folder }
-  | { kind: 'delete'; folder: Folder }
   | { kind: 'access'; item: ItemRef }
   | { kind: 'move'; items: ItemRef[]; to?: string | null };
 
@@ -962,64 +961,6 @@ function NameDialog({
   );
 }
 
-function FolderMenu({
-  f,
-  onAction,
-}: {
-  f: Folder;
-  onAction: (a: 'rename' | 'access' | 'move' | 'delete') => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const items: { id: 'rename' | 'access' | 'move' | 'delete'; label: string; show: boolean }[] = [
-    { id: 'rename', label: 'Rename', show: atLeast(f.level, 'edit') },
-    { id: 'access', label: 'Access', show: true },
-    { id: 'move', label: 'Move to…', show: f.level === 'manage' },
-    { id: 'delete', label: 'Delete', show: f.level === 'manage' },
-  ];
-  return (
-    <span className="relative flex-none">
-      <button
-        type="button"
-        aria-label={`More for ${f.name}`}
-        aria-expanded={open}
-        className="flex size-10 items-center justify-center rounded-lg text-lg hover:bg-secondary"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-      >
-        ⋯
-      </button>
-      {open && (
-        <ul
-          role="menu"
-          className="absolute top-full right-0 z-20 min-w-[170px] rounded-lg border border-input bg-card py-1 shadow-md"
-          onMouseLeave={() => setOpen(false)}
-        >
-          {items
-            .filter((i) => i.show)
-            .map((i) => (
-              <li key={i.id} role="none">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={`block w-full px-3 py-2 text-left hover:bg-secondary ${i.id === 'delete' ? 'text-[#B5403C]' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setOpen(false);
-                    onAction(i.id);
-                  }}
-                >
-                  {i.label}
-                </button>
-              </li>
-            ))}
-        </ul>
-      )}
-    </span>
-  );
-}
-
 export interface Selection {
   /** Selected files (folders are tracked by the browser). */
   ids: Set<string>;
@@ -1062,6 +1003,8 @@ export function FolderBrowser({
   const { list, error, load } = useFolders(cfg, token, base);
   const phone = usePhone();
   const [dialog, setDialog] = useState<Dialogs | null>(null);
+  // Folder details (rev 13, P2/P4): the open folder's record page and its edit screen.
+  const [details, setDetails] = useState<{ editing: boolean } | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [selFiles, setSelFiles] = useState<Set<string>>(new Set());
   const [selFolders, setSelFolders] = useState<Set<string>>(new Set());
@@ -1077,6 +1020,8 @@ export function FolderBrowser({
   useEffect(() => {
     if (list && typeof place === 'string' && place !== SHARED && !byId.has(place)) onPlace(null);
   }, [list, place, byId, onPlace]);
+
+  useEffect(() => setDetails(null), [place]);
 
   const visibleIds = new Set(folders.map((f) => f.folderId));
   const sharedFiles = (files ?? []).filter((f) => f.folderId && !visibleIds.has(f.folderId));
@@ -1158,15 +1103,11 @@ export function FolderBrowser({
           </Button>
         )}
         {here && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              setDialog({ kind: 'access', item: { kind: 'folder', id: here.folderId } })
-            }
-          >
-            <Icon name="users" size={15} />
-            Access
+          // Rev 13: a folder's own actions (rename, access, move, delete) live on
+          // its details page, not in a menu on its row.
+          <Button size="sm" variant="ghost" onClick={() => setDetails({ editing: false })}>
+            <Icon name="folder" size={15} />
+            Folder details
           </Button>
         )}
         <Button
@@ -1262,18 +1203,6 @@ export function FolderBrowser({
                       </span>
                     </span>
                   </button>
-                  <FolderMenu
-                    f={f}
-                    onAction={(a) =>
-                      setDialog(
-                        a === 'access'
-                          ? { kind: 'access', item: { kind: 'folder', id: f.folderId } }
-                          : a === 'move'
-                            ? { kind: 'move', items: [{ kind: 'folder', id: f.folderId }] }
-                            : { kind: a, folder: f },
-                      )
-                    }
-                  />
                 </li>
               ))}
             </ul>
@@ -1287,10 +1216,39 @@ export function FolderBrowser({
     </div>
   );
 
+  const shown =
+    details && here ? (
+      <FolderDetails
+        cfg={cfg}
+        token={token}
+        base={base}
+        rootLabel={rootLabel}
+        folder={here}
+        items={count(here)}
+        editing={details.editing}
+        onBack={() => setDetails(details.editing ? { editing: false } : null)}
+        onEdit={() => setDetails({ editing: true })}
+        onAccess={() => setDialog({ kind: 'access', item: { kind: 'folder', id: here.folderId } })}
+        onMove={() => setDialog({ kind: 'move', items: [{ kind: 'folder', id: here.folderId }] })}
+        onSaved={() => {
+          setDetails({ editing: false });
+          refresh();
+        }}
+        onDeleted={() => {
+          setDetails(null);
+          onPlace(here.parentId);
+          setNotice(`Deleted “${here.name}”.`);
+          refresh();
+        }}
+      />
+    ) : (
+      body
+    );
+
   return (
     <>
       {phone || !list ? (
-        body
+        shown
       ) : (
         <div className="flex items-start gap-4">
           <aside className="sticky top-2 w-[220px] flex-none border-r border-input pr-3">
@@ -1303,7 +1261,7 @@ export function FolderBrowser({
               onDrop={onDrop}
             />
           </aside>
-          {body}
+          {shown}
         </div>
       )}
       {dialog?.kind === 'new' && (
@@ -1318,32 +1276,6 @@ export function FolderBrowser({
               parentId: here?.folderId ?? null,
             });
             setNotice(`Made “${made.name}”.`);
-            refresh();
-          }}
-        />
-      )}
-      {dialog?.kind === 'rename' && (
-        <NameDialog
-          title="Rename folder"
-          initial={dialog.folder.name}
-          action="Save"
-          onClose={() => setDialog(null)}
-          onSave={async (name) => {
-            await api(cfg, token, 'PATCH', `${base}/${dialog.folder.folderId}`, { name });
-            refresh();
-          }}
-        />
-      )}
-      {dialog?.kind === 'delete' && (
-        <DeleteFolder
-          cfg={cfg}
-          token={token}
-          base={base}
-          folder={dialog.folder}
-          items={count(dialog.folder)}
-          onClose={() => setDialog(null)}
-          onDeleted={() => {
-            setNotice(`Deleted “${dialog.folder.name}”.`);
             refresh();
           }}
         />
@@ -1380,61 +1312,139 @@ export function FolderBrowser({
   );
 }
 
-function DeleteFolder({
+/** Folder details (rev 13): a record page, with Edit for the name and the danger area. */
+function FolderDetails({
   cfg,
   token,
   base,
-  folder,
+  rootLabel,
+  folder: f,
   items,
-  onClose,
+  editing,
+  onBack,
+  onEdit,
+  onAccess,
+  onMove,
+  onSaved,
   onDeleted,
 }: {
   cfg: AppConfig;
   token: string;
   base: string;
+  rootLabel: string;
   folder: Folder;
   items: number;
-  onClose: () => void;
+  editing: boolean;
+  onBack: () => void;
+  onEdit: () => void;
+  onAccess: () => void;
+  onMove: () => void;
+  onSaved: () => void;
   onDeleted: () => void;
 }) {
+  const [name, setName] = useState(f.name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  async function go() {
-    setBusy(true);
-    try {
-      await api(cfg, token, 'DELETE', `${base}/${folder.folderId}`);
-      onDeleted();
-      onClose();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+  useEffect(() => setName(f.name), [f.name, editing]);
+  const where = [rootLabel, ...f.path.map((p) => p?.name ?? '…')].join(' › ');
+  const when = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  if (editing) {
+    return (
+      <EditScreen
+        title="Edit folder"
+        back={{ to: f.name, onClick: onBack }}
+        busy={busy}
+        error={error}
+        canSave={!!name.trim() && name.trim() !== f.name}
+        onCancel={onBack}
+        onSave={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await api(cfg, token, 'PATCH', `${base}/${f.folderId}`, { name: name.trim() });
+            onSaved();
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        danger={
+          f.level === 'manage' && (
+            <DangerArea
+              title={`Delete ${f.name}`}
+              what={
+                <>
+                  {items > 0
+                    ? 'Everything inside it is deleted too, including folders inside. '
+                    : ''}
+                  Files that are in use, or that belong to someone else, stop the delete. A
+                  Blueprint admin can recover deleted files for 35 days.
+                </>
+              }
+              onConfirm={async () => {
+                await api(cfg, token, 'DELETE', `${base}/${f.folderId}`);
+                onDeleted();
+              }}
+            />
+          )
+        }
+      >
+        <Field
+          label="Folder name"
+          value={name}
+          maxLength={120}
+          autoFocus
+          onChange={(e) => setName(e.target.value)}
+        />
+      </EditScreen>
+    );
   }
+
   return (
-    <Dialog
-      title="Delete folder"
-      onClose={onClose}
-      footer={
+    <RecordPage
+      kind="Folder"
+      title={f.name}
+      sub={where}
+      lead={<FolderIcon />}
+      badges={
         <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
+          <Tag tone="s">{LEVEL_LABEL[f.level]}</Tag>
+          {f.customAccess && <Tag tone="n">Own access setting</Tag>}
+        </>
+      }
+      back={{ to: f.name, onClick: onBack }}
+      {...(atLeast(f.level, 'edit') ? { onEdit } : {})}
+      more={
+        <>
+          <Button variant="ghost" onClick={onAccess}>
+            <Icon name="users" size={16} />
+            Access
           </Button>
-          <Button variant="cta" disabled={busy} onClick={() => void go()}>
-            {busy ? 'Deleting…' : 'Delete'}
-          </Button>
+          {f.level === 'manage' && (
+            <Button variant="ghost" onClick={onMove}>
+              Move to…
+            </Button>
+          )}
         </>
       }
     >
-      <p>
-        Delete <b>{folder.name}</b>
-        {items > 0 ? ' and everything inside it (including folders inside)?' : '?'}
-      </p>
-      <p className="src">
-        Files that are in use, or that belong to someone else, stop the delete. A Blueprint admin
-        can recover deleted files for 35 days.
-      </p>
-      {error && <Notice tone="error">{error}</Notice>}
-    </Dialog>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[15px]">
+        <dt className="src">Owner</dt>
+        <dd>{f.ownedByMe ? 'Me' : f.ownerName}</dd>
+        <dt className="src">Inside</dt>
+        <dd>
+          {items} {items === 1 ? 'item' : 'items'}
+        </dd>
+        <dt className="src">Access</dt>
+        <dd>{f.customAccess ? 'Set on this folder' : 'Inherited from the folder above'}</dd>
+        <dt className="src">Made</dt>
+        <dd>{when(f.createdAt)}</dd>
+        <dt className="src">Last changed</dt>
+        <dd>{when(f.updatedAt)}</dd>
+      </dl>
+    </RecordPage>
   );
 }

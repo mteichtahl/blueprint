@@ -619,7 +619,6 @@ export function GigsTab({
               const g = all.find((x) => x.gigId === gigId);
               if (g) edit(g);
             }}
-            onEdit={edit}
             empty={`No ${filter === 'help' ? 'help requests' : `${filter} gigs`} for ${first} yet.`}
           />
         )}
@@ -634,16 +633,14 @@ function GigTable({
   names,
   selected,
   onOpen,
-  onEdit,
   empty,
 }: {
   gigs: Gig[];
   artistName?: string;
   names?: Record<string, string>;
   selected?: string;
+  /** P1 (rev 13): the whole row opens the gig. No buttons on rows. */
   onOpen: (gigId: string, artistId: string) => void;
-  /** BMG desktop: an Edit button on each row. */
-  onEdit?: (gig: Gig) => void;
   empty: string;
 }) {
   if (gigs.length === 0) return <p className="src">{empty}</p>;
@@ -686,11 +683,6 @@ function GigTable({
           <th scope="col">Checklist</th>
           <th scope="col">Planned by</th>
           <th scope="col">Help</th>
-          {onEdit && (
-            <th scope="col">
-              <span className="sr-only">Edit</span>
-            </th>
-          )}
         </tr>
       </thead>
       <tbody>
@@ -725,21 +717,6 @@ function GigTable({
               <td>{done(g)}</td>
               <td>{g.plannedBy === 'bmg' ? 'Blueprint' : who.split(' ')[0]}</td>
               <td>{helpOpen ? <Tag tone="k">{helpLabel(g)}</Tag> : '—'}</td>
-              {onEdit && (
-                <td>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    aria-label={`Edit ${g.title}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEdit(g);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                </td>
-              )}
             </tr>
           );
         })}
@@ -771,6 +748,11 @@ export function AllGigs({
   }, [phone, editing]);
   const form = editing && (
     <div className="flex flex-col gap-4">
+      <span>
+        <Button size="sm" variant="ghost" onClick={() => onOpenArtist(editing.artistId)}>
+          Open {names[editing.artistId] ?? 'the artist'}’s workspace
+        </Button>
+      </span>
       <GigForm
         key={editing.gigId}
         cfg={cfg}
@@ -817,10 +799,9 @@ export function AllGigs({
         <GigTable
           gigs={gigs}
           names={names}
-          onOpen={(_, artistId) => onOpenArtist(artistId)}
-          onEdit={(g) => {
+          onOpen={(gigId) => {
             setSaved(null);
-            setEditing(g);
+            setEditing(gigs.find((g) => g.gigId === gigId) ?? null);
           }}
           empty={
             filter === 'help'
