@@ -6,6 +6,7 @@ import type { Me } from '../src/lib/api.ts';
 import type { AppConfig } from '../src/lib/config.ts';
 import { Home } from '../src/pages/Home.tsx';
 import { SignIn } from '../src/pages/SignIn.tsx';
+import { NewsletterSignup } from '../src/pages/NewsletterSignup.tsx';
 
 /**
  * Phase 6 gate: WCAG 2.2 AA checks (axe-core) on every screen of the BMG
@@ -296,6 +297,17 @@ const meetingContent = {
 
 function answer(method: string, path: string): [number, unknown] {
   const p = path.replace(/^\/v1/, '').split('?')[0]!;
+  if (/^\/access\/recovery-codes$/.test(p)) {
+    return method === 'POST'
+      ? [
+          201,
+          {
+            codes: Array.from({ length: 10 }, (_, i) => `ABCDE-FGH${'JKMNPQRSTU'[i]}2`),
+            createdAt: now,
+          },
+        ]
+      : [200, { left: 0, createdAt: null, usedAt: null }];
+  }
   if (method !== 'GET') return [200, {}];
   const routes: [RegExp, unknown][] = [
     // Meeting notes (rev 11).
@@ -748,6 +760,33 @@ describe('WCAG 2.2 AA (axe-core)', () => {
     expect(await violations()).toEqual([]);
   });
 
+  it('sign-in with social buttons, and the recovery code screen', async () => {
+    render(
+      <SignIn
+        cfg={{
+          ...cfg,
+          loginDomain: 'x.auth.example',
+          socialProviders: ['Google', 'SignInWithApple'],
+        }}
+        problem="There’s no Blueprint account for that Google email."
+        onSignedIn={() => undefined}
+      />,
+    );
+    await settle();
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Continue with Apple' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Continue with Facebook' })).toBeNull();
+    expect(screen.getByText(/no Blueprint account for that Google email/)).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('the public newsletter sign-up page', async () => {
+    render(<NewsletterSignup />);
+    await settle();
+    expect(screen.getByRole('heading', { name: 'Join Our Mailing List' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
   const BMG_VIEWS = [
     'Overview',
     'Chloe Poli',
@@ -841,6 +880,21 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Profile & preferences' }));
     await settle();
     expect(screen.getByRole('button', { name: 'Upload a photo' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist phone: Profile → Security, recovery codes shown once, and text codes', async () => {
+    render(<Home {...props('artist')} cfg={{ ...cfg, smsMfa: true }} />);
+    await settle();
+    await click(/your account$/i);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile & preferences' }));
+    await settle();
+    expect(screen.getByText('Text-message codes')).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Make recovery codes' }));
+    await settle();
+    expect(screen.getByRole('list', { name: 'Your recovery codes' })).toBeTruthy();
+    expect(screen.getByText('Save these now. They won’t be shown again.')).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 

@@ -854,6 +854,8 @@ export class ApiStack extends BmgStack {
           // Rev 12: the 10-minute roll-up schedule, and a plan changing owner.
           'plan.digest',
           'plan.handover',
+          // A recovery code was used (from the public endpoint in the web stack).
+          'account.recovered',
           // Rev 8: a new version of a document, and new editors or a new owner.
           'file.versionAdded',
           'file.editorsAdded',

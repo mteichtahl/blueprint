@@ -1,3 +1,4 @@
+import { idpRedirect, withProvider } from '../src/commands/social.ts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -302,5 +303,27 @@ describe('release ship', () => {
 
   it('refuses a malformed VERSION', () => {
     expect(planShip({ ...base, versionAtSha: '1.5' }).problems).toHaveLength(1);
+  });
+});
+
+describe('social sign-in setup', () => {
+  it('turns a provider on in bmg.config.json once, keeping the rest', () => {
+    const raw = JSON.stringify({
+      $schemaVersion: 1,
+      environments: { staging: { subdomain: 'staging' }, prod: { socialProviders: ['Google'] } },
+    });
+    const once = withProvider(raw, 'prod', 'Apple');
+    expect(JSON.parse(once).environments.prod.socialProviders).toEqual(['Google', 'Apple']);
+    expect(
+      JSON.parse(withProvider(once, 'prod', 'Apple')).environments.prod.socialProviders,
+    ).toEqual(['Google', 'Apple']);
+    expect(JSON.parse(once).environments.staging).toEqual({ subdomain: 'staging' });
+    expect(once.endsWith('\n')).toBe(true);
+  });
+
+  it('gives providers Cognito’s own redirect address', () => {
+    expect(idpRedirect('bmg-prod.auth.ap-southeast-2.amazoncognito.com')).toBe(
+      'https://bmg-prod.auth.ap-southeast-2.amazoncognito.com/oauth2/idpresponse',
+    );
   });
 });

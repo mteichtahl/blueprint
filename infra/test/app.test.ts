@@ -630,10 +630,20 @@ describe('environment web app', () => {
     expect(json).toContain('\\"MfaConfiguration\\":\\"ON\\"');
   });
 
-  it('only lets the page talk to the Cognito API for sign-in', () => {
+  it('only lets the page talk to the Cognito API for sign-in (no social providers on)', () => {
     const csp = JSON.stringify(prod!.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
     expect(csp).not.toContain('amazoncognito.com');
     expect(csp).toContain("form-action 'self';");
+  });
+
+  it('serves the public endpoints from a signed function URL, never cached', () => {
+    const t = prod!;
+    t.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'AWS_IAM' });
+    const dist = JSON.stringify(t.findResources('AWS::CloudFront::Distribution'));
+    expect(dist).toContain('/public/*');
+    t.hasResourceProperties('AWS::CloudFront::OriginAccessControl', {
+      OriginAccessControlConfig: Match.objectLike({ OriginAccessControlOriginType: 'lambda' }),
+    });
   });
 });
 
@@ -931,5 +941,55 @@ describe('Phase 6 web headers', () => {
         },
       }),
     });
+  });
+});
+
+describe('social sign-in and text codes switched on (design D2)', () => {
+  const on = parseConfig({
+    ...JSON.parse(
+      readFileSync(resolve(import.meta.dirname, '../../bmg.config.example.json'), 'utf8'),
+    ),
+  });
+  on.environments.prod.socialProviders = ['Google', 'Apple', 'Facebook'];
+  on.environments.prod.smsMfa = true;
+  const app = new App();
+  const built = buildApp(app, on, { version: 'test' });
+  it('synthesizes with no unacknowledged cdk-nag findings', () => {
+    expect(() => app.synth()).not.toThrow();
+  });
+  const prod = built.environments[1]!;
+  const identity = Template.fromStack(prod.identity);
+  const web = Template.fromStack(prod.web);
+
+  it('adds each provider, reading its OAuth app from Secrets Manager', () => {
+    for (const type of ['Google', 'SignInWithApple', 'Facebook']) {
+      identity.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+        ProviderName: type,
+      });
+    }
+    expect(
+      JSON.stringify(identity.findResources('AWS::Cognito::UserPoolIdentityProvider')),
+    ).toContain('resolve:secretsmanager:');
+  });
+
+  it('turns on text codes with a role only Cognito can use', () => {
+    identity.hasResourceProperties('AWS::Cognito::UserPool', {
+      EnabledMfas: Match.arrayWith(['SMS_MFA', 'SOFTWARE_TOKEN_MFA']),
+      SmsConfiguration: Match.objectLike({ ExternalId: 'bmg-prod-cognito-sms' }),
+    });
+  });
+
+  it('gives the web client code + PKCE with the app as callback, and the buttons in config', () => {
+    web.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      AllowedOAuthFlows: ['code'],
+      SupportedIdentityProviders: Match.arrayWith([
+        'COGNITO',
+        'Google',
+        'SignInWithApple',
+        'Facebook',
+      ]),
+    });
+    const csp = JSON.stringify(web.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
+    expect(csp).toContain('amazoncognito.com');
   });
 });

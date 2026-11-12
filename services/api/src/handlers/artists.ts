@@ -33,6 +33,7 @@ import { isArtistId, newArtistId } from '@bmg/crypto';
 import { appOrigin, inviteEmail, sendMail } from '@bmg/email';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { accessRoutes } from './access.ts';
+import { newSet, RECOVERY_SK, type RecoveryRecord } from '../recovery.ts';
 import { z } from 'zod';
 import {
   audit,
@@ -103,6 +104,40 @@ async function requireAdmin(event: APIGatewayProxyEvent, action: string) {
 }
 
 /**
+ * Recovery codes (sign-in), for whoever is signed in:
+ *   GET  /access/recovery-codes  how many are left, and when they were made
+ *   POST /access/recovery-codes  ten new codes, shown once (the old ones stop
+ *                                working); needs a sign-in in the last 5 minutes
+ */
+async function recoveryCodes(event: APIGatewayProxyEvent) {
+  const principal = await principalFor(authContext(event));
+  if (!principal.mfaSatisfied) throw new HttpError(403, 'two-step verification required');
+  const key = { PK: `USER#${principal.sub}`, SK: RECOVERY_SK };
+  if (event.httpMethod === 'GET') {
+    const rec = (await db.send(new GetCommand({ TableName: env('MAIN_TABLE'), Key: key }))).Item as
+      RecoveryRecord | undefined;
+    return json(200, {
+      left: rec ? rec.codes.filter(Boolean).length : 0,
+      createdAt: rec?.createdAt ?? null,
+      usedAt: rec?.usedAt ?? null,
+    });
+  }
+  if (event.httpMethod !== 'POST') throw new HttpError(404, 'Not found');
+  if (principal.secondsSinceAuth > 300) {
+    throw new HttpError(403, 'Making recovery codes needs a fresh step-up');
+  }
+  const { shown, record } = newSet(new Date());
+  await db.send(
+    new PutCommand({
+      TableName: env('MAIN_TABLE'),
+      Item: { ...key, type: 'recovery', ...record },
+    }),
+  );
+  await audit(event, 'auth.recoveryCodes', 'success', { count: shown.length });
+  return json(201, { codes: shown, createdAt: record.createdAt });
+}
+
+/**
  * POST /artists: a BMG admin invites an artist (design F1). Needs a fresh
  * step-up. Creates the invite, starts onboarding (the artist's own KMS key),
  * creates the Cognito user with an immutable artistId in the artist group,
@@ -115,6 +150,10 @@ export const handler = handle(async (event) => {
   if (event.resource === '/access/{proxy+}') {
     // Artist invitations (onboarding) share the access proxy: no new API routes.
     if ((event.pathParameters?.proxy ?? '').startsWith('invitations')) return invitations(event);
+    // Recovery codes (sign-in) share it too: everyone's own, after a fresh sign-in.
+    if ((event.pathParameters?.proxy ?? '').startsWith('recovery-codes')) {
+      return recoveryCodes(event);
+    }
     return accessRoutes(event, temporaryPassword);
   }
   if (event.resource === '/artists/{artistId}/invite/resend') return resend(event);

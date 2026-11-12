@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { asChoice, friendlyError, otpauthUri, toStep } from '../src/lib/cognito.ts';
+import { asChoice, friendlyError, otpauthUri, toE164, toStep } from '../src/lib/cognito.ts';
+import { socialError, socialProviders } from '../src/lib/social.ts';
 import { fromB64url, requestOptions, toB64url } from '../src/lib/webauthn.ts';
 import { passwordProblems } from '../src/pages/SignIn.tsx';
 
@@ -57,7 +58,7 @@ describe('sign-in steps from Cognito', () => {
     ).toEqual({ kind: 'passkey', session: 's', options: '{"challenge":"AA"}' });
     const tokens = { AccessToken: 'a', IdToken: 'i', RefreshToken: 'r', ExpiresIn: 900 };
     expect(toStep({ AuthenticationResult: tokens })).toEqual({ kind: 'done', tokens });
-    expect(() => toStep({ ChallengeName: 'SMS_MFA' })).toThrow(/doesn’t support/);
+    expect(() => toStep({ ChallengeName: 'EMAIL_OTP' })).toThrow(/doesn’t support/);
   });
 
   it('turns Cognito errors into plain words without saying whether an account exists', () => {
@@ -101,6 +102,51 @@ describe('passkey encoding', () => {
     expect(o.rpId).toBe('app.example');
     expect(new Uint8Array(o.allowCredentials![0]!.id as ArrayBuffer)).toEqual(
       new Uint8Array([4, 5, 6]),
+    );
+  });
+});
+
+describe('text-message codes', () => {
+  it('reads Australian mobiles and international numbers as E.164', () => {
+    expect(toE164('0412 345 678')).toBe('+61412345678');
+    expect(toE164('(03) 9123-4567')).toBe('+61391234567');
+    expect(toE164('+44 7700 900123')).toBe('+447700900123');
+    expect(toE164('12345')).toBeNull();
+  });
+
+  it('asks which way when both are on, and says where the text went', () => {
+    expect(
+      toStep({
+        ChallengeName: 'SELECT_MFA_TYPE',
+        Session: 's',
+        ChallengeParameters: { MFAS_CAN_CHOOSE: '["SMS_MFA","SOFTWARE_TOKEN_MFA"]' },
+      }),
+    ).toEqual({ kind: 'chooseMfa', session: 's', sms: true, app: true });
+    expect(
+      toStep({
+        ChallengeName: 'SMS_MFA',
+        Session: 's',
+        ChallengeParameters: { CODE_DELIVERY_DESTINATION: '+*******5678' },
+      }),
+    ).toEqual({ kind: 'smsCode', session: 's', destination: '+*******5678' });
+  });
+});
+
+describe('social sign-in (design D2)', () => {
+  const base = { clientId: 'c', region: 'r', userPoolId: 'p', apiBase: '/v1' };
+  it('offers only the providers this deploy has, in a fixed order', () => {
+    expect(socialProviders({ ...base, socialProviders: ['Facebook', 'Google'] })).toEqual([]);
+    expect(
+      socialProviders({ ...base, loginDomain: 'x', socialProviders: ['Facebook', 'Google'] }),
+    ).toEqual(['Google', 'Facebook']);
+  });
+
+  it('explains an email with no invitation in plain words', () => {
+    expect(
+      socialError('PreSignUp failed with error Sign-up is by invitation only.', 'Google'),
+    ).toMatch(/^There’s no Blueprint account for that Google email/);
+    expect(socialError(null, 'SignInWithApple')).toBe(
+      'Signing in with Apple didn’t work. Try again, or use your email and password.',
     );
   });
 });

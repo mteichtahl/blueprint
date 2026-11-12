@@ -121,6 +121,10 @@ export type Step =
   | { kind: 'newPassword'; session: string }
   | { kind: 'mfaSetup'; session: string }
   | { kind: 'mfaCode'; session: string }
+  /** A text-message code was sent (to the masked number shown). */
+  | { kind: 'smsCode'; session: string; destination: string }
+  /** Both an authenticator and text codes are on: which one this time. */
+  | { kind: 'chooseMfa'; session: string; sms: boolean; app: boolean }
   | { kind: 'done'; tokens: Tokens };
 
 export function toStep(res: AuthResponse): Step {
@@ -148,6 +152,21 @@ export function toStep(res: AuthResponse): Step {
       return { kind: 'mfaSetup', session };
     case 'SOFTWARE_TOKEN_MFA':
       return { kind: 'mfaCode', session };
+    case 'SMS_MFA':
+      return {
+        kind: 'smsCode',
+        session,
+        destination: res.ChallengeParameters?.CODE_DELIVERY_DESTINATION ?? 'your phone',
+      };
+    case 'SELECT_MFA_TYPE': {
+      const options = res.ChallengeParameters?.MFAS_CAN_CHOOSE ?? '';
+      return {
+        kind: 'chooseMfa',
+        session,
+        sms: options.includes('SMS_MFA'),
+        app: options.includes('SOFTWARE_TOKEN_MFA'),
+      };
+    }
     default:
       throw new CognitoError(
         'UnsupportedChallenge',
@@ -307,4 +326,48 @@ export const completePasskeyRegistration = (
 export function otpauthUri(secret: string, email: string): string {
   const label = encodeURIComponent(`Blueprint:${email}`);
   return `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent('Blueprint')}`;
+}
+
+// ── Text-message codes (Profile → Security) ─────────────────────────────────
+/** Saves the number and texts it a code to check it. Numbers are E.164 (+61…). */
+export const setPhone = (cfg: AppConfig, accessToken: string, phone: string) =>
+  cognito(cfg, 'UpdateUserAttributes', {
+    AccessToken: accessToken,
+    UserAttributes: [{ Name: 'phone_number', Value: phone }],
+  });
+
+export const verifyPhone = (cfg: AppConfig, accessToken: string, code: string) =>
+  cognito(cfg, 'VerifyUserAttribute', {
+    AccessToken: accessToken,
+    AttributeName: 'phone_number',
+    Code: code,
+  });
+
+/** Turns text codes on or off; the authenticator stays the preferred way while it's set up. */
+export const setSmsMfa = (cfg: AppConfig, accessToken: string, on: boolean) =>
+  cognito(cfg, 'SetUserMFAPreference', {
+    AccessToken: accessToken,
+    SMSMfaSettings: { Enabled: on, PreferredMfa: false },
+  });
+
+/** The number on the account, its check, and whether text codes are on. */
+export async function smsStatus(cfg: AppConfig, accessToken: string) {
+  const u = await cognito<{
+    UserAttributes?: { Name: string; Value: string }[];
+    UserMFASettingList?: string[];
+  }>(cfg, 'GetUser', { AccessToken: accessToken });
+  const attr = (n: string) => u.UserAttributes?.find((a) => a.Name === n)?.Value;
+  return {
+    phone: attr('phone_number') ?? null,
+    verified: attr('phone_number_verified') === 'true',
+    on: (u.UserMFASettingList ?? []).includes('SMS_MFA'),
+  };
+}
+
+/** "0412 345 678" (Australia) or "+44 …" as E.164, or null if it isn't a phone number. */
+export function toE164(input: string): string | null {
+  const s = input.replace(/[\s()-]/g, '');
+  if (/^\+[1-9]\d{6,14}$/.test(s)) return s;
+  if (/^0[2-9]\d{8}$/.test(s)) return `+61${s.slice(1)}`;
+  return null;
 }

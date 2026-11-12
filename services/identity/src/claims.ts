@@ -81,6 +81,46 @@ export function signUpAllowed(
   return false;
 }
 
+/** Cognito names a social sign-in user `<provider>_<id>` (e.g. `Google_1234`). */
+export function providerOf(userName: string): { provider: string; id: string } | undefined {
+  const m = /^(Google|SignInWithApple|Facebook)_(.+)$/.exec(userName);
+  return m ? { provider: m[1]!, id: m[2]! } : undefined;
+}
+
+export interface NativeUser {
+  Username?: string;
+  Enabled?: boolean;
+  UserStatus?: string;
+  Attributes?: { Name?: string; Value?: string }[];
+}
+
+/**
+ * Which of the people with this email a social sign-in joins (design D2):
+ * an enabled account of their own (not another social sign-in) whose email
+ * is verified, and only when the provider vouches for the email too.
+ * Facebook only gives verified addresses, so it has no flag.
+ */
+export function linkTarget(
+  users: readonly NativeUser[],
+  provider: string,
+  socialEmailVerified: string | undefined,
+): string | undefined {
+  if (provider !== 'Facebook' && socialEmailVerified !== 'true') return undefined;
+  const attr = (u: NativeUser, n: string) => u.Attributes?.find((a) => a.Name === n)?.Value;
+  const ok = users.filter(
+    (u) =>
+      u.Enabled !== false &&
+      u.UserStatus !== 'EXTERNAL_PROVIDER' &&
+      !providerOf(u.Username ?? '') &&
+      // Invited accounts keep the verified email Blueprint set for them.
+      (attr(u, 'email_verified') === 'true' || u.UserStatus === 'FORCE_CHANGE_PASSWORD'),
+  );
+  return ok.length === 1 ? ok[0]!.Username : undefined;
+}
+
+/** Tells the app the account was just linked, so it signs in once more straight away. */
+export const LINKED_MARKER = 'BMG_LINKED';
+
 /** Key of the invite item in the main table. Emails are matched case-insensitively. */
 export function inviteKey(email: string): { PK: string; SK: string } {
   return { PK: `INVITE#${email.trim().toLowerCase()}`, SK: 'INVITE' };

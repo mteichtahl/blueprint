@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  linkTarget,
+  providerOf,
   buildClaims,
   ClaimsError,
   inviteKey,
@@ -92,5 +94,44 @@ describe('cognitoMessageKind', () => {
     expect(cognitoMessageKind('CustomMessage_ForgotPassword')).toBe('forgot-password');
     expect(cognitoMessageKind('CustomMessage_VerifyUserAttribute')).toBe('attribute-verification');
     expect(cognitoMessageKind('CustomMessage_Authentication')).toBeUndefined();
+  });
+});
+
+describe('social sign-in joins the person’s own account (design D2)', () => {
+  const user = (Username: string, over: Record<string, unknown> = {}, verified = 'true') => ({
+    Username,
+    Enabled: true,
+    UserStatus: 'CONFIRMED',
+    Attributes: [{ Name: 'email_verified', Value: verified }],
+    ...over,
+  });
+
+  it('reads the provider from Cognito’s user name', () => {
+    expect(providerOf('Google_1234')).toEqual({ provider: 'Google', id: '1234' });
+    expect(providerOf('SignInWithApple_00.ab_c')).toEqual({
+      provider: 'SignInWithApple',
+      id: '00.ab_c',
+    });
+    expect(providerOf('3f0e-uuid')).toBeUndefined();
+  });
+
+  it('links to the one enabled account with a verified email', () => {
+    expect(linkTarget([user('u1')], 'Google', 'true')).toBe('u1');
+    // An invited artist who hasn't set a password yet still joins.
+    expect(
+      linkTarget([user('u2', { UserStatus: 'FORCE_CHANGE_PASSWORD' }, 'false')], 'Google', 'true'),
+    ).toBe('u2');
+    // Facebook only gives verified addresses.
+    expect(linkTarget([user('u1')], 'Facebook', undefined)).toBe('u1');
+  });
+
+  it('never links an unverified social email, a turned-off account, another social user, or two matches', () => {
+    expect(linkTarget([user('u1')], 'Google', 'false')).toBeUndefined();
+    expect(linkTarget([user('u1', { Enabled: false })], 'Google', 'true')).toBeUndefined();
+    expect(
+      linkTarget([user('Facebook_9', { UserStatus: 'EXTERNAL_PROVIDER' })], 'Google', 'true'),
+    ).toBeUndefined();
+    expect(linkTarget([user('u1', {}, 'false')], 'Google', 'true')).toBeUndefined();
+    expect(linkTarget([user('u1'), user('u2')], 'Google', 'true')).toBeUndefined();
   });
 });
