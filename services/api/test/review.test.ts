@@ -58,9 +58,16 @@ describe('changes', () => {
     expect(patchAllowed('bmg-staff', 'open', { priority: 'high' })).toBeUndefined();
     expect(patchAllowed('bmg-staff', 'open', { note: 'x' })).toMatch(/Only the artist/);
     expect(patchAllowed('artist', 'open', { title: 'New' })).toBeUndefined();
-    expect(patchAllowed('artist', 'reviewed', { priority: 'low' })).toMatch(
-      /already been reviewed/,
+    expect(patchAllowed('artist', 'reviewed', { priority: 'low' })).toMatch(/already complete/);
+  });
+
+  it('lets only Blueprint complete a review, on its own and once', () => {
+    expect(patchAllowed('bmg-staff', 'open', { complete: true })).toBeUndefined();
+    expect(patchAllowed('artist', 'open', { complete: true })).toMatch(/Blueprint completes/);
+    expect(patchAllowed('bmg-admin', 'open', { complete: true, priority: 'high' })).toMatch(
+      /on its own/,
     );
+    expect(patchAllowed('bmg-admin', 'reviewed', { complete: true })).toMatch(/already complete/);
   });
 
   it('tells the artist only when BMG actually changed the timing', () => {
@@ -76,6 +83,25 @@ describe('feedback', () => {
     expect(FeedbackBody.safeParse({}).success).toBe(false);
     expect(FeedbackBody.safeParse({ comment: 'Great' }).success).toBe(true);
     expect(FeedbackBody.safeParse({ points: [{ title: 'Lift the vocal' }] }).success).toBe(true);
+  });
+
+  it('leaves the review open unless asked to complete it too', () => {
+    expect(FeedbackBody.parse({ comment: 'Great' }).complete).toBe(false);
+    expect(FeedbackBody.parse({ comment: 'Great', complete: true }).complete).toBe(true);
+  });
+
+  it('shows when feedback was given, including on reviews from before Complete existed', () => {
+    expect(publicSubmission({ ...base, feedbackAt: '2026-11-12T01:00:00Z' }).feedbackAt).toBe(
+      '2026-11-12T01:00:00Z',
+    );
+    const legacy = publicSubmission({
+      ...base,
+      status: 'reviewed',
+      reviewedAt: '2026-11-10T00:00:00Z',
+      feedbackCipher: new Uint8Array([1]),
+    });
+    expect(legacy.feedbackAt).toBe('2026-11-10T00:00:00Z');
+    expect(publicSubmission(base).feedbackAt).toBeNull();
   });
 });
 
