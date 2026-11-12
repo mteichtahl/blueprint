@@ -5,3 +5,5 @@ package-lock.json
 .bmg
 bmg.config.json
 .agent-build
+apps/e2e/playwright-report
+apps/e2e/test-results
