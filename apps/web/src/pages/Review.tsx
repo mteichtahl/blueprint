@@ -11,6 +11,8 @@ import {
 } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { download, formatSize, uploadFile, waitUntilScanned, type FileItem } from '../lib/files.ts';
+import { pickerLevel } from '../lib/folders.ts';
+import { useFolders } from '../components/Folders.tsx';
 import {
   Avatar,
   Button,
@@ -144,6 +146,13 @@ function AttachFiles({
     );
   const toggle = (id: string, on: boolean) =>
     onChange(on ? [...selected, id] : selected.filter((i) => i !== id));
+  // Rev 10: browse the Library's folders, one level at a time.
+  const { list: folderList } = useFolders(cfg, token, `/artists/${artistId}/folders`);
+  const [at, setAt] = useState<string | null>(null);
+  const level = pickerLevel(folderList?.folders ?? [], usable, at);
+  const parentName = level.here?.parentId
+    ? (folderList?.folders.find((f) => f.folderId === level.here!.parentId)?.name ?? '…')
+    : 'My library';
 
   async function upload(file: File) {
     setMsg(null);
@@ -187,8 +196,36 @@ function AttachFiles({
       {usable.length === 0 ? (
         <p className="src">No files in your library yet. Upload one below.</p>
       ) : (
-        <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-lg border border-input p-2">
-          {usable.map((f) => (
+        <div className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-lg border border-input p-2">
+          {level.here && (
+            <div className="flex items-center gap-2 px-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setAt(level.here!.parentId ?? null)}
+              >
+                ← {parentName}
+              </Button>
+              <b className="min-w-0 truncate">{level.here.name}</b>
+            </div>
+          )}
+          {level.folders.map((f) => (
+            <button
+              key={f.folderId}
+              type="button"
+              onClick={() => setAt(f.folderId)}
+              className="flex min-h-9 items-center gap-2.5 rounded-md px-1 text-left hover:bg-[#F6F8FA] dark:hover:bg-secondary"
+            >
+              <Icon name="folder" size={16} />
+              <span className="min-w-0 flex-1 truncate font-bold">{f.name}</span>
+              <span aria-hidden="true">›</span>
+            </button>
+          ))}
+          {level.files.length === 0 && level.folders.length === 0 && (
+            <p className="src px-1">Nothing in this folder.</p>
+          )}
+          {level.files.map((f) => (
             <label key={f.fileId} className="flex min-h-9 items-center gap-2.5 px-1">
               <input
                 type="checkbox"

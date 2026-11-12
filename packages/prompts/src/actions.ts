@@ -11,6 +11,17 @@ import { z } from 'zod';
 const ArtistId = z.string().regex(/^art_[a-z0-9]{10,32}$/);
 const Summary = z.string().trim().min(1).max(200);
 
+// Folder actions (rev 10): the same rules as the folder screens, re-checked by the API.
+/** Blueprint's library, or one artist's Library. */
+const Space = z.union([z.literal('library'), ArtistId]);
+const FolderId = z.string().regex(/^[a-z0-9]{10,40}$/);
+const ItemRef = z.object({ kind: z.enum(['file', 'folder']), id: FolderId }).strict();
+const FolderName = z.string().trim().min(1).max(120);
+const GrantKey = z
+  .string()
+  .regex(/^(p:[0-9a-f-]{36}|a:art_[a-z0-9]{10,32}|g:team|g:admins|g:artists)$/);
+const Level = z.enum(['none', 'view', 'edit', 'manage']);
+
 export const Action = z.discriminatedUnion('type', [
   z
     .object({
@@ -40,7 +51,59 @@ export const Action = z.discriminatedUnion('type', [
       priority: z.enum(['high', 'medium', 'low']),
     })
     .strict(),
+  z
+    .object({
+      type: z.literal('createFolder'),
+      summary: Summary,
+      space: Space,
+      name: FolderName,
+      /** Leave out (or null) for the top of the library. */
+      parentId: FolderId.nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('renameFolder'),
+      summary: Summary,
+      space: Space,
+      folderId: FolderId,
+      name: FolderName,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('moveItems'),
+      summary: Summary,
+      space: Space,
+      items: z.array(ItemRef).min(1).max(50),
+      /** The folder to move into; null for the top. */
+      to: FolderId.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('copyItems'),
+      summary: Summary,
+      space: Space,
+      items: z.array(ItemRef).min(1).max(50),
+      to: FolderId.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      /** Change who can open a folder or file; null resets someone to inherited. */
+      type: z.literal('setAccess'),
+      summary: Summary,
+      space: Space,
+      item: ItemRef,
+      grants: z.record(GrantKey, Level.nullable()),
+    })
+    .strict(),
 ]);
+
+/** Where an action's folder routes live: `/library/folders` or `/artists/<id>/folders`. */
+export const foldersPath = (space: string) =>
+  space === 'library' ? '/library/folders' : `/artists/${space}/folders`;
 export type Action = z.infer<typeof Action>;
 
 export const MAX_ACTIONS = 10;

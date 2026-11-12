@@ -1029,6 +1029,31 @@ describe('WCAG 2.2 AA (axe-core): folders (rev 10)', () => {
     expect(screen.getByLabelText('Access for All artists')).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
+
+  it('BMG: search, Select with Copy to… and Download as ZIP, and the copy picker (rev 10)', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Document library/ })[0]!);
+    await settle();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Library' }), {
+      target: { value: 'contr' },
+    });
+    expect(screen.getByRole('list', { name: 'Folders found' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Library' }), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Contracts' }));
+    expect(screen.getByRole('button', { name: 'Copy to…' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Download as ZIP/ })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to…' }));
+    await settle();
+    expect(screen.getByRole('dialog', { name: /Copy 1 item to…/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy here' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
 });
 
 describe('WCAG 2.2 AA (axe-core): Access & permissions', () => {

@@ -18,7 +18,13 @@ import {
 import { makeThumbnail } from '../lib/thumbnail.ts';
 import { openLink } from '../lib/push.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
-import { AccessPanel, CustomAccess, MoveDialog, useFolders } from '../components/Folders.tsx';
+import {
+  AccessPanel,
+  copiedText,
+  CustomAccess,
+  MoveDialog,
+  useFolders,
+} from '../components/Folders.tsx';
 import { foldersBase } from '../lib/folders.ts';
 import {
   Avatar,
@@ -216,7 +222,8 @@ function DocumentDetail({
   // Folders (rev 10): where it is, who has access, and moving it.
   const base = foldersBase(collection);
   const folders = useFolders(cfg, token, base);
-  const [panel, setPanel] = useState<'access' | 'move' | null>(null);
+  const [panel, setPanel] = useState<'access' | 'move' | 'copy' | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const [moved, setMoved] = useState<{ to: string | null; name: string } | null>(null);
   const folder = f.folderId
     ? folders.list?.folders.find((x) => x.folderId === f.folderId)
@@ -287,6 +294,11 @@ function DocumentDetail({
             Move to…
           </Button>
         )}
+        {f.status === 'available' && (
+          <Button variant="ghost" onClick={() => setPanel('copy')}>
+            Copy to…
+          </Button>
+        )}
       </div>
       {panel === 'access' && (
         <AccessPanel
@@ -298,6 +310,22 @@ function DocumentDetail({
           onSaved={onChanged}
         />
       )}
+      {panel === 'copy' && (
+        <MoveDialog
+          cfg={cfg}
+          token={token}
+          base={base}
+          rootLabel="Library"
+          items={[{ kind: 'file', id: f.fileId }]}
+          mode="copy"
+          onClose={() => setPanel(null)}
+          onMoved={(_to, name, done) => {
+            setCopied(copiedText(name, done));
+            onChanged();
+          }}
+        />
+      )}
+      {copied && <Notice tone="success">{copied}</Notice>}
       {panel === 'move' && (
         <MoveDialog
           cfg={cfg}

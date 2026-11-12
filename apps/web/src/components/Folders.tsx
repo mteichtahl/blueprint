@@ -8,8 +8,10 @@ import {
   LEVEL_LABEL,
   LEVELS,
   listFolders,
+  copyItems,
   moveItems,
   type AccessInfo,
+  type CopyResult,
   type Folder,
   type FolderList,
   type ItemRef,
@@ -18,6 +20,22 @@ import {
 } from '../lib/folders.ts';
 import { Button, Field, Icon, Notice, PhonePanel, Tag, usePhone, WaveLoader } from './ui.tsx';
 import { DangerArea, EditScreen, RecordPage } from './patterns.tsx';
+import { downloadZip, searchLibrary, zipEntries, zipTooBig, type SearchScope } from '../lib/zip.ts';
+
+/** "Copied 3 files and 1 folder to “Contracts”" (and what was left out). */
+export function copiedText(name: string, done?: CopyResult): string {
+  if (!done) return `Copied to “${name}”.`;
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  const parts = [
+    done.files ? n(done.files, 'file', 'files') : '',
+    done.folders ? n(done.folders, 'folder', 'folders') : '',
+  ].filter(Boolean);
+  return `Copied ${parts.join(' and ') || 'nothing'} to “${name}”.${
+    done.skipped
+      ? ` ${n(done.skipped, 'item', 'items')} you can’t open or still being scanned were left out.`
+      : ''
+  }`;
+}
 
 /**
  * Folders and folder permissions (rev 10): the folder browser (tree,
@@ -385,6 +403,7 @@ export function MoveDialog({
   to: preset,
   onClose,
   onMoved,
+  mode = 'move',
 }: {
   cfg: AppConfig;
   token: string;
@@ -394,8 +413,12 @@ export function MoveDialog({
   to?: string | null;
   onClose: () => void;
   /** Done: where it went (null is the top) and that folder's name. */
-  onMoved: (to: string | null, name: string) => void;
+  onMoved: (to: string | null, name: string, copied?: CopyResult) => void;
+  /** Copy to… (rev 10) picks a folder the same way; copies need no access preview. */
+  mode?: 'move' | 'copy';
 }) {
+  const copying = mode === 'copy';
+  const Verb = copying ? 'Copy' : 'Move';
   const { list, error: loadError } = useFolders(cfg, token, base);
   // Callers often pass a new array on every render. Key the check on what is
   // being moved, so a redraw around the dialog doesn't restart it (which
@@ -415,7 +438,7 @@ export function MoveDialog({
     moving.has(f.folderId) || f.path.some((p) => p && moving.has(p.folderId));
 
   useEffect(() => {
-    if (target === undefined) return;
+    if (target === undefined || copying) return;
     setSummary(null);
     setError(null);
     let live = true;
@@ -425,14 +448,18 @@ export function MoveDialog({
     return () => {
       live = false;
     };
-  }, [cfg, token, base, itemsKey, target]);
+  }, [cfg, token, base, itemsKey, target, copying]);
 
   async function go() {
     if (target === undefined) return;
     setBusy(true);
     try {
-      await moveItems(cfg, token, base, items, target, false);
-      onMoved(target, target === null ? rootLabel : (byId.get(target)?.name ?? 'the folder'));
+      const name = target === null ? rootLabel : (byId.get(target)?.name ?? 'the folder');
+      if (copying) onMoved(target, name, await copyItems(cfg, token, base, items, target));
+      else {
+        await moveItems(cfg, token, base, items, target, false);
+        onMoved(target, name);
+      }
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -446,7 +473,7 @@ export function MoveDialog({
     const name = target === null ? rootLabel : (byId.get(target)?.name ?? 'that folder');
     return (
       <Dialog
-        title={`Move ${what}`}
+        title={`${Verb} ${what}`}
         onClose={onClose}
         footer={
           <>
@@ -456,18 +483,29 @@ export function MoveDialog({
             >
               {preset === undefined ? 'Back' : 'Cancel'}
             </Button>
-            <Button variant="cta" disabled={!summary || busy} onClick={() => void go()}>
-              {busy ? 'Moving…' : `Move to ${name}`}
+            <Button
+              variant="cta"
+              disabled={(!copying && !summary) || busy}
+              onClick={() => void go()}
+            >
+              {busy ? (copying ? 'Copying…' : 'Moving…') : `${Verb} to ${name}`}
             </Button>
           </>
         }
       >
-        <p>
-          Moving to <b>{name}</b>. Moved items keep their own access settings and take the rest from
-          their new folder.
-        </p>
+        {copying ? (
+          <p>
+            Copying to <b>{name}</b>. The copies are yours and take {name}’s access. Versions and
+            the originals’ own access settings stay with the originals.
+          </p>
+        ) : (
+          <p>
+            Moving to <b>{name}</b>. Moved items keep their own access settings and take the rest
+            from their new folder.
+          </p>
+        )}
         {error && <Notice tone="error">{error}</Notice>}
-        {!summary && !error && <WaveLoader />}
+        {!copying && !summary && !error && <WaveLoader />}
         {summary && <SummaryNotice s={summary} />}
       </Dialog>
     );
@@ -483,7 +521,7 @@ export function MoveDialog({
       : !!here && atLeast(here.level, 'edit') && !blocked(here);
   return (
     <Dialog
-      title={`Move ${what} to…`}
+      title={`${Verb} ${what} to…`}
       onClose={onClose}
       footer={
         <>
@@ -491,7 +529,7 @@ export function MoveDialog({
             Cancel
           </Button>
           <Button variant="cta" disabled={!canHere} onClick={() => setTarget(at)}>
-            Move here
+            {Verb} here
           </Button>
         </>
       }
@@ -898,7 +936,8 @@ export function AccessPanel({
 type Dialogs =
   | { kind: 'new' }
   | { kind: 'access'; item: ItemRef }
-  | { kind: 'move'; items: ItemRef[]; to?: string | null };
+  | { kind: 'move'; items: ItemRef[]; to?: string | null }
+  | { kind: 'copy'; items: ItemRef[] };
 
 function NameDialog({
   title,
@@ -1009,6 +1048,12 @@ export function FolderBrowser({
   const [selFiles, setSelFiles] = useState<Set<string>>(new Set());
   const [selFolders, setSelFolders] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
+  // This folder / Everywhere search (rev 10).
+  const [query, setQuery] = useState('');
+  const [scope, setScope] = useState<SearchScope>('here');
+  // Download as ZIP (rev 10): progress while the files are fetched.
+  const [zipping, setZipping] = useState<string | null>(null);
+  const [zipError, setZipError] = useState<string | null>(null);
   const refresh = () => {
     void load();
     onChanged();
@@ -1040,6 +1085,16 @@ export function FolderBrowser({
     (place === SHARED
       ? sharedFiles
       : files.filter((f) => (f.folderId ?? null) === (here?.folderId ?? null)));
+  const searching = place !== SHARED && !!query.trim();
+  const found = searching
+    ? searchLibrary(
+        query,
+        here ? scope : 'everywhere',
+        here?.folderId ?? null,
+        folders.filter((f) => !f.sharedWithMe),
+        files ?? [],
+      )
+    : { folders: [], files: [] };
   const count = (f: Folder) =>
     folders.filter((x) => x.parentId === f.folderId).length +
     (files ?? []).filter((x) => x.folderId === f.folderId).length;
@@ -1079,6 +1134,29 @@ export function FolderBrowser({
       }
     : undefined;
   const selectedCount = selFiles.size + selFolders.size;
+  const selectedItems = (): ItemRef[] => [
+    ...[...selFiles].map((id) => ({ kind: 'file' as const, id })),
+    ...[...selFolders].map((id) => ({ kind: 'folder' as const, id })),
+  ];
+  const zipItems = async (items: ItemRef[], name: string) => {
+    setZipError(null);
+    const { entries, skipped } = zipEntries(items, folders, files ?? []);
+    const tooBig = zipTooBig(entries);
+    if (tooBig) return setZipError(tooBig);
+    try {
+      setZipping(`Getting ${entries.length} ${entries.length === 1 ? 'file' : 'files'} ready…`);
+      await downloadZip(cfg, token, collection, entries, name, (done, total) =>
+        setZipping(`Downloading ${done} of ${total}…`),
+      );
+      setNotice(
+        `Downloaded “${name}.zip”${skipped ? ` (${skipped} still being scanned or not kept were left out)` : ''}.`,
+      );
+    } catch (e) {
+      setZipError((e as Error).message);
+    } finally {
+      setZipping(null);
+    }
+  };
   const stopSelecting = () => {
     setSelecting(false);
     setSelFiles(new Set());
@@ -1124,24 +1202,104 @@ export function FolderBrowser({
               size="sm"
               variant="navy"
               disabled={selectedCount === 0}
-              onClick={() =>
-                setDialog({
-                  kind: 'move',
-                  items: [
-                    ...[...selFiles].map((id) => ({ kind: 'file' as const, id })),
-                    ...[...selFolders].map((id) => ({ kind: 'folder' as const, id })),
-                  ],
-                })
-              }
+              onClick={() => setDialog({ kind: 'move', items: selectedItems() })}
             >
               Move to…
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={selectedCount === 0}
+              onClick={() => setDialog({ kind: 'copy', items: selectedItems() })}
+            >
+              Copy to…
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={selectedCount === 0 || !!zipping}
+              onClick={() => void zipItems(selectedItems(), here?.name ?? rootLabel)}
+            >
+              <Icon name="download" size={15} />
+              Download as ZIP
             </Button>
           </>
         )}
       </div>
+      {place !== SHARED && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="min-h-11 min-w-[min(260px,100%)] flex-1 rounded-lg border border-input bg-white px-3 text-base shadow-xs"
+            type="search"
+            aria-label={`Search ${rootLabel}`}
+            placeholder="Search by name"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query.trim() && here && (
+            <div className="seg" role="tablist" aria-label="Search where">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === 'here'}
+                onClick={() => setScope('here')}
+              >
+                This folder
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === 'everywhere'}
+                onClick={() => setScope('everywhere')}
+              >
+                Everywhere
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {(error || notice) && <Notice tone={error ? 'error' : 'success'}>{error ?? notice}</Notice>}
+      {zipping && <Notice>{zipping}</Notice>}
+      {zipError && <Notice tone="error">{zipError}</Notice>}
       {!list && !error ? (
         <WaveLoader />
+      ) : searching ? (
+        <>
+          <p className="src" aria-live="polite">
+            {found.folders.length + found.files.length === 0
+              ? 'Nothing matches.'
+              : `${found.folders.length + found.files.length} found ${scope === 'here' && here ? `in “${here.name}”` : `in ${rootLabel}`}`}
+          </p>
+          {found.folders.length > 0 && (
+            <ul className="flex flex-col gap-1.5" aria-label="Folders found">
+              {found.folders.map((f) => (
+                <li key={f.folderId}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery('');
+                      onPlace(f.folderId);
+                    }}
+                    className="flex min-h-[52px] w-full items-center gap-3 rounded-[10px] border border-input bg-card px-3 py-2 text-left shadow-xs hover:bg-[#F6F8FA] dark:hover:bg-secondary"
+                  >
+                    <FolderIcon />
+                    <span className="min-w-0 flex-1">
+                      <b className="line-clamp-2 block [overflow-wrap:anywhere]">{f.name}</b>
+                      <span className="src">
+                        {[rootLabel, ...f.path.map((p) => p?.name ?? '…')].join(' › ')}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {found.files.length > 0 &&
+            renderFiles(found.files, {
+              selection,
+              onDragStart: (e, f) => onDragStart(e, { kind: 'file', id: f.fileId }),
+            })}
+        </>
       ) : (
         <>
           {(subfolders.length > 0 || (place === null && hasShared)) && (
@@ -1230,6 +1388,8 @@ export function FolderBrowser({
         onEdit={() => setDetails({ editing: true })}
         onAccess={() => setDialog({ kind: 'access', item: { kind: 'folder', id: here.folderId } })}
         onMove={() => setDialog({ kind: 'move', items: [{ kind: 'folder', id: here.folderId }] })}
+        onCopy={() => setDialog({ kind: 'copy', items: [{ kind: 'folder', id: here.folderId }] })}
+        onZip={() => void zipItems([{ kind: 'folder', id: here.folderId }], here.name)}
         onSaved={() => {
           setDetails({ editing: false });
           refresh();
@@ -1290,6 +1450,24 @@ export function FolderBrowser({
           onSaved={refresh}
         />
       )}
+      {dialog?.kind === 'copy' && (
+        <MoveDialog
+          cfg={cfg}
+          token={token}
+          base={base}
+          rootLabel={rootLabel}
+          items={dialog.items}
+          mode="copy"
+          onClose={() => setDialog(null)}
+          onMoved={(to, name, done) => {
+            stopSelecting();
+            setDetails(null);
+            onPlace(to);
+            setNotice(copiedText(name, done));
+            refresh();
+          }}
+        />
+      )}
       {dialog?.kind === 'move' && (
         <MoveDialog
           cfg={cfg}
@@ -1325,6 +1503,8 @@ function FolderDetails({
   onEdit,
   onAccess,
   onMove,
+  onCopy,
+  onZip,
   onSaved,
   onDeleted,
 }: {
@@ -1339,6 +1519,8 @@ function FolderDetails({
   onEdit: () => void;
   onAccess: () => void;
   onMove: () => void;
+  onCopy: () => void;
+  onZip: () => void;
   onSaved: () => void;
   onDeleted: () => void;
 }) {
@@ -1428,6 +1610,13 @@ function FolderDetails({
               Move to…
             </Button>
           )}
+          <Button variant="ghost" onClick={onCopy}>
+            Copy to…
+          </Button>
+          <Button variant="ghost" onClick={onZip}>
+            <Icon name="download" size={16} />
+            Download as ZIP
+          </Button>
         </>
       }
     >

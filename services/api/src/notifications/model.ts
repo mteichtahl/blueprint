@@ -124,6 +124,21 @@ export type DomainEvent =
       restoredFrom?: number;
     }
   | {
+      /**
+       * Access given in the Access panel, or a library document shared with
+       * artists (rev 10): the people who can open it now and couldn't before.
+       */
+      type: 'item.shared';
+      /** `library` or the artist's id. */
+      space: string;
+      kind: 'file' | 'folder';
+      id: string;
+      name: string;
+      toSubs: string[];
+      bySub: string;
+      byName: string;
+    }
+  | {
       /** People given edit access to a document, or handed it (rev 8). */
       type: 'file.editorsAdded';
       fileId: string;
@@ -406,6 +421,22 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
         },
       };
     }
+    case 'item.shared':
+      return {
+        to: everyone.filter((r) => e.toSubs.includes(r.sub) && r.sub !== e.bySub),
+        draft: {
+          kind: 'file',
+          title: `${e.byName} shared “${e.name}” with you`,
+          body:
+            e.kind === 'folder'
+              ? 'Open the folder to see what’s inside.'
+              : 'Open it to read or download it.',
+          link:
+            e.kind === 'folder'
+              ? `folder:${e.space}/${e.id}`
+              : docLink({ fileId: e.id, ...(e.space === 'library' ? {} : { artistId: e.space }) }),
+        },
+      };
     case 'plan.updated':
     case 'plan.ownerChanged':
     case 'file.versionAdded':

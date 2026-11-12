@@ -521,6 +521,7 @@ export function ArtistFiles({
   kind = 'all',
   onOpenChange,
   openFileId,
+  openFolderId,
 }: {
   cfg: AppConfig;
   token: string;
@@ -529,6 +530,8 @@ export function ArtistFiles({
   isAdmin?: boolean;
   /** Open this document's page straight away (a notification or "Where it's used" link). */
   openFileId?: string | null;
+  /** Open this folder straight away (a "shared with you" notification, rev 10). */
+  openFolderId?: string | null;
   /** Library type filter: everything, or documents only (assets have their own gallery). */
   kind?: Exclude<LibraryKind, 'assets'>;
   /** A document page opened or closed (so the screen can hide what's around it). */
@@ -551,6 +554,9 @@ export function ArtistFiles({
   useEffect(() => {
     if (openFileId) setOpened({ fileId: openFileId } as FileItem);
   }, [openFileId]);
+  useEffect(() => {
+    if (openFolderId) setPlace(openFolderId);
+  }, [openFolderId]);
   useEffect(() => onOpenChange?.(!!opened), [opened, onOpenChange]);
 
   const upload = (
@@ -758,6 +764,7 @@ export function Library({
   isBmg,
   artists,
   openFileId,
+  openFolderId,
   onClosed,
   onOpenChange,
 }: {
@@ -768,6 +775,8 @@ export function Library({
   artists: ArtistSummary[];
   /** Open this document's page straight away (from a Studio HQ card). */
   openFileId?: string | null;
+  /** Open this folder straight away (a "shared with you" notification, rev 10). */
+  openFolderId?: string | null;
   /** The opened document was closed. */
   onClosed?: () => void;
   /** A document page opened or closed (so the screen can hide what's around it). */
@@ -788,6 +797,9 @@ export function Library({
   useEffect(() => {
     if (openFileId) setOpened({ fileId: openFileId } as FileItem);
   }, [openFileId]);
+  useEffect(() => {
+    if (openFolderId) setPlace(openFolderId);
+  }, [openFolderId]);
   useEffect(() => onOpenChange?.(!!opened), [opened, onOpenChange]);
   const back = () => {
     setOpened(null);
