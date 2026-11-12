@@ -312,3 +312,168 @@ export function SectionSwitch<T extends string>({
     </div>
   );
 }
+
+/**
+ * P1 Select mode (rev 13): rows open their item, so acting on several items
+ * at once is a mode. "Select" turns it on; a row tap then ticks the row
+ * instead of opening it, and the bar shows what can be done to the ticked
+ * ones. The library has its own (folders and Move to…).
+ */
+export function useSelect() {
+  const [on, setOn] = useState(false);
+  const [ids, setIds] = useState<ReadonlySet<string>>(new Set());
+  return {
+    on,
+    ids,
+    has: (id: string) => ids.has(id),
+    toggle: (id: string) =>
+      setIds((s) => {
+        const n = new Set(s);
+        if (n.has(id)) n.delete(id);
+        else n.add(id);
+        return n;
+      }),
+    set: (list: readonly string[]) => setIds(new Set(list)),
+    start: () => setOn(true),
+    stop: () => {
+      setOn(false);
+      setIds(new Set());
+    },
+  };
+}
+export type SelectState = ReturnType<typeof useSelect>;
+
+/** One thing the Select bar can do to every ticked item. */
+export interface BulkAction {
+  label: string;
+  /** Does it for one item; a thrown error is counted and reported. */
+  run: (id: string) => Promise<void>;
+  /** Only the ticked items it applies to (Mark done skips done ones). */
+  applies?: (id: string) => boolean;
+  /** The success message, e.g. "Marked 3 to-dos done". */
+  done: (n: number) => string;
+}
+
+/**
+ * The Select button, then (in Select mode) the count, Select all, the bulk
+ * actions and Cancel. Items are changed one at a time with the routes each
+ * screen already uses; failures are counted, never hidden.
+ */
+export function SelectBar({
+  sel,
+  all,
+  actions,
+  onDone,
+}: {
+  sel: SelectState;
+  /** Every item that can be ticked right now. */
+  all: readonly string[];
+  actions: readonly BulkAction[];
+  /** After a bulk action ran: reload the list. */
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  if (!sel.on) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={all.length === 0}
+            onClick={() => {
+              setResult(null);
+              sel.start();
+            }}
+          >
+            Select
+          </Button>
+        </div>
+        {result && <Notice tone={result.tone}>{result.text}</Notice>}
+      </div>
+    );
+  }
+  const picked = [...sel.ids].filter((id) => all.includes(id));
+  const run = async (a: BulkAction) => {
+    const ids = picked.filter((id) => a.applies?.(id) ?? true);
+    setBusy(a.label);
+    setResult(null);
+    let ok = 0;
+    let firstError = '';
+    for (const id of ids) {
+      try {
+        await a.run(id);
+        ok++;
+      } catch (e) {
+        firstError ||= (e as Error).message;
+      }
+    }
+    setBusy(null);
+    const failed = ids.length - ok;
+    setResult(
+      failed
+        ? {
+            tone: 'error',
+            text: `${ok ? `${a.done(ok)}. ` : ''}${failed} couldn’t be changed: ${firstError}`,
+          }
+        : { tone: 'success', text: a.done(ok) },
+    );
+    sel.stop();
+    onDone();
+  };
+  const everything = picked.length === all.length;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 rounded-[10px] border border-input bg-card px-3 py-2"
+      role="toolbar"
+      aria-label="Selected items"
+    >
+      <span className="src" aria-live="polite">
+        {picked.length} selected
+      </span>
+      <Button size="sm" variant="ghost" onClick={() => sel.set(everything ? [] : all)}>
+        {everything ? 'Clear' : 'Select all'}
+      </Button>
+      {actions.map((a) => {
+        const n = picked.filter((id) => a.applies?.(id) ?? true).length;
+        return (
+          <Button
+            key={a.label}
+            size="sm"
+            variant="navy"
+            disabled={!!busy || n === 0}
+            onClick={() => void run(a)}
+          >
+            {busy === a.label ? 'Working…' : a.label}
+          </Button>
+        );
+      })}
+      <Button size="sm" variant="ghost" className="ml-auto" disabled={!!busy} onClick={sel.stop}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
+/** The tick on a row in Select mode (its label names the item). */
+export function SelectBox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <input
+      type="checkbox"
+      className="size-5 flex-none"
+      aria-label={`Select ${label}`}
+      checked={checked}
+      onChange={onChange}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}

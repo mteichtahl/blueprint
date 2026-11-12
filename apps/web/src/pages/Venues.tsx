@@ -1,4 +1,12 @@
-import { BackLink, DangerArea, RecordPage } from '../components/patterns.tsx';
+import {
+  BackLink,
+  DangerArea,
+  RecordPage,
+  SelectBar,
+  SelectBox,
+  useSelect,
+  type SelectState,
+} from '../components/patterns.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -15,7 +23,7 @@ import {
   TextArea,
   WaveLoader,
 } from '../components/ui.tsx';
-import { ContactPicker, type Contact } from './Contacts.tsx';
+import { archiveActions, ContactPicker, type Contact } from './Contacts.tsx';
 import {
   LogoTile,
   lookupableUrl,
@@ -562,6 +570,8 @@ export function Venues({
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Select mode (rev 13): Blueprint archives or restores several at once.
+  const sel = useSelect();
 
   /** Archive or delete. Throws, so the danger area can show why it didn't work. */
   async function act(v: Venue, method: 'PATCH' | 'DELETE', done: string) {
@@ -732,6 +742,20 @@ export function Venues({
           </label>
         )}
       </div>
+      {isBmg && !compact && venues && (
+        <SelectBar
+          sel={sel}
+          all={venues.map((v) => v.venueId)}
+          actions={archiveActions(
+            cfg,
+            token,
+            venues.map((v) => ({ id: v.venueId, archived: v.archived })),
+            (id) => `/venues/${id}`,
+            ['venue', 'venues'],
+          )}
+          onDone={() => void reload()}
+        />
+      )}
       {venues === null ? (
         <WaveLoader />
       ) : venues.length === 0 ? (
@@ -747,12 +771,22 @@ export function Venues({
       ) : (
         <DataTable
           label="Venues"
-          cards={venueCards(venues, setOpen, (v) => (
-            <VenueLogo cfg={cfg} token={token} venue={v} size={40} />
-          ))}
+          cards={venueCards(
+            venues,
+            setOpen,
+            (v) => (
+              <VenueLogo cfg={cfg} token={token} venue={v} size={40} />
+            ),
+            sel,
+          )}
         >
           <thead>
             <tr>
+              {sel.on && (
+                <th scope="col">
+                  <span className="sr-only">Selected</span>
+                </th>
+              )}
               <th scope="col">Venue</th>
               <th scope="col">Suburb</th>
               <th scope="col">Capacity</th>
@@ -767,12 +801,21 @@ export function Venues({
               <tr
                 key={v.venueId}
                 className={`cursor-pointer ${v.archived ? 'opacity-60' : ''}`}
-                onClick={() => setOpen(v)}
+                onClick={() => (sel.on ? sel.toggle(v.venueId) : setOpen(v))}
               >
+                {sel.on && (
+                  <td className="w-10">
+                    <SelectBox
+                      label={v.name}
+                      checked={sel.has(v.venueId)}
+                      onChange={() => sel.toggle(v.venueId)}
+                    />
+                  </td>
+                )}
                 <td>
                   <span className="flex items-center gap-2.5">
                     <VenueLogo cfg={cfg} token={token} venue={v} size={32} />
-                    <button type="button" className="font-bold">
+                    <button type="button" className="font-bold" tabIndex={sel.on ? -1 : undefined}>
                       {v.name}
                     </button>
                   </span>
@@ -801,11 +844,23 @@ function venueCards(
   venues: Venue[],
   open: (v: Venue) => void,
   logo: (v: Venue) => React.ReactNode,
+  select?: SelectState,
 ) {
+  const selecting = !!select?.on;
   return venues.map((v) => (
     <RowCard
       key={v.venueId}
-      lead={logo(v)}
+      lead={
+        selecting ? (
+          <SelectBox
+            label={v.name}
+            checked={select!.has(v.venueId)}
+            onChange={() => select!.toggle(v.venueId)}
+          />
+        ) : (
+          logo(v)
+        )
+      }
       title={v.name}
       status={v.archived ? <Tag>Archived</Tag> : undefined}
       sub={[v.suburb, v.capacity ? `Capacity ${v.capacity}` : ''].filter(Boolean).join(' · ')}
@@ -823,7 +878,7 @@ function venueCards(
           )}
         </>
       }
-      onOpen={() => open(v)}
+      onOpen={() => (selecting ? select!.toggle(v.venueId) : open(v))}
     />
   ));
 }

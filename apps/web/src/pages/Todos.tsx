@@ -1,4 +1,11 @@
-import { BackLink } from '../components/patterns.tsx';
+import {
+  BackLink,
+  SelectBar,
+  SelectBox,
+  useSelect,
+  type BulkAction,
+  type SelectState,
+} from '../components/patterns.tsx';
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
@@ -521,16 +528,45 @@ function useEditing(load: () => Promise<void>) {
 }
 
 /** P1 (rev 13): the whole row opens the to-do; Mark done is on the to-do. */
+/** Select mode's bulk actions for to-dos: Mark done and Mark not done (rev 13). */
+function todoActions(cfg: AppConfig, token: string, todos: readonly Todo[]): BulkAction[] {
+  const byId = new Map(todos.map((t) => [t.todoId, t]));
+  const set = (done: boolean) => async (id: string) => {
+    const t = byId.get(id)!;
+    await api(cfg, token, 'PATCH', `/artists/${t.artistId}/todos/${t.todoId}`, { done });
+  };
+  const n = (k: number) => `${k} ${k === 1 ? 'to-do' : 'to-dos'}`;
+  return [
+    {
+      label: 'Mark done',
+      run: set(true),
+      applies: (id) => !byId.get(id)?.done,
+      done: (k) => `Marked ${n(k)} done`,
+    },
+    {
+      label: 'Mark not done',
+      run: set(false),
+      applies: (id) => !!byId.get(id)?.done,
+      done: (k) => `Marked ${n(k)} not done`,
+    },
+  ];
+}
+
 function TodoRows({
   todos,
   onEdit,
   artistName,
+  select,
 }: {
   todos: Todo[];
   onEdit: (t: Todo) => void;
   artistName?: (id: string) => string;
+  /** Select mode (rev 13): a row tap ticks it instead of opening it. */
+  select?: SelectState;
 }) {
   const overdue = (t: Todo) => !t.done && !!t.due && t.due < today();
+  const selecting = !!select?.on;
+  const tap = (t: Todo) => (selecting ? select!.toggle(t.todoId) : onEdit(t));
   return (
     <DataTable
       label="To-dos"
@@ -545,13 +581,27 @@ function TodoRows({
             .filter(Boolean)
             .join(' · ')}
           tags={t.due ? <DueTag t={t} /> : undefined}
-          onOpen={() => onEdit(t)}
-          openLabel={`Open "${t.title}"`}
+          lead={
+            selecting ? (
+              <SelectBox
+                label={t.title}
+                checked={select!.has(t.todoId)}
+                onChange={() => select!.toggle(t.todoId)}
+              />
+            ) : undefined
+          }
+          onOpen={() => tap(t)}
+          openLabel={selecting ? `Tick "${t.title}"` : `Open "${t.title}"`}
         />
       ))}
     >
       <thead>
         <tr>
+          {selecting && (
+            <th scope="col">
+              <span className="sr-only">Selected</span>
+            </th>
+          )}
           <th scope="col">To-do</th>
           {artistName && <th scope="col">Artist</th>}
           <th scope="col">From</th>
@@ -560,13 +610,23 @@ function TodoRows({
       </thead>
       <tbody>
         {todos.map((t) => (
-          <tr key={t.todoId} className="cursor-pointer" onClick={() => onEdit(t)}>
+          <tr key={t.todoId} className="cursor-pointer" onClick={() => tap(t)}>
+            {selecting && (
+              <td className="w-10">
+                <SelectBox
+                  label={t.title}
+                  checked={select!.has(t.todoId)}
+                  onChange={() => select!.toggle(t.todoId)}
+                />
+              </td>
+            )}
             <td>
               <button
                 type="button"
                 className={`block text-left font-bold ${t.done ? 'text-muted-foreground line-through' : ''}`}
+                tabIndex={selecting ? -1 : undefined}
               >
-                <span className="sr-only">Open </span>
+                <span className="sr-only">{selecting ? 'Tick ' : 'Open '}</span>
                 {t.title}
                 {t.done && <span className="sr-only"> (done)</span>}
               </button>
@@ -618,6 +678,7 @@ export function ArtistTodos({
   const { filter, setFilter, todos, error, setError, load, toggle } = useTodos(cfg, token, path);
   const all = useAllCounts(cfg, token, artistId, todos);
   const ed = useEditing(load);
+  const sel = useSelect();
   const editor = ed.editing && (
     <TodoEditor
       key={ed.editing.todoId}
@@ -673,7 +734,15 @@ export function ArtistTodos({
       ) : todos.length === 0 ? (
         <p className="src">Nothing here.</p>
       ) : (
-        <TodoRows todos={todos} onEdit={ed.open} />
+        <>
+          <SelectBar
+            sel={sel}
+            all={todos.map((t) => t.todoId)}
+            actions={todoActions(cfg, token, todos)}
+            onDone={() => void load()}
+          />
+          <TodoRows todos={todos} onEdit={ed.open} select={sel} />
+        </>
       )}
       {editor}
       <AddTodo
@@ -789,6 +858,7 @@ export function AllTodos({
   );
   const { filter, setFilter, todos, error, load, toggle } = useTodos(cfg, token, path);
   const ed = useEditing(load);
+  const sel = useSelect();
   const overdue = (todos ?? []).filter((t) => !t.done && t.due && t.due < today()).length;
 
   return (
@@ -824,7 +894,20 @@ export function AllTodos({
           ) : todos.length === 0 ? (
             <p className="src">Nothing here.</p>
           ) : (
-            <TodoRows todos={todos} onEdit={ed.open} artistName={(id) => names[id] ?? 'Artist'} />
+            <>
+              <SelectBar
+                sel={sel}
+                all={todos.map((t) => t.todoId)}
+                actions={todoActions(cfg, token, todos)}
+                onDone={() => void load()}
+              />
+              <TodoRows
+                todos={todos}
+                onEdit={ed.open}
+                artistName={(id) => names[id] ?? 'Artist'}
+                select={sel}
+              />
+            </>
           )}
         </div>
         {ed.saved && <Notice tone="success">{ed.saved}</Notice>}
