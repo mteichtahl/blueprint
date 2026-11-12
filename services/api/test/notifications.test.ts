@@ -48,6 +48,39 @@ describe('who hears about what', () => {
       ),
     ).toEqual(['sarun']);
   });
+  it('tells whoever asked for the review when it is complete', () => {
+    const done = plan(
+      {
+        type: 'submission.completed',
+        artistId: B,
+        submissionId: 's',
+        requesterSub: 'sarun',
+        completedBySub: 'kyra',
+        todos: 2,
+        feedback: true,
+      },
+      people,
+    )!;
+    expect(subs(done)).toEqual(['sarun']);
+    expect(done.draft.title).toBe('Your review is complete');
+    expect(done.draft.body).toMatch(/2 new to-dos/);
+    // No requester on record (older submissions): the artist is told.
+    expect(
+      subs(
+        plan(
+          {
+            type: 'submission.completed',
+            artistId: B,
+            submissionId: 's',
+            todos: 0,
+            feedback: false,
+          },
+          people,
+        ),
+      ),
+    ).toEqual(['sarun']);
+  });
+
   it('never tells Blueprint about artist-to-artist messages, and never the sender', () => {
     const e = {
       type: 'message.created' as const,
