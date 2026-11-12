@@ -93,6 +93,22 @@ describe('templates', () => {
     expect(all.todoUpdated.text).toContain('Thu 3 Dec 2026, 1:30 pm');
     expect(all.todoUpdated.text).toContain('1 day before');
   });
+  it('tells an invited artist how to use the website, install the app and sign in first time', () => {
+    for (const part of [all.invite.html, all.invite.text]) {
+      expect(part).toContain('https://app.blueprintmusic.group/');
+      expect(part).toMatch(/Add to Home Screen/);
+      expect(part).toMatch(/Install app/);
+      expect(part).toMatch(/Choose your own password/);
+      expect(part).toMatch(/authenticator app/);
+      expect(part).toMatch(/website or app/i);
+      expect(part).toMatch(/Accept the terms/);
+    }
+    expect(all.invite.html).toContain('<ol');
+    expect(all.invite.text).toMatch(/1\. Open Blueprint/);
+    // Team members get the same steps, without the artist-only terms and AI step.
+    expect(all.teamInvite.text).toMatch(/Add to Home Screen/);
+    expect(all.teamInvite.text).not.toMatch(/Accept the terms/);
+  });
   it('includes the temporary password in the invite', () => {
     expect(all.invite.html).toContain('Ab3$xyz123456');
   });

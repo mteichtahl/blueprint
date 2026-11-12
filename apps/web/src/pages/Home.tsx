@@ -46,6 +46,7 @@ import { useDeepLink } from '../lib/push.ts';
 import { AssetLibrary } from './Assets.tsx';
 import { BrandKit } from './BrandKit.tsx';
 import { AccessPage } from './Access.tsx';
+import { Invitations } from './Invitations.tsx';
 import { ArtistFiles, Library, LIBRARY_KIND_OPTIONS, type LibraryKind } from './Library.tsx';
 import { Profile } from './Profile.tsx';
 import { ArtistChats, BmgChat, useInbox, type ConversationSummary } from './Messages.tsx';
@@ -99,6 +100,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   useOwnAvatar(me.sub, me.artistId, avatar);
   // Back from a vendor's sign-in page: open Connectors to finish connecting.
   const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
+  // Bumped after an invite, so the invitations list reloads.
+  const [invitesKey, setInvitesKey] = useState(0);
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
   // Which workspace section to open (a plan notification opens Plan; rev 12).
   const [wsTab, setWsTab] = useState<WorkspaceTab | undefined>();
@@ -392,15 +395,23 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             <PageHeader
               eyebrow="Artist workspaces"
               title="Invite artist"
-              sub="Sets up their login, private key and artist workspace."
+              sub="Sets up their login, private key and artist workspace. Follow each invitation here until they sign in."
             />
-            <div className="max-w-[520px]">
-              <InviteArtist
-                cfg={cfg}
-                token={token}
-                onReauth={onReauth}
-                onInvited={() => void load()}
-              />
+            <div className="flex flex-wrap items-start gap-5">
+              <div className="w-full max-w-[520px] flex-[1_1_320px]">
+                <InviteArtist
+                  cfg={cfg}
+                  token={token}
+                  onReauth={onReauth}
+                  onInvited={() => {
+                    setInvitesKey((k) => k + 1);
+                    void load();
+                  }}
+                />
+              </div>
+              <div className="min-w-0 flex-[2_1_420px]">
+                <Invitations cfg={cfg} token={token} refreshKey={invitesKey} onReauth={onReauth} />
+              </div>
             </div>
           </>
         )}
@@ -1099,7 +1110,8 @@ function InviteArtist({
           )}
         </div>
         <span className="src">
-          This creates their login. They choose a passkey or password on first sign-in.
+          This creates their login and emails them how to open Blueprint on the web, install the app
+          on their phone and sign in for the first time.
         </span>
       </form>
       {result && <Notice tone={result.tone}>{result.text}</Notice>}
