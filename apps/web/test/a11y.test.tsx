@@ -404,6 +404,39 @@ function answer(method: string, path: string): [number, unknown] {
     ],
     [/^\/library\/files$/, { files: [] }],
     [
+      /^\/access\/invitations$/,
+      {
+        invitations: [
+          {
+            artistId: 'art_newartist001',
+            displayName: 'Mia Ray',
+            email: 'mia@example.com',
+            status: 'pending',
+            invitedAt: now,
+            lastSentAt: now,
+            expiresAt: now,
+            acceptedAt: null,
+            revokedAt: null,
+            resend: true,
+            revoke: true,
+          },
+          {
+            artistId: ARTIST,
+            displayName: 'Chloe Poli',
+            email: 'chloe@example.com',
+            status: 'accepted',
+            invitedAt: now,
+            lastSentAt: now,
+            expiresAt: now,
+            acceptedAt: now,
+            revokedAt: null,
+            resend: false,
+            revoke: false,
+          },
+        ],
+      },
+    ],
+    [
       /^\/review-queue$/,
       {
         submissions: [
@@ -1209,6 +1242,25 @@ describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
       expect(await violations()).toEqual([]);
     },
   );
+
+  it('BMG: Invite artist lists invitations, and one opens with Resend and Revoke', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Invite artist/ })[0]!);
+    await settle();
+    expect(screen.getByText('Mia Ray')).toBeTruthy();
+    // "Waiting" hides accepted ones; "All" shows them.
+    fireEvent.click(screen.getByRole('tab', { name: 'All' }));
+    expect(screen.getAllByText('Accepted').length).toBeGreaterThan(0);
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: /Open the invitation for Mia Ray/ }));
+    await settle();
+    expect(screen.getByRole('heading', { name: 'Invitation' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Resend invitation' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Revoke Mia Ray/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '← Invitations' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
 
   it('BMG: picking a chat on Studio HQ opens that chat', async () => {
     withChat = true;

@@ -72,6 +72,60 @@ function todoFacts(t: TodoSnapshot): Block {
 
 // ── Invitations ───────────────────────────────────────────────────────────
 
+/**
+ * Getting started (invitations): how to open Blueprint on the web, install it
+ * on a phone, and sign in for the first time, which is the same on both.
+ */
+export function gettingStartedBlocks(
+  ctx: BrandContext,
+  email: string,
+  who: 'artist' | 'team' = 'artist',
+): Block[] {
+  const site = link(ctx, '/');
+  return [
+    { kind: 'h', text: 'Use Blueprint on the web' },
+    {
+      kind: 'p',
+      text: `Open ${site} in any browser on your computer, tablet or phone. Bookmark it so it's easy to find.`,
+    },
+    { kind: 'h', text: 'Install the app on your phone' },
+    {
+      kind: 'p',
+      text: 'Blueprint installs straight from the website, so there’s nothing to download from an app store. It then opens full screen from its own icon and keeps you signed in.',
+    },
+    {
+      kind: 'list',
+      items: [
+        `iPhone or iPad: open ${site} in Safari, tap the Share button, then Add to Home Screen, then Add.`,
+        `Android: open ${site} in Chrome, tap the ⋮ menu, then Install app (or Add to Home screen).`,
+        'Computer (optional): in Chrome or Edge, click the install icon at the right of the address bar.',
+      ],
+    },
+    { kind: 'h', text: 'Sign in for the first time (website or app)' },
+    {
+      kind: 'p',
+      text: 'The steps are the same whichever you use first. You only use the temporary password once.',
+    },
+    {
+      kind: 'steps',
+      items: [
+        `Open Blueprint (the website, or the app icon on your home screen) and enter your email: ${email}.`,
+        'Enter the temporary password above.',
+        'Choose your own password: you’ll use it from now on.',
+        'Set up two-step verification: scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password…) and enter the 6-digit code it shows.',
+        'Optionally, create a passkey so next time you sign in with your fingerprint, face or device PIN.',
+        ...(who === 'artist'
+          ? ['Accept the terms and choose whether to use Blueprint’s AI assistance.']
+          : []),
+      ],
+    },
+    {
+      kind: 'p',
+      text: 'Signing in on another device later? Use your email, your own password and your authenticator code (or your passkey). The temporary password won’t work again.',
+    },
+  ];
+}
+
 export function inviteEmail(
   ctx: BrandContext,
   i: { displayName: string; email: string; temporaryPassword: string; expiresInDays: number },
@@ -79,7 +133,7 @@ export function inviteEmail(
   return renderLayout(
     {
       subject: 'You’re invited to the Blueprint Music Group app',
-      preheader: 'Your Blueprint workspace is ready. Sign in to get started.',
+      preheader: 'Your Blueprint workspace is ready. Here’s how to install the app and sign in.',
       eyebrow: 'Welcome to Blueprint',
       heading: `Hi ${i.displayName}, your workspace is ready`,
       blocks: [
@@ -89,13 +143,10 @@ export function inviteEmail(
         },
         { kind: 'facts', rows: [['Email', i.email]] },
         { kind: 'code', label: 'Temporary password', text: i.temporaryPassword },
-        {
-          kind: 'p',
-          text: 'The first time you sign in you’ll choose your own password and set up an authenticator app or a passkey.',
-        },
+        ...gettingStartedBlocks(ctx, i.email),
       ],
-      cta: { label: 'Sign in to Blueprint', url: link(ctx, '/') },
-      footerNote: `This invitation expires in ${i.expiresInDays} days. If you weren’t expecting it, you can ignore this email.`,
+      cta: { label: 'Open Blueprint and sign in', url: link(ctx, '/') },
+      footerNote: `This invitation expires in ${i.expiresInDays} days. If it runs out, ask Blueprint to send it again. If you weren’t expecting it, you can ignore this email.`,
     },
     layout(ctx),
   );
@@ -132,12 +183,9 @@ export function teamInviteEmail(
           ],
         },
         { kind: 'code', label: 'Temporary password', text: i.temporaryPassword },
-        {
-          kind: 'p',
-          text: 'The first time you sign in you’ll choose your own password and set up an authenticator app or a passkey.',
-        },
+        ...gettingStartedBlocks(ctx, i.email, 'team'),
       ],
-      cta: { label: 'Sign in to Blueprint', url: link(ctx, '/') },
+      cta: { label: 'Open Blueprint and sign in', url: link(ctx, '/') },
       footerNote: `This invitation expires in ${i.expiresInDays} days. If you weren’t expecting it, you can ignore this email.`,
     },
     layout(ctx),

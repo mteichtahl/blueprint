@@ -24,7 +24,11 @@ export type Block =
   | { kind: 'facts'; rows: [label: string, value: string][] }
   /** A highlighted value, e.g. a temporary password or code. */
   | { kind: 'code'; text: string; label?: string }
-  | { kind: 'list'; items: string[] };
+  | { kind: 'list'; items: string[] }
+  /** A small section heading inside the card. */
+  | { kind: 'h'; text: string }
+  /** Numbered steps. */
+  | { kind: 'steps'; items: string[] };
 
 export interface EmailContent {
   subject: string;
@@ -77,6 +81,12 @@ function blockHtml(b: Block): string {
       return `<ul style="margin:0 0 16px;padding-left:20px;font-family:${BODY_FONT};font-size:17px;line-height:1.5;color:${BRAND.navy};">${b.items
         .map((i) => `<li style="margin:0 0 4px;">${escapeHtml(i)}</li>`)
         .join('')}</ul>`;
+    case 'h':
+      return `<h2 style="margin:24px 0 10px;font-family:${HEADING_FONT};font-size:18px;line-height:1.3;color:${BRAND.navy};font-weight:bold;">${escapeHtml(b.text)}</h2>`;
+    case 'steps':
+      return `<ol style="margin:0 0 16px;padding-left:22px;font-family:${BODY_FONT};font-size:17px;line-height:1.5;color:${BRAND.navy};">${b.items
+        .map((i) => `<li style="margin:0 0 6px;">${escapeHtml(i)}</li>`)
+        .join('')}</ol>`;
     case 'facts':
       return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px;border-collapse:separate;background:${BRAND.offWhite};border-radius:10px;">${b.rows
         .map(
@@ -95,6 +105,10 @@ function blockText(b: Block): string {
       return b.text;
     case 'list':
       return b.items.map((i) => `- ${i}`).join('\n');
+    case 'h':
+      return b.text.toUpperCase();
+    case 'steps':
+      return b.items.map((i, n) => `${n + 1}. ${i}`).join('\n');
     case 'facts':
       return b.rows.map(([l, v]) => `${l}: ${v}`).join('\n');
     case 'code':
