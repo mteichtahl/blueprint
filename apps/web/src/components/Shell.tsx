@@ -566,7 +566,7 @@ export function BmgShell({
   );
 
   const sidebar = (phone: boolean) => (
-    <nav aria-label="Main" className="bp flex h-full flex-col gap-0.5 px-3.5 pt-[22px] pb-3.5">
+    <nav aria-label="Main" className="bp flex min-h-full flex-col gap-0.5 px-3.5 pt-[22px] pb-3.5">
       <button type="button" className="mb-[18px] px-2 text-left" onClick={() => go('overview')}>
         <Logo />
       </button>
@@ -649,7 +649,7 @@ export function BmgShell({
   return (
     <div className="bmg-frame flex min-h-dvh bg-background text-foreground">
       <SkipLink />
-      <div className="sticky top-0 hidden h-dvh w-[264px] flex-none overflow-y-auto lg:block">
+      <div className="sticky top-0 hidden h-dvh w-[264px] flex-none overflow-y-auto overscroll-contain bg-[#011935] lg:block">
         {sidebar(false)}
       </div>
       {open && (
