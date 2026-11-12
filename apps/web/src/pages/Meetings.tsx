@@ -816,56 +816,14 @@ function NewMeeting({
             : 'Saved in Blueprint’s library › Meetings.'}
         </span>
       </label>
-      <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1.5 text-[15px] font-bold">Attendees</legend>
-        <div className="flex flex-wrap gap-2">
-          {team.map((t) => (
-            <button
-              key={t.sub}
-              type="button"
-              className="chip min-h-8"
-              aria-pressed={has('staff', t.sub)}
-              onClick={() => toggle({ kind: 'staff', id: t.sub, name: t.displayName })}
-            >
-              {t.displayName}
-              {t.sub === me.sub ? ' (you)' : ''}
-            </button>
-          ))}
-          {attendees
-            .filter((a) => a.kind !== 'staff')
-            .map((a) => (
-              <button
-                key={`${a.kind}:${a.id}`}
-                type="button"
-                className="chip min-h-8"
-                aria-pressed="true"
-                onClick={() => (a.kind === 'artist' ? undefined : toggle(a))}
-              >
-                {a.name}
-              </button>
-            ))}
-        </div>
-        <div className="flex gap-2">
-          <Field
-            label="Someone else"
-            value={guest}
-            maxLength={120}
-            placeholder="Name"
-            onChange={(e) => setGuest(e.target.value)}
-          />
-          <Button
-            variant="ghost"
-            className="self-end"
-            disabled={!guest.trim()}
-            onClick={() => {
-              toggle({ kind: 'contact', id: `guest-${Date.now()}`, name: guest.trim() });
-              setGuest('');
-            }}
-          >
-            Add
-          </Button>
-        </div>
-      </fieldset>
+      <AttendeesPicker
+        team={team}
+        me={me}
+        attendees={attendees}
+        onToggle={toggle}
+        guest={guest}
+        onGuest={setGuest}
+      />
       {artist && (
         <label className="flex items-start gap-2">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
@@ -2599,7 +2557,100 @@ function DetailsSection(ctx: Ctx & { artistName?: string }) {
   );
 }
 
-/** Edit details (rev 13, P4): the title and sharing, then Delete in the danger area. */
+/** Edit details (rev 13, P4): the title, attendees and sharing, then Delete in the danger area. */
+/**
+ * Who was there: the Blueprint team as chips, the linked artist (always on),
+ * and anyone else added by name. Used on New meeting and Edit meeting (rev 13).
+ */
+/** Attendees compared as a set (order doesn't matter). */
+const attendeeKey = (list: readonly Attendee[]) =>
+  list
+    .map((a) => `${a.kind}:${a.id}`)
+    .sort()
+    .join('|');
+
+function AttendeesPicker({
+  team,
+  me,
+  attendees,
+  onToggle,
+  guest,
+  onGuest,
+  lockedArtistId,
+}: {
+  team: TeamMember[];
+  me?: Pick<Me, 'sub'>;
+  attendees: Attendee[];
+  onToggle: (a: Attendee) => void;
+  guest: string;
+  onGuest: (v: string) => void;
+  /** The artist the meeting is about: always an attendee. */
+  lockedArtistId?: string | undefined;
+}) {
+  const has = (kind: Attendee['kind'], id: string) =>
+    attendees.some((a) => a.kind === kind && a.id === id);
+  const toggle = onToggle;
+  const setGuest = onGuest;
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="mb-1.5 text-[15px] font-bold">Attendees</legend>
+      <div className="flex flex-wrap gap-2">
+        {team.map((t) => (
+          <button
+            key={t.sub}
+            type="button"
+            className="chip min-h-8"
+            aria-pressed={has('staff', t.sub)}
+            onClick={() => toggle({ kind: 'staff', id: t.sub, name: t.displayName })}
+          >
+            {t.displayName}
+            {t.sub === me?.sub ? ' (you)' : ''}
+          </button>
+        ))}
+        {attendees
+          // Everyone else, and team members who have since left the team.
+          .filter((a) => a.kind !== 'staff' || !team.some((t) => t.sub === a.id))
+          .map((a) => (
+            <button
+              key={`${a.kind}:${a.id}`}
+              type="button"
+              className="chip min-h-8"
+              aria-pressed="true"
+              onClick={() =>
+                a.kind === 'artist' && (!lockedArtistId || a.id === lockedArtistId)
+                  ? undefined
+                  : toggle(a)
+              }
+            >
+              {a.name}
+            </button>
+          ))}
+      </div>
+      <div className="flex gap-2">
+        <Field
+          label="Someone else"
+          value={guest}
+          maxLength={120}
+          placeholder="Name"
+          onChange={(e) => setGuest(e.target.value)}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          className="self-end"
+          disabled={!guest.trim()}
+          onClick={() => {
+            toggle({ kind: 'contact', id: `guest-${Date.now()}`, name: guest.trim() });
+            setGuest('');
+          }}
+        >
+          Add
+        </Button>
+      </div>
+    </fieldset>
+  );
+}
+
 function EditMeeting({
   ctx,
   artistName,
@@ -2614,11 +2665,27 @@ function EditMeeting({
   const { meeting: m } = ctx;
   const [title, setTitle] = useState(m.title);
   const [shared, setShared] = useState(m.shared);
+  // Rev 13: who was there can be changed after the meeting too.
+  const [attendees, setAttendees] = useState<Attendee[]>(m.attendees);
+  const [guest, setGuest] = useState('');
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  useEffect(() => {
+    api<{ team: TeamMember[] }>(ctx.cfg, ctx.token, 'GET', '/access/team')
+      .then((r) => setTeam(r.team))
+      .catch(() => setTeam([]));
+  }, [ctx.cfg, ctx.token]);
+  const toggle = (a: Attendee) =>
+    setAttendees((list) =>
+      list.some((x) => x.kind === a.kind && x.id === a.id)
+        ? list.filter((x) => !(x.kind === a.kind && x.id === a.id))
+        : [...list, a],
+    );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const who = artistName ?? 'the artist';
   const undoOpen = !!m.undoUntil && Date.parse(m.undoUntil) > Date.now();
-  const changed = title.trim() !== m.title || shared !== m.shared;
+  const attendeesChanged = attendeeKey(attendees) !== attendeeKey(m.attendees);
+  const changed = title.trim() !== m.title || shared !== m.shared || attendeesChanged;
   return (
     <EditScreen
       title="Edit meeting"
@@ -2634,6 +2701,7 @@ function EditMeeting({
           await patchMeeting(ctx.cfg, ctx.token, m, {
             ...(title.trim() !== m.title ? { title: title.trim() } : {}),
             ...(shared !== m.shared ? { shared } : {}),
+            ...(attendeesChanged ? { attendees } : {}),
           });
           await ctx.reload();
           onDone();
@@ -2677,6 +2745,14 @@ function EditMeeting({
         value={title}
         maxLength={200}
         onChange={(e) => setTitle(e.target.value)}
+      />
+      <AttendeesPicker
+        team={team}
+        attendees={attendees}
+        onToggle={toggle}
+        guest={guest}
+        onGuest={setGuest}
+        lockedArtistId={m.artistId ?? undefined}
       />
       {m.artistId && (
         <label className="flex min-h-9 items-center gap-2.5 text-[15px]">

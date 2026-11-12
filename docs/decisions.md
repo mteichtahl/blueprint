@@ -600,6 +600,16 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **Editor-added notifications.** Giving people edit access (Who can edit → chosen people) or handing someone the document publishes `file.editorsAdded`: new editors read "<name> gave you edit access to …", a new owner "<name> handed you …". The person who made the change isn't told. Both events open the document's page.
 - **`publish()`** in `services/api/src/lib.ts` puts a `bmg.workspace` event on the bus, so handlers no longer need their own EventBridge boilerplate for notifications.
 
+## Workspace gaps: chat count, Select mode, meeting attendees (12 Nov 2026)
+
+- **Unread count on the workspace chat icon (rev 9).** The chat icon beside an artist's name shows a coral count of unread messages in Blueprint's chat with that artist (99+ past 99), the same number as on the Chat list. Archived chats don't count. It's worked out from the inbox Studio HQ already keeps live, so there's no new call. It hides while the chat panel is open, and the icon's name says it ("Chat with Chloe Poli, 3 unread").
+- **Select mode beyond the library (rev 13, P10).** `useSelect`, `SelectBar` and `SelectBox` in `components/patterns.tsx`. **Select** turns the mode on; a row tap then ticks the row instead of opening it.
+  - **To-dos** (a workspace's To-dos and Tasks & to-dos): **Mark done** and **Mark not done**.
+  - **Contacts and venues** (Blueprint, full lists): **Archive** and **Restore**. These aren't in a danger area: archiving deletes nothing and Restore undoes it (recorded as an exception in `patterns.md`).
+  - Items are changed one at a time with the routes each screen already uses, so there's no bulk API and no new route; each change is checked and audited as before. If some fail, the bar says how many and why ("Marked 4 to-dos done. 1 couldn't be changed: …").
+  - Still without Select: gigs and the review queue, which have no action that makes sense for several at once yet.
+- **Editing meeting attendees (rev 13).** Edit meeting now has the same attendees picker as New meeting (the Blueprint team as chips, the artist the meeting is about always included, anyone else by name). Team members who have since left still show and can be removed. Saving sends `attendees` only when they changed. The API already accepted it.
+
 ## End-to-end tests after every staging deploy (12 Nov 2026)
 
 - **Staging E2E** (`.github/workflows/e2e.yml`) runs after every Deploy staging, as a job of that workflow, and by hand. It's the automatable part of the UAT plan: about 45 Playwright tests in `apps/e2e`. How it works and how to add tests: [`e2e.md`](e2e.md).
