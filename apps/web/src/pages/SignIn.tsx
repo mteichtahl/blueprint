@@ -22,7 +22,7 @@ import {
 import { lastEmail, rememberEmail, storeTokens, type Session } from '../lib/auth.ts';
 import { cancelled, createPasskey, getPasskey, passkeysSupported } from '../lib/webauthn.ts';
 import { AuthFrame } from '../components/Shell.tsx';
-import { Button, Card, Field, Notice } from '../components/ui.tsx';
+import { Button, Card, Field, Notice, WaveLoader } from '../components/ui.tsx';
 
 /**
  * Blueprint's own sign-in (design 6.1), on Cognito's user-pool API rather
@@ -507,7 +507,7 @@ function MfaSetupStep({
     })();
   }, [cfg, session, email, onError]);
 
-  if (!setup) return <p className="m-0 py-6 text-center text-[15px]">Preparing your set-up…</p>;
+  if (!setup) return <WaveLoader label="Preparing your set-up" />;
   return (
     <form
       className="flex flex-col gap-3"

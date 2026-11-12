@@ -642,7 +642,7 @@ async function openWorkspace(name: string) {
     Plan: ['Plan'],
     Stages: ['Plan', 'Stages'],
     Timeline: ['Plan', 'Timeline'],
-    'To-do': ['Plan', 'To-dos'],
+    'To-do': ['Work', 'To-dos'],
     Submissions: ['Work', 'Submissions'],
     Gigs: ['Work', 'Gigs'],
     Library: ['Files', 'Library'],

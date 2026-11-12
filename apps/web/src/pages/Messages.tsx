@@ -2893,7 +2893,7 @@ export function ArtistChatTab({
           </>
         ) : (
           <section className="wa-pane wa-pane-empty">
-            <p className="wa-sub">Opening the chat with {artist.displayName}…</p>
+            <WaveLoader label={`Opening the chat with ${artist.displayName}`} />
           </section>
         )}
       </div>
