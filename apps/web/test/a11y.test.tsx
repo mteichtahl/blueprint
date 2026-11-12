@@ -617,6 +617,8 @@ async function openWorkspace(name: string) {
     Overview: ['Overview'],
     Stats: ['Overview', 'Stats'],
     Plan: ['Plan'],
+    Stages: ['Plan', 'Stages'],
+    Timeline: ['Plan', 'Timeline'],
     'To-do': ['Plan', 'To-dos'],
     Submissions: ['Work', 'Submissions'],
     Gigs: ['Work', 'Gigs'],
@@ -765,6 +767,30 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     await settle();
     await openWorkspace(tab);
     expect(await violations()).toEqual([]);
+  });
+
+  it('BMG: plan stages edit one at a time, with Remove stage in the danger area (rev 13)', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Chloe Poli/ })[0]!);
+    await settle();
+    await openWorkspace('Stages');
+    // No edit mode for the whole plan, and no third row of plan tabs.
+    expect(screen.queryByRole('button', { name: 'Edit plan' })).toBeNull();
+    expect(screen.getAllByRole('tablist', { name: 'Plan sections' })).toHaveLength(1);
+    expect(screen.getByRole('tab', { name: /^Stages/ }).getAttribute('aria-selected')).toBe('true');
+    const edits = screen.getAllByRole('button', { name: 'Edit stage' });
+    expect(edits.length).toBeGreaterThan(0);
+    fireEvent.click(edits[0]!);
+    await settle();
+    expect(screen.getByRole('button', { name: 'Save stage' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Remove stage: Remove / })).toBeTruthy();
+    // Only one part is open for editing at a time.
+    expect(screen.queryByRole('button', { name: 'Edit stage' })).toBeNull();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await settle();
+    expect(screen.getAllByRole('button', { name: 'Edit stage' }).length).toBe(edits.length);
   });
 
   it('BMG: plan in edit mode (Markdown editors)', async () => {
