@@ -1078,22 +1078,11 @@ export function PlanStages({
         ) : (
           <ul className="m-0 flex list-none flex-col p-0">
             {data.stages.map((st) => (
-              <li key={st.stageId} className="li flex-wrap text-[15px]">
-                <span className="min-w-0 flex-1">
-                  <b className="block">{st.name}</b>
-                  <span className="src">
-                    {st.appliesTo === 'all'
-                      ? 'All artists'
-                      : st.artistIds.map((id) => names[id] ?? 'Artist').join(', ')}
-                    {` · ${st.milestones.length} milestone${st.milestones.length === 1 ? '' : 's'}`}
-                  </span>
-                </span>
-                <Button size="sm" variant="ghost" onClick={() => void apply(st)}>
-                  Add to plans
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
+              <li key={st.stageId}>
+                {/* P1 (rev 13): the row opens the stage; Add to plans and Delete are on it. */}
+                <button
+                  type="button"
+                  className="li w-full text-left text-[15px]"
                   onClick={() =>
                     setEditing({
                       id: st.stageId,
@@ -1107,9 +1096,17 @@ export function PlanStages({
                     })
                   }
                 >
-                  Edit
-                </Button>
-                <ConfirmButton label="Delete" onConfirm={() => remove(st)} />
+                  <span className="min-w-0 flex-1">
+                    <b className="block">{st.name}</b>
+                    <span className="src">
+                      {st.appliesTo === 'all'
+                        ? 'All artists'
+                        : st.artistIds.map((id) => names[id] ?? 'Artist').join(', ')}
+                      {` · ${st.milestones.length} milestone${st.milestones.length === 1 ? '' : 's'}`}
+                    </span>
+                  </span>
+                  <span aria-hidden="true">›</span>
+                </button>
               </li>
             ))}
           </ul>
@@ -1134,6 +1131,12 @@ export function PlanStages({
             onChange={(draft) => setEditing({ ...editing, draft })}
             onSave={() => void save()}
             onCancel={() => setEditing(null)}
+            {...(editing.id
+              ? (() => {
+                  const st = data.stages.find((x) => x.stageId === editing.id);
+                  return st ? { onApply: () => void apply(st), onDelete: () => remove(st) } : {};
+                })()
+              : {})}
           />
         </div>
       )}
@@ -1148,6 +1151,8 @@ function StageEditor({
   onChange,
   onSave,
   onCancel,
+  onApply,
+  onDelete,
 }: {
   draft: StageDraft;
   isNew: boolean;
@@ -1155,6 +1160,10 @@ function StageEditor({
   onChange: (d: StageDraft) => void;
   onSave: () => void;
   onCancel: () => void;
+  /** Add the saved stage to those artists' plans. */
+  onApply?: () => void;
+  /** P5: delete the saved stage (plans that use it keep their copy). */
+  onDelete?: () => Promise<void>;
 }) {
   const [milestones, setMilestones] = useState(draft.milestones.join('\n'));
   const set = (patch: Partial<StageDraft>) => onChange({ ...draft, ...patch });
@@ -1238,26 +1247,19 @@ function StageEditor({
         <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
+        {onApply && (
+          <Button variant="ghost" className="ml-auto" onClick={onApply}>
+            Add to plans
+          </Button>
+        )}
       </div>
+      {onDelete && (
+        <DangerArea
+          title={`Delete ${draft.name || 'this stage'}`}
+          what="It stops being offered for new plans. Plans that already use it keep their copy."
+          onConfirm={onDelete}
+        />
+      )}
     </Card>
-  );
-}
-
-/** A button that asks for a second click before acting (no browser dialogs). */
-function ConfirmButton({ label, onConfirm }: { label: string; onConfirm: () => Promise<void> }) {
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 4000);
-    return () => clearTimeout(t);
-  }, [armed]);
-  return (
-    <Button
-      size="sm"
-      variant={armed ? 'cta' : 'ghost'}
-      onClick={() => (armed ? void onConfirm().finally(() => setArmed(false)) : setArmed(true))}
-    >
-      {armed ? 'Confirm' : label}
-    </Button>
   );
 }

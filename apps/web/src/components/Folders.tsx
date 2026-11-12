@@ -500,7 +500,7 @@ export function MoveDialog({
       <div className="flex items-center gap-2">
         {at !== null && (
           <Button size="sm" variant="ghost" onClick={() => setAt(here?.parentId ?? null)}>
-            ← {here?.parentId ? (byId.get(here.parentId)?.name ?? 'Back') : rootLabel}
+            ← {here?.parentId ? (byId.get(here.parentId)?.name ?? '…') : rootLabel}
           </Button>
         )}
         <b className="[overflow-wrap:anywhere]">{here?.name ?? rootLabel}</b>
