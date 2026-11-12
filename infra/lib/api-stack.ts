@@ -422,6 +422,8 @@ export class ApiStack extends BmgStack {
       ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
       [main],
     );
+    // Invite artist page: the roster (GSI1 `ARTISTS`), to list every invitation and its status.
+    allow(artists, 'ReadRoster', ['dynamodb:Query'], [`${main}/index/GSI1`]);
     allow(artists, 'ReadSmtpSecret', ['secretsmanager:GetSecretValue'], [smtpSecretArn]);
     allow(
       artists,
@@ -838,6 +840,7 @@ export class ApiStack extends BmgStack {
           'submission.created',
           'submission.updated',
           'submission.feedbackGiven',
+          'submission.completed',
           'message.created',
           'file.rejected',
           'gig.helpRequested',

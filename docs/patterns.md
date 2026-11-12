@@ -34,6 +34,7 @@ changing and deleting work the same way everywhere. The components live in
 - Deleting a **line inside a form** (a cost row, a run sheet row, a crew slot, a
   milestone while editing a stage) is an inline remove button in that form.
 - **Call and email links** on contact cards stay on the row: they open the phone or mail app, not the contact, and save a tap on the most common job.
+- **An invitation** has no fields to edit, so its **Revoke** danger area sits on its record page.
 - **Chat** keeps WhatsApp's conventions (info pane, Delete group in group info).
 - **Drag and drop** onto folders stays as a shortcut beside Select → Move to….
 - **Bulk Archive and Restore** (contacts and venues, Select mode) aren't in a danger area: archiving hides an item from pickers but deletes nothing, and Restore undoes it.
