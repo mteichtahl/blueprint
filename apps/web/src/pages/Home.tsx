@@ -210,14 +210,21 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     { items: [{ id: 'overview', label: 'Overview', icon: 'home' }] },
     {
       label: 'ARTIST WORKSPACES',
+      // One searchable dropdown for every artist, instead of a row each.
+      picker: {
+        label: 'Find an artist workspace',
+        placeholder: 'Choose an artist',
+        options: [...artists]
+          .sort((x, y) => x.displayName.localeCompare(y.displayName))
+          .map((a) => ({
+            id: `artist:${a.artistId}`,
+            label: a.displayName,
+            avatar: a.displayName,
+            avatarArtistId: a.artistId,
+            badge: reviewsFor(a.artistId) || undefined,
+          })),
+      },
       items: [
-        ...artists.slice(0, 8).map((a) => ({
-          id: `artist:${a.artistId}`,
-          label: a.displayName,
-          avatar: a.displayName,
-          avatarArtistId: a.artistId,
-          badge: reviewsFor(a.artistId) || undefined,
-        })),
         {
           id: 'gigs',
           label: 'Artist gigs',

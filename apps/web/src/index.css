@@ -262,6 +262,67 @@ main {
     background: transparent;
     color: #d3d8de;
   }
+  /* Side menu: the artist workspace dropdown (search box and its list). */
+  .navpicker {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 2px 0 6px;
+    padding: 6px;
+    border-radius: 10px;
+    background: rgba(241, 244, 247, 0.06);
+  }
+  .navpicker input {
+    min-height: 40px;
+    width: 100%;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(241, 244, 247, 0.28);
+    background: rgba(1, 25, 53, 0.6);
+    color: #fff;
+    font-size: 16px;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .navpicker input::placeholder {
+    color: #aab3bf;
+  }
+  .navpicker input:focus-visible {
+    outline: 2px solid #f1f4f7;
+    outline-offset: 1px;
+  }
+  .navpicker-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 300px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .navpicker-opt {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    padding: 0 8px;
+    border-radius: 8px;
+    color: #d3d8de;
+    cursor: pointer;
+  }
+  .navpicker-active {
+    color: #fff;
+    background: rgba(241, 244, 247, 0.1);
+  }
+  .navpicker-opt[aria-selected='true'] {
+    color: #fff;
+    box-shadow: inset 3px 0 0 #d9534f;
+  }
+  .navpicker-empty {
+    margin: 0;
+    padding: 8px;
+    font-size: 14px;
+    color: #d3d8de;
+  }
   .ws {
     display: flex;
     align-items: center;
