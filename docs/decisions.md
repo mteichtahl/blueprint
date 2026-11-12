@@ -626,3 +626,19 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
   - **Ids:** a new read tool, `list_folders`, gives the agent folder and document ids with the person's level on each. Artists only ever get their own Library.
   - **Review before commit (P6):** before the checklist is shown, moves and access changes are previewed with the API's own preview. The checklist says who gains and who loses access (or "Nobody gains or loses access"), or why it can't be done.
   - The prompt and the `tools.list_folders` description are in `@bmg/prompts`, so admins can edit them like the others.
+
+## End-to-end tests after every staging deploy (12 Nov 2026)
+
+- **Staging E2E** (`.github/workflows/e2e.yml`) runs after every Deploy staging, as a job of that workflow, and by hand. It's the automatable part of the UAT plan: about 45 Playwright tests in `apps/e2e`. How it works and how to add tests: [`e2e.md`](e2e.md).
+- **API first for rules.** Privacy and permission rules are checked straight against the API, so they hold whatever any screen shows. The screen tests cover real sign-in and that every screen opens without a page error or a 5xx.
+- **Dedicated test accounts** (`blueprint e2e setup`): an admin, a team member and three artists, created through the app's own invites so they're real accounts with their own keys. Their passwords and authenticator secrets are in Secrets Manager (`bmg/staging/e2e-accounts`, tooling key, tagged `bmg:env=tooling` so the permission boundary lets the tooling runner read it). Only the deploy-staging runner role can read it, so the job runs there; nothing is stored in GitHub, and PR builds on the CI runner can't reach it.
+- **Shared staging.** The tests only touch data the test accounts own, delete any contacts they add, and never change global settings. To-dos and gigs have no delete in the API, so each run's are left done or cancelled.
+- **Amazon Linux 2023** isn't a Playwright platform, so the job installs Chromium's libraries with dnf, then Playwright's Chromium.
+- **Not a release gate yet.** A failed E2E run fails the Deploy staging run but doesn't stop `blueprint release ship` or the release guard, which still look at the staging deployment. Once the suite has proved stable, the release guard can also require a green Staging E2E for the commit.
+
+## Release trains: the version moves after every release (12 Nov 2026)
+
+- **Problem:** after 1.5.1 shipped, 15 PRs (#132–#149) merged without starting a new release, so staging kept showing `beta-1.5.1`, the same as production, and "What's new" had nothing new to show. The bump was a convention only.
+- **Now enforced:** the **CI checks** job runs `tools/release/version-check.mjs` on pull requests. It fails unless `VERSION` is newer than both the `VERSION` at production's last successful deployment and the newest `vX.Y.Z` tag, and says to run `blueprint release minor|major|hotfix`. Merges to `main` and Dependabot PRs skip it. The job now needs `deployments: read`, granted by the Deploy staging call too.
+- **`blueprint release ship`** also refuses a version production already runs, even when it was never tagged.
+- **1.6.0** starts the next release, with notes for #132–#147.

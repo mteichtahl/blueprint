@@ -29,6 +29,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
+      deployments: read
       pull-requests: read
       security-events: write
 
@@ -70,3 +71,10 @@ jobs:
           test "$release" = "$expected" || { echo "::error::staging release is $release, expected $expected"; exit 1; }
           echo "::notice::staging is on release $release"
           echo "Released **$release** to staging (\`${GITHUB_SHA::7}\`)" >> "$GITHUB_STEP_SUMMARY"
+
+  # End-to-end tests against what was just deployed (docs/e2e.md).
+  e2e:
+    needs: deploy-staging
+    uses: ./.github/workflows/e2e.yml
+    permissions:
+      contents: read

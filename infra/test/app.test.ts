@@ -158,6 +158,16 @@ describe('tooling (CodeBuild runners)', () => {
     expect(prodPolicies[0]).toContain('DeployProdRole');
   });
 
+  it('lets only the staging runner read the E2E accounts secret', () => {
+    const policies = Object.values(t.findResources('AWS::IAM::Policy')).map((p) =>
+      JSON.stringify(p.Properties),
+    );
+    const readers = policies.filter((p) => p.includes('bmg/staging/e2e-accounts'));
+    expect(readers).toHaveLength(1);
+    expect(readers[0]).toContain('DeployStagingRole');
+    expect(readers[0]).toContain('secretsmanager:GetSecretValue');
+  });
+
   it('gives runner roles the connection permissions CodeBuild checks at project creation', () => {
     const policies = JSON.stringify(t.findResources('AWS::IAM::Policy'));
     for (const action of [

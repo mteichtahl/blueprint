@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./ai-opt-out": "./src/ai-opt-out.ts",
+    "./e2e": "./src/e2e.ts",
     "./release": "./src/release.ts"
   },
   "scripts": {
