@@ -580,6 +580,7 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **Who's told:** completing sends `submission.completed`. The in-app notifier tells whoever asked for the review (the submission's `createdBy`), falling back to the artist for submissions with no requester on record, and never the person who completed it. Email and push follow each person's settings (the "feedback" category). Feedback sent with "and complete" sends one notification ("Your review is complete"), not two.
 - **No new routes:** completing is `PATCH /artists/{id}/submissions/{sid}` with `{ "complete": true }` (Blueprint only, on its own), and feedback takes `complete` in its body. The API stack is at 459 of its 460-resource guard.
 - **Status words:** `reviewed` now reads **Completed** in the app (queue tab, rows, the artist's list). Open reviews with feedback read "Feedback sent · review open". Reviews from before this change have `feedbackAt` taken from their review time.
+
 ## Library gaps from rev 8 (12 Nov 2026)
 
 - **Filters:** every library gets **Locked** (only the owner can change it), **In use** (used outside chat, so it can't be deleted until it's taken out of there) and **Owned by me**. The artist's own Library had no filters; it now has these three under "Show". Blueprint's document library gets Locked and Owned by me beside the sharing filters, but no In use: library documents are only ever posted in chats, which don't count.
