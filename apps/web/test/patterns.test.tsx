@@ -149,11 +149,23 @@ describe('Rev 13 source guards', () => {
       .filter((f) => f.endsWith('.tsx'))
       .map((f) => `${d}/${f}`),
   );
-  const KNOWN_BACK = new Set(['components/Folders.tsx']);
+  const KNOWN_BACK = new Set<string>();
 
   it('P8: no "← Back" or "Back to …" links (name the page instead)', () => {
     const offenders = files.filter(
       (f) => !KNOWN_BACK.has(f) && /←\s*Back\b|← Back to/.test(readFileSync(join(root, f), 'utf8')),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('P5: no home-made second-click buttons (use DangerArea)', () => {
+    // Chat keeps WhatsApp's own conventions (docs/patterns.md). Connectors: follow-up.
+    const allowed = new Set(['pages/Messages.tsx', 'pages/Connectors.tsx']);
+    const offenders = files.filter(
+      (f) =>
+        !allowed.has(f) &&
+        f !== 'components/patterns.tsx' &&
+        /function ConfirmButton|Click again to/.test(readFileSync(join(root, f), 'utf8')),
     );
     expect(offenders).toEqual([]);
   });
