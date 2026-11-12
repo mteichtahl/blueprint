@@ -42,6 +42,19 @@ export type DomainEvent =
       todos: number;
     }
   | {
+      /** Blueprint completed the review; whoever asked for it is told. */
+      type: 'submission.completed';
+      artistId: string;
+      submissionId: string;
+      title?: string;
+      /** Who asked for the review (the submission's creator). */
+      requesterSub?: string;
+      completedBySub?: string;
+      todos: number;
+      /** Whether the review came with feedback. */
+      feedback: boolean;
+    }
+  | {
       type: 'message.created';
       conversationId: string;
       conversationType: 'bmg-artist' | 'group' | 'broadcast' | 'announcement' | 'artist-to-artist';
@@ -218,6 +231,26 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
           link: 'submit',
         },
       };
+    case 'submission.completed': {
+      // Whoever asked for the review; an older submission without one tells the artist.
+      const asker = everyone.filter((r) => r.sub === e.requesterSub && r.sub !== e.completedBySub);
+      const name = e.title ? `“${e.title}”` : 'Your submission';
+      return {
+        to: asker.length ? asker : artistsOf([e.artistId]),
+        draft: {
+          kind: 'feedback',
+          title: 'Your review is complete',
+          body: `${name} has been reviewed by Blueprint${
+            e.feedback
+              ? e.todos
+                ? `. Read the feedback and your ${e.todos} new to-do${e.todos === 1 ? '' : 's'}.`
+                : '. Read the feedback.'
+              : '.'
+          }`,
+          link: 'submit',
+        },
+      };
+    }
     case 'message.created': {
       const muted = new Set(e.mutedMembers ?? []);
       const toArtists = artistsOf(e.artistIds).filter(

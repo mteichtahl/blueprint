@@ -160,6 +160,49 @@ async function checkFiles(artistId: string, fileIds: string[]): Promise<Record<s
  * open; BMG can change priority and date and gives feedback, which becomes
  * to-dos in one transaction.
  */
+/**
+ * The update that completes a review: status `reviewed`, who and when, and the
+ * item moves to the reviewed queue (sorted by completion time).
+ */
+function completeExpression(by: string, at: string, artistId: string, submissionId: string) {
+  return {
+    UpdateExpression:
+      'SET #s = :reviewed, reviewedAt = :at, reviewedBy = :by, GSI3PK = :pk, GSI3SK = :sk',
+    ConditionExpression: '#s = :open',
+    ExpressionAttributeNames: { '#s': 'status' },
+    ExpressionAttributeValues: {
+      ':reviewed': 'reviewed',
+      ':open': 'open',
+      ':at': at,
+      ':by': by,
+      ':pk': queuePk('reviewed'),
+      ':sk': `${at}#${artistId}#${submissionId}`,
+    } as Record<string, unknown>,
+  };
+}
+
+/** Tells whoever asked for the review (the submission's creator) that it's complete. */
+async function completed(
+  event: APIGatewayProxyEvent,
+  bySub: string,
+  sub: Submission,
+  f: { todos: number; feedback: boolean },
+) {
+  await domainEvent('submission.completed', {
+    artistId: sub.artistId,
+    submissionId: sub.submissionId,
+    title: sub.title,
+    requesterSub: sub.createdBy,
+    completedBySub: bySub,
+    todos: f.todos,
+    feedback: f.feedback,
+  });
+  await audit(event, 'submission.complete', 'success', {
+    artistId: sub.artistId,
+    submissionId: sub.submissionId,
+  });
+}
+
 export const handler = handle(async (event) => {
   const principal = await principalFor(authContext(event));
   const route = `${event.httpMethod} ${event.resource}`;
@@ -283,7 +326,38 @@ export const handler = handle(async (event) => {
       const sub = await load(artistId, submissionIdParam(event));
       const patch = parseBody(event, SubmissionPatch);
       const refused = patchAllowed(principal.role, sub.status, patch);
-      if (refused) throw new HttpError(409, refused);
+      if (refused)
+        throw new HttpError(principal.role === 'artist' && patch.complete ? 403 : 409, refused);
+      if (patch.complete) {
+        const at = now();
+        try {
+          await db.send(
+            new UpdateCommand({
+              TableName: table(),
+              Key: { PK: artistPk(artistId), SK: submissionSk(sub.submissionId) },
+              ...completeExpression(principal.sub, at, artistId, sub.submissionId),
+            }),
+          );
+        } catch (err) {
+          if ((err as Error).name === 'ConditionalCheckFailedException') {
+            throw new HttpError(409, 'This review is already complete');
+          }
+          throw err;
+        }
+        await completed(event, principal.sub, sub, {
+          todos: sub.feedbackTodoIds?.length ?? 0,
+          feedback: !!sub.feedbackAt,
+        });
+        return json(
+          200,
+          publicSubmission({
+            ...sub,
+            status: 'reviewed',
+            reviewedAt: at,
+            reviewedBy: principal.sub,
+          }),
+        );
+      }
       const next = {
         ...sub,
         ...(patch.priority ? { priority: patch.priority } : {}),
@@ -343,7 +417,8 @@ export const handler = handle(async (event) => {
       ensure(principal, 'write', artistId);
       if (principal.role === 'artist') throw new HttpError(403, 'Feedback comes from Blueprint');
       const sub = await load(artistId, submissionIdParam(event));
-      if (sub.status !== 'open') throw new HttpError(409, 'Feedback has already been given');
+      if (sub.status !== 'open') throw new HttpError(409, 'This review is already complete');
+      if (sub.feedbackAt) throw new HttpError(409, 'Feedback has already been given');
       const body = parseBody(event, FeedbackBody);
       const feedbackCipher = body.comment
         ? await (await cipher(principal, artistId)).seal(body.comment)
@@ -362,7 +437,9 @@ export const handler = handle(async (event) => {
         createdBy: principal.sub,
         createdAt: at,
       }));
-      const reviewed = { ...sub, status: 'reviewed' as const };
+      // Feedback no longer ends the review on its own (Complete review does),
+      // unless Blueprint sends it with "and complete the review".
+      const done = completeExpression(principal.sub, at, artistId, sub.submissionId);
       try {
         await db.send(
           new TransactWriteCommand({
@@ -372,19 +449,17 @@ export const handler = handle(async (event) => {
                   TableName: table(),
                   Key: { PK: artistPk(artistId), SK: submissionSk(sub.submissionId) },
                   UpdateExpression:
-                    'SET #s = :reviewed, reviewedAt = :at, reviewedBy = :by, feedbackTodoIds = :ids, GSI3PK = :pk, GSI3SK = :sk' +
+                    (body.complete ? `${done.UpdateExpression}, ` : 'SET ') +
+                    'feedbackAt = :fat, feedbackTodoIds = :ids' +
                     (feedbackCipher ? ', feedbackCipher = :f' : ''),
-                  ConditionExpression: '#s = :open',
-                  ExpressionAttributeNames: { '#s': 'status' },
+                  ConditionExpression: `${done.ConditionExpression} AND attribute_not_exists(feedbackAt)`,
+                  ExpressionAttributeNames: done.ExpressionAttributeNames,
                   ExpressionAttributeValues: {
-                    ':reviewed': 'reviewed',
-                    ':open': 'open',
-                    ':at': at,
-                    ':by': principal.sub,
+                    ...(body.complete
+                      ? done.ExpressionAttributeValues
+                      : { ':open': done.ExpressionAttributeValues[':open'] }),
+                    ':fat': at,
                     ':ids': todos.map((t) => t.todoId),
-                    ':pk': queuePk('reviewed'),
-                    // Reviewed items sort by review time.
-                    ':sk': `${at}#${artistId}#${sub.submissionId}`,
                     ...(feedbackCipher ? { ':f': feedbackCipher } : {}),
                   },
                 },
@@ -408,25 +483,33 @@ export const handler = handle(async (event) => {
         );
       } catch (err) {
         if ((err as Error).name === 'TransactionCanceledException') {
-          throw new HttpError(409, 'Feedback has already been given');
+          throw new HttpError(409, 'Feedback has already been given, or the review is complete');
         }
         throw err;
       }
-      await domainEvent('submission.feedbackGiven', {
-        artistId,
-        submissionId: sub.submissionId,
-        title: sub.title,
-        todos: todos.length,
-      });
       await audit(event, 'submission.feedback', 'success', {
         artistId,
         submissionId: sub.submissionId,
         todos: todos.length,
       });
+      if (body.complete) {
+        // One message for both: the feedback is ready and the review is complete.
+        await completed(event, principal.sub, sub, { todos: todos.length, feedback: true });
+      } else {
+        await domainEvent('submission.feedbackGiven', {
+          artistId,
+          submissionId: sub.submissionId,
+          title: sub.title,
+          todos: todos.length,
+        });
+      }
       return json(200, {
         ...publicSubmission({
-          ...reviewed,
-          reviewedAt: at,
+          ...sub,
+          ...(body.complete
+            ? { status: 'reviewed' as const, reviewedAt: at, reviewedBy: principal.sub }
+            : {}),
+          feedbackAt: at,
           feedbackTodoIds: todos.map((t) => t.todoId),
         }),
         todos: todos.map((t) => ({ todoId: t.todoId, title: t.title, due: t.due ?? null })),
