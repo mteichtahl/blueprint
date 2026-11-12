@@ -111,6 +111,24 @@ export interface FileUse {
   blocks: boolean;
 }
 
+/**
+ * Where a "Where it's used" row opens (rev 8): the chat, the submission, the
+ * brand kit or the asset library. Links are the app's own (see `openLink`);
+ * the shell opens the right screen for whoever is signed in.
+ */
+export function placeLink(u: FileUse, f: Pick<FileItem, 'artistId'>): string | null {
+  if (u.kind === 'chat') return `chat:${u.id}`;
+  if (!f.artistId) return null;
+  if (u.kind === 'submission') return `submission:${f.artistId}/${u.id}`;
+  if (u.kind === 'brand-kit') return `brand:${f.artistId}`;
+  return `assets:${f.artistId}`;
+}
+
+/** The link to a document's own page (notifications use the same form). */
+export function docLink(f: Pick<FileItem, 'artistId' | 'fileId'>): string {
+  return `doc:${f.artistId ?? 'library'}/${f.fileId}`;
+}
+
 export interface FileVersion {
   v: number;
   name: string;

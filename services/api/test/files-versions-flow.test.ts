@@ -228,6 +228,24 @@ describe('a new version (rev 8)', () => {
     expect(sent.map((e) => e.DetailType)).toContain('file.available');
   });
 
+  it('tells the owner and chosen editors about the new version (not who uploaded it)', async () => {
+    Object.assign(record(), { editAccess: 'chosen', editorIds: ['u-staff', 'u-sam'] });
+    startVersion(2, pdf('version two'));
+    await scanned(quarantineKey('library', FILE, undefined, 'file', 2));
+    const told = sent.find((e) => e.DetailType === 'file.versionAdded')!;
+    expect(JSON.parse(told.Detail)).toMatchObject({
+      fileId: FILE,
+      scope: 'library',
+      name: 'Tour rider',
+      v: 2,
+      uploadedBy: 'u-staff',
+      ownerSub: 'u-kyra',
+      editorSubs: ['u-staff', 'u-sam'],
+    });
+    // Free text (the version note) stays out of notifications.
+    expect(told.Detail).not.toContain('Set times');
+  });
+
   it('takes the new preview, whether it arrives before or after the file', async () => {
     startVersion(2, pdf('two'), true);
     await scanned(quarantineKey('library', FILE, undefined, 'thumb', 2));

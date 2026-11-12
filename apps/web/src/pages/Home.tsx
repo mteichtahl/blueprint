@@ -57,7 +57,7 @@ import { Events } from './Events.tsx';
 import { Prompts } from './Prompts.tsx';
 import { Newsroom } from './Newsroom.tsx';
 import { AllGigs, ArtistGigs } from './Gigs.tsx';
-import { ArtistWorkspace, type TabId as WorkspaceTab } from './Workspace.tsx';
+import { ArtistWorkspace, type WorkspaceTarget } from './Workspace.tsx';
 import { MeetingsPage, RecorderProvider, RecordingBar, type MeetingsTarget } from './Meetings.tsx';
 import { FileThumb } from '../components/FileThumb.tsx';
 
@@ -100,8 +100,18 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   // Back from a vendor's sign-in page: open Connectors to finish connecting.
   const [view, setView] = useState(hasPendingCallback() ? 'connectors' : 'overview');
   const [artists, setArtists] = useState<ArtistSummary[]>([]);
-  // Which workspace section to open (a plan notification opens Plan; rev 12).
-  const [wsTab, setWsTab] = useState<WorkspaceTab | undefined>();
+  // Which workspace section to open (a plan notification opens Plan, rev 12;
+  // a document or "Where it's used" link opens its place, rev 8).
+  const [wsTarget, setWsTarget] = useState<WorkspaceTarget | undefined>();
+  const openWorkspace = (artistId: string, t: Omit<WorkspaceTarget, 'n'>) => {
+    setWsTarget((was) => ({ ...t, n: (was?.n ?? 0) + 1 }));
+    setView(`artist:${artistId}`);
+  };
+  // A submission opened from a link shows in the review queue.
+  const [reviewTarget, setReviewTarget] = useState<{
+    artistId: string;
+    submissionId: string;
+  } | null>(null);
   const [openReviews, setOpenReviews] = useState<SubmissionSummary[]>([]);
   const [gigHelp, setGigHelp] = useState(0);
   const [todosOverdue, setTodosOverdue] = useState(0);
@@ -151,10 +161,23 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     if (meeting) return openMeetings({ kind: 'open', space: meeting[1]!, meetingId: meeting[2]! });
     // An artist's plan, for its owner: `plan:<artistId>` (rev 12).
     const planOf = /^plan:(art_[a-z0-9]+)$/.exec(link);
-    if (planOf) {
-      setWsTab('plan');
-      return setView(`artist:${planOf[1]}`);
+    if (planOf) return openWorkspace(planOf[1]!, { tab: 'plan' });
+    // Rev 8: a document, a submission, a brand kit or an asset library.
+    const doc = /^doc:(library|art_[a-z0-9]+)\/([a-z0-9]+)$/.exec(link);
+    if (doc?.[1] === 'library') {
+      setLibraryFile(doc[2]!);
+      return setView('library');
     }
+    if (doc) return openWorkspace(doc[1]!, { tab: 'library', fileId: doc[2]! });
+    const sub = /^submission:(art_[a-z0-9]+)\/([A-Za-z0-9_-]+)$/.exec(link);
+    if (sub) {
+      setReviewTarget({ artistId: sub[1]!, submissionId: sub[2]! });
+      return setView('review');
+    }
+    const brand = /^brand:(art_[a-z0-9]+)$/.exec(link);
+    if (brand) return openWorkspace(brand[1]!, { tab: 'brand' });
+    const assets = /^assets:(art_[a-z0-9]+)$/.exec(link);
+    if (assets) return openWorkspace(assets[1]!, { tab: 'library', libKind: 'assets' });
     setView(LINK_VIEWS[link] ?? 'overview');
   };
   useDeepLink(goTo);
@@ -254,7 +277,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         current={view}
         onNavigate={(v) => {
           if (v === 'meetings') setMeetingsTarget({ kind: 'list' });
-          setWsTab(undefined);
+          setWsTarget(undefined);
+          setReviewTarget(null);
           setView(v);
         }}
         userName={userName}
@@ -327,7 +351,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             token={token}
             me={me}
             artist={openArtist}
-            {...(wsTab ? { initialTab: wsTab } : {})}
+            {...(wsTarget ? { target: wsTarget } : {})}
             onNavigate={setView}
             onOpenChat={openChat}
             onRecordMeeting={() => openMeetings({ kind: 'new', artistId: openArtist.artistId })}
@@ -448,7 +472,14 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
               title="Review queue"
               sub="Sorted by priority, then date needed. Feedback turns into the artist's to-dos."
             />
-            <ReviewQueue cfg={cfg} token={token} artists={artists} onChanged={() => void load()} />
+            <ReviewQueue
+              cfg={cfg}
+              token={token}
+              artists={artists}
+              open={reviewTarget}
+              onClosed={() => setReviewTarget(null)}
+              onChanged={() => void load()}
+            />
           </>
         )}
         {view === 'gigs' && (
@@ -1132,7 +1163,27 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [libraryFile, setLibraryFile] = useState<string | null>(null);
   const notes = useNotifications(cfg, token, me.sub);
   const [chatTarget, setChatTarget] = useState<string | null>(null);
+  // A document of their own opened from a link (rev 8), and a submission.
+  const [myFile, setMyFile] = useState<string | null>(null);
+  const [subTarget, setSubTarget] = useState<{ submissionId: string; n: number } | null>(null);
   useDeepLink((link) => {
+    const doc = /^doc:(library|art_[a-z0-9]+)\/([a-z0-9]+)$/.exec(link);
+    if (doc) {
+      setLibTab('all');
+      if (doc[1] === 'library') setLibraryFile(doc[2]!);
+      else setMyFile(doc[2]!);
+      return setView('library');
+    }
+    const sub = /^submission:art_[a-z0-9]+\/([A-Za-z0-9_-]+)$/.exec(link);
+    if (sub) {
+      setSubTarget((was) => ({ submissionId: sub[1]!, n: (was?.n ?? 0) + 1 }));
+      return setView('submit');
+    }
+    if (link.startsWith('brand:')) return setView('brand');
+    if (link.startsWith('assets:')) {
+      setLibTab('assets');
+      return setView('library');
+    }
     if (link.startsWith('chat:')) setChatTarget(link.slice('chat:'.length) || null);
     setView(
       link.startsWith('chat:')
@@ -1173,10 +1224,10 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
   const [libTab, setLibTab] = useState<LibraryKind>('all');
   // Which list has a document page open; the rest of the library is hidden meanwhile.
   const [docOpen, setDocOpen] = useState<'mine' | 'shared' | null>(null);
-  const mineOpen = useCallback(
-    (o: boolean) => setDocOpen((d) => (o ? 'mine' : d === 'mine' ? null : d)),
-    [],
-  );
+  const mineOpen = useCallback((o: boolean) => {
+    setDocOpen((d) => (o ? 'mine' : d === 'mine' ? null : d));
+    if (!o) setMyFile(null);
+  }, []);
   const sharedOpen = useCallback(
     (o: boolean) => setDocOpen((d) => (o ? 'shared' : d === 'shared' ? null : d)),
     [],
@@ -1301,6 +1352,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
                   isBmg={false}
                   kind={libTab}
                   onOpenChange={mineOpen}
+                  openFileId={myFile}
                 />
               </div>
               <div className={docOpen === 'mine' ? 'hidden' : 'contents'}>
@@ -1346,7 +1398,13 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
         />
       )}
       {view === 'submit' && (
-        <ArtistSubmissions cfg={cfg} token={token} artistId={artistId} isBmg={false} />
+        <ArtistSubmissions
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          isBmg={false}
+          open={subTarget}
+        />
       )}
       {view === 'plan' && (
         <PlanTab

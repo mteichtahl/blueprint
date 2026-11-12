@@ -670,14 +670,20 @@ export function ArtistSubmissions({
   token,
   artistId,
   isBmg,
+  open,
 }: {
   cfg: AppConfig;
   token: string;
   artistId: string;
   isBmg: boolean;
+  /** Open this submission straight away (a link from a document's "Where it's used"). */
+  open?: { submissionId: string; n: number } | null;
 }) {
   const [subs, setSubs] = useState<SubmissionSummary[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) setOpenId(open.submissionId);
+  }, [open]);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
@@ -761,16 +767,27 @@ export function ReviewQueue({
   token,
   artists,
   onChanged,
+  open,
+  onClosed,
 }: {
   cfg: AppConfig;
   token: string;
   artists: ArtistSummary[];
   /** Lets the shell refresh its queue badge. */
   onChanged?: () => void;
+  /** Open this submission straight away (a document's "Where it's used" link). */
+  open?: { artistId: string; submissionId: string } | null;
+  /** The submission opened from a link was closed. */
+  onClosed?: () => void;
 }) {
   const [status, setStatus] = useState<'open' | 'reviewed'>('open');
   const [subs, setSubs] = useState<SubmissionSummary[] | null>(null);
-  const [opened, setOpened] = useState<SubmissionSummary | null>(null);
+  const [opened, setOpened] = useState<Pick<SubmissionSummary, 'artistId' | 'submissionId'> | null>(
+    null,
+  );
+  useEffect(() => {
+    if (open) setOpened(open);
+  }, [open]);
   const [error, setError] = useState<string | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
   const load = useCallback(async () => {
@@ -800,7 +817,10 @@ export function ReviewQueue({
         submissionId={opened.submissionId}
         isBmg
         backTo="Review queue"
-        onBack={() => setOpened(null)}
+        onBack={() => {
+          setOpened(null);
+          onClosed?.();
+        }}
         onChanged={() => {
           void load();
           onChanged?.();
