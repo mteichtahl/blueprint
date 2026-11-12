@@ -171,6 +171,28 @@ const meeting = {
 };
 /** Serve the meeting as one Chloe has turned AI off for (spec 8). */
 let meetingAiOff = false;
+/** One chat in the inbox (the Studio HQ chat card test). */
+let withChat = false;
+const chatFixture = {
+  conversationId: 'c-chloe',
+  type: 'bmg-artist',
+  title: 'Chloe Poli',
+  description: null,
+  artists: [{ artistId: ARTIST, displayName: 'Chloe Poli' }],
+  access: 'read-write',
+  canSend: true,
+  settings: null,
+  lastMessageAt: now,
+  preview: 'New mix is up',
+  previewSender: 'Chloe Poli',
+  previewTicks: null,
+  unreadCount: 2,
+  pinned: false,
+  muted: false,
+  archived: false,
+  private: false,
+  lastSeen: null,
+};
 const aiOffMeeting = () => ({
   ...meeting,
   status: 'no-ai',
@@ -412,7 +434,8 @@ function answer(method: string, path: string): [number, unknown] {
       },
     ],
     [/^\/notifications$/, { notifications: [], unread: 0 }],
-    [/^\/conversations$/, { conversations: [] }],
+    [/^\/conversations$/, { conversations: withChat ? [chatFixture] : [] }],
+    [/^\/conversations\/[^/]+\/messages$/, { messages: [] }],
     [
       /^\/events$/,
       {
@@ -1139,6 +1162,22 @@ describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
       expect(await violations()).toEqual([]);
     },
   );
+
+  it('BMG: picking a chat on Studio HQ opens that chat', async () => {
+    withChat = true;
+    try {
+      render(<Home {...props('bmg-admin')} />);
+      await settle();
+      fireEvent.click(screen.getByRole('button', { name: /Chloe Poli.*New mix is up/ }));
+      await settle();
+      expect(screen.getByRole('heading', { name: 'Chat', level: 1 })).toBeTruthy();
+      // The conversation itself is open, not just the chat list.
+      expect(document.querySelector('.wa-pane:not(.wa-pane-empty)')).not.toBeNull();
+      expect(await violations()).toEqual([]);
+    } finally {
+      withChat = false;
+    }
+  });
 
   it('BMG: a meeting’s Edit details has the title, sharing and the danger area (rev 13)', async () => {
     await openMeetings();

@@ -522,8 +522,8 @@ function ChatRow({
       className="wa-row"
       onClick={onOpen}
       aria-current={active ? 'true' : undefined}
-      aria-label={`${c.title}${unread ? `, ${c.unreadCount} unread` : ''}`}
     >
+      {/* The row's name is its visible text (WCAG 2.5.3); "unread" is spoken with the count. */}
       <ChatAvatar c={c} />
       <span className="wa-row-body">
         <span className="wa-top">
@@ -554,6 +554,7 @@ function ChatRow({
           {unread && (
             <span className={`wa-count ${c.muted ? 'wa-count-muted' : ''}`}>
               {c.unreadCount > 99 ? '99+' : c.unreadCount}
+              <span className="sr-only"> unread</span>
             </span>
           )}
         </span>
