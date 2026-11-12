@@ -49,7 +49,13 @@ import { AccessPage } from './Access.tsx';
 import { Invitations } from './Invitations.tsx';
 import { ArtistFiles, Library, LIBRARY_KIND_OPTIONS, type LibraryKind } from './Library.tsx';
 import { Profile } from './Profile.tsx';
-import { ArtistChats, BmgChat, useInbox, type ConversationSummary } from './Messages.tsx';
+import {
+  ArtistChats,
+  BmgChat,
+  directUnread,
+  useInbox,
+  type ConversationSummary,
+} from './Messages.tsx';
 import { markdownToText } from '../lib/markdown.ts';
 import { PlanStages, PlanTab } from './PlanLazy.tsx';
 import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
@@ -359,6 +365,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             {...(wsTarget ? { target: wsTarget } : {})}
             onNavigate={setView}
             onOpenChat={openChat}
+            chatUnread={directUnread(inbox.conversations, openArtist.artistId)}
             onRecordMeeting={() => openMeetings({ kind: 'new', artistId: openArtist.artistId })}
             onOpenMeeting={(m) =>
               openMeetings({ kind: 'open', space: m.space, meetingId: m.meetingId })

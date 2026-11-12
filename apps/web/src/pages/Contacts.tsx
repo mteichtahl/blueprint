@@ -1,4 +1,13 @@
-import { BackLink, DangerArea, RecordPage } from '../components/patterns.tsx';
+import {
+  BackLink,
+  DangerArea,
+  RecordPage,
+  SelectBar,
+  SelectBox,
+  useSelect,
+  type BulkAction,
+  type SelectState,
+} from '../components/patterns.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -314,6 +323,9 @@ export function Contacts({
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Select mode (rev 13): Blueprint archives or restores several at once.
+  const sel = useSelect();
+  const selectable = isBmg && !compact;
 
   async function archive(c: Contact, archived: boolean) {
     setActionError(null);
@@ -460,6 +472,20 @@ export function Contacts({
           </label>
         )}
       </div>
+      {selectable && contacts && (
+        <SelectBar
+          sel={sel}
+          all={contacts.map((c) => c.contactId)}
+          actions={archiveActions(
+            cfg,
+            token,
+            contacts.map((c) => ({ id: c.contactId, archived: c.archived })),
+            (id) => `/contacts/${id}`,
+            ['contact', 'contacts'],
+          )}
+          onDone={() => void reload()}
+        />
+      )}
       {contacts === null ? (
         <WaveLoader />
       ) : contacts.length === 0 ? (
@@ -471,9 +497,14 @@ export function Contacts({
           {contactCards(contacts, setOpen)}
         </ul>
       ) : (
-        <DataTable label="Contacts" cards={contactCards(contacts, setOpen)}>
+        <DataTable label="Contacts" cards={contactCards(contacts, setOpen, sel)}>
           <thead>
             <tr>
+              {sel.on && (
+                <th scope="col">
+                  <span className="sr-only">Selected</span>
+                </th>
+              )}
               <th scope="col">Name</th>
               <th scope="col">Role</th>
               <th scope="col">Email</th>
@@ -487,10 +518,19 @@ export function Contacts({
               <tr
                 key={c.contactId}
                 className={`cursor-pointer ${c.archived ? 'opacity-60' : ''}`}
-                onClick={() => setOpen(c)}
+                onClick={() => (sel.on ? sel.toggle(c.contactId) : setOpen(c))}
               >
+                {sel.on && (
+                  <td className="w-10">
+                    <SelectBox
+                      label={c.name}
+                      checked={sel.has(c.contactId)}
+                      onChange={() => sel.toggle(c.contactId)}
+                    />
+                  </td>
+                )}
                 <td>
-                  <button type="button" className="font-bold">
+                  <button type="button" className="font-bold" tabIndex={sel.on ? -1 : undefined}>
                     {c.name}
                   </button>
                 </td>
@@ -528,10 +568,20 @@ export function Contacts({
 }
 
 /** Contacts as phone cards: name and role, tags, and one-tap call and email. */
-function contactCards(contacts: Contact[], open: (c: Contact) => void) {
+function contactCards(contacts: Contact[], open: (c: Contact) => void, select?: SelectState) {
+  const selecting = !!select?.on;
   return contacts.map((c) => (
     <RowCard
       key={c.contactId}
+      lead={
+        selecting ? (
+          <SelectBox
+            label={c.name}
+            checked={select!.has(c.contactId)}
+            onChange={() => select!.toggle(c.contactId)}
+          />
+        ) : undefined
+      }
       title={c.name}
       status={c.archived ? <Tag>Archived</Tag> : undefined}
       sub={[c.jobTitle, c.organisation].filter(Boolean).join(' · ') || c.email || c.phone}
@@ -558,9 +608,41 @@ function contactCards(contacts: Contact[], open: (c: Contact) => void) {
           )}
         </>
       }
-      onOpen={() => open(c)}
+      onOpen={() => (selecting ? select!.toggle(c.contactId) : open(c))}
     />
   ));
+}
+
+/**
+ * Select mode's bulk actions for contacts and venues (rev 13, Blueprint only):
+ * Archive (hidden from pickers) and Restore, through each one's own PATCH.
+ */
+export function archiveActions(
+  cfg: AppConfig,
+  token: string,
+  items: readonly { id: string; archived: boolean }[],
+  path: (id: string) => string,
+  noun: [string, string],
+): BulkAction[] {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const n = (k: number) => `${k} ${k === 1 ? noun[0] : noun[1]}`;
+  const set = (archived: boolean) => async (id: string) => {
+    await api(cfg, token, 'PATCH', path(id), { archived });
+  };
+  return [
+    {
+      label: 'Archive',
+      run: set(true),
+      applies: (id) => !byId.get(id)?.archived,
+      done: (k) => `Archived ${n(k)}`,
+    },
+    {
+      label: 'Restore',
+      run: set(false),
+      applies: (id) => !!byId.get(id)?.archived,
+      done: (k) => `Restored ${n(k)}`,
+    },
+  ];
 }
 
 /**

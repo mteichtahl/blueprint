@@ -600,6 +600,32 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **Editor-added notifications.** Giving people edit access (Who can edit → chosen people) or handing someone the document publishes `file.editorsAdded`: new editors read "<name> gave you edit access to …", a new owner "<name> handed you …". The person who made the change isn't told. Both events open the document's page.
 - **`publish()`** in `services/api/src/lib.ts` puts a `bmg.workspace` event on the bus, so handlers no longer need their own EventBridge boilerplate for notifications.
 
+## Workspace gaps: chat count, Select mode, meeting attendees (12 Nov 2026)
+
+- **Unread count on the workspace chat icon (rev 9).** The chat icon beside an artist's name shows a coral count of unread messages in Blueprint's chat with that artist (99+ past 99), the same number as on the Chat list. Archived chats don't count. It's worked out from the inbox Studio HQ already keeps live, so there's no new call. It hides while the chat panel is open, and the icon's name says it ("Chat with Chloe Poli, 3 unread").
+- **Select mode beyond the library (rev 13, P10).** `useSelect`, `SelectBar` and `SelectBox` in `components/patterns.tsx`. **Select** turns the mode on; a row tap then ticks the row instead of opening it.
+  - **To-dos** (a workspace's To-dos and Tasks & to-dos): **Mark done** and **Mark not done**.
+  - **Contacts and venues** (Blueprint, full lists): **Archive** and **Restore**. These aren't in a danger area: archiving deletes nothing and Restore undoes it (recorded as an exception in `patterns.md`).
+  - Items are changed one at a time with the routes each screen already uses, so there's no bulk API and no new route; each change is checked and audited as before. If some fail, the bar says how many and why ("Marked 4 to-dos done. 1 couldn't be changed: …").
+  - Still without Select: gigs and the review queue, which have no action that makes sense for several at once yet.
+- **Editing meeting attendees (rev 13).** Edit meeting now has the same attendees picker as New meeting (the Blueprint team as chips, the artist the meeting is about always included, anyone else by name). Team members who have since left still show and can be removed. Saving sends `attendees` only when they changed. The API already accepted it.
+
+## End-to-end tests after every staging deploy (12 Nov 2026)
+
+- **Staging E2E** (`.github/workflows/e2e.yml`) runs after every Deploy staging, as a job of that workflow, and by hand. It's the automatable part of the UAT plan: about 45 Playwright tests in `apps/e2e`. How it works and how to add tests: [`e2e.md`](e2e.md).
+- **API first for rules.** Privacy and permission rules are checked straight against the API, so they hold whatever any screen shows. The screen tests cover real sign-in and that every screen opens without a page error or a 5xx.
+- **Dedicated test accounts** (`blueprint e2e setup`): an admin, a team member and three artists, created through the app's own invites so they're real accounts with their own keys. Their passwords and authenticator secrets are in Secrets Manager (`bmg/staging/e2e-accounts`, tooling key, tagged `bmg:env=tooling` so the permission boundary lets the tooling runner read it). Only the deploy-staging runner role can read it, so the job runs there; nothing is stored in GitHub, and PR builds on the CI runner can't reach it.
+- **Shared staging.** The tests only touch data the test accounts own, delete any contacts they add, and never change global settings. To-dos and gigs have no delete in the API, so each run's are left done or cancelled.
+- **Amazon Linux 2023** isn't a Playwright platform, so the job installs Chromium's libraries with dnf, then Playwright's Chromium.
+- **Not a release gate yet.** A failed E2E run fails the Deploy staging run but doesn't stop `blueprint release ship` or the release guard, which still look at the staging deployment. Once the suite has proved stable, the release guard can also require a green Staging E2E for the commit.
+
+## Release trains: the version moves after every release (12 Nov 2026)
+
+- **Problem:** after 1.5.1 shipped, 15 PRs (#132–#149) merged without starting a new release, so staging kept showing `beta-1.5.1`, the same as production, and "What's new" had nothing new to show. The bump was a convention only.
+- **Now enforced:** the **CI checks** job runs `tools/release/version-check.mjs` on pull requests. It fails unless `VERSION` is newer than both the `VERSION` at production's last successful deployment and the newest `vX.Y.Z` tag, and says to run `blueprint release minor|major|hotfix`. Merges to `main` and Dependabot PRs skip it. The job now needs `deployments: read`, granted by the Deploy staging call too.
+- **`blueprint release ship`** also refuses a version production already runs, even when it was never tagged.
+- **1.6.0** starts the next release, with notes for #132–#147.
+
 ## Sign-in and newsletter gaps (12 Nov 2026)
 
 - **Social sign-in buttons** (Google, Apple, Facebook; design D2).

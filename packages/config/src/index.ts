@@ -172,6 +172,8 @@ export const names = {
   /** One social sign-in provider's OAuth app (JSON: clientId and clientSecret, or Apple's teamId, keyId, privateKey). */
   socialSecret: (cfg: BmgConfig, env: EnvironmentName, provider: string) =>
     `${cfg.project}/${env}/social/${provider.toLowerCase()}`,
+  /** Secrets Manager id of the end-to-end test accounts (docs/e2e.md); read by the Staging E2E job. */
+  e2eSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/e2e-accounts`,
   /** Secrets Manager id prefix for the connector OAuth apps: `<prefix>/<provider>` (Phase 4). */
   connectorSecretPrefix: (cfg: BmgConfig, env: EnvironmentName) =>
     `${cfg.project}/${env}/connectors`,

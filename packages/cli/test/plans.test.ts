@@ -301,6 +301,20 @@ describe('release ship', () => {
     expect(planShip({ ...base, changes: [] }).problems.join()).toMatch(/nothing to release/);
   });
 
+  it('refuses a version production already runs, even without a tag', () => {
+    const plan = planShip({
+      ...base,
+      versionAtSha: '1.5.1',
+      existingTags: [],
+      productionVersion: '1.5.1\n',
+    });
+    expect(plan.problems.join()).toMatch(/production is already on 1\.5\.1/);
+  });
+
+  it('allows a version newer than production', () => {
+    expect(planShip({ ...base, productionVersion: '1.4.0' }).problems).toEqual([]);
+  });
+
   it('refuses a malformed VERSION', () => {
     expect(planShip({ ...base, versionAtSha: '1.5' }).problems).toHaveLength(1);
   });

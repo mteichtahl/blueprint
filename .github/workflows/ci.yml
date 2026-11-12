@@ -52,6 +52,9 @@ jobs:
   checks:
     name: CI checks
     runs-on: codebuild-bmg-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    permissions:
+      contents: read
+      deployments: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,6 +64,14 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci --no-audit --no-fund
+      # After a release ships, the next PR starts a new one (docs/releases.md).
+      # Pull requests only: merges to main and Dependabot PRs deploy under the
+      # current version.
+      - name: VERSION is newer than the last release
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/release/version-check.mjs
       - name: Lint and format
         run: |
           npm run lint
