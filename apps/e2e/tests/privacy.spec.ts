@@ -1,6 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { account } from '../src/accounts.ts';
-import { answerMfa, artistIdOf, call, CognitoError, ok, startPasswordSignIn } from '../src/api.ts';
+import {
+  aiTool,
+  answerMfa,
+  artistIdOf,
+  call,
+  CognitoError,
+  ok,
+  startPasswordSignIn,
+} from '../src/api.ts';
 import { wrongCode } from '../src/totp.ts';
 
 /**
@@ -38,15 +46,11 @@ test.describe('Sign-in', () => {
 
 test.describe('Roles', () => {
   test('artists can’t reach Blueprint-only areas', async () => {
-    for (const path of [
-      '/access/team',
-      '/ai/prompts',
-      '/gigs',
-      '/review-queue',
-      '/ai/tools/artists',
-    ]) {
+    for (const path of ['/access/team', '/ai/prompts', '/gigs', '/review-queue']) {
       await test.step(path, async () => denied((await call('artistOn', 'GET', path)).status));
     }
+    // A real refusal, not the 404 any request without the assistant's marker gets.
+    expect((await aiTool('artistOn', '/ai/tools/artists')).status).toBe(403);
   });
 
   test('O-01, O-02: only an admin can change Access & permissions', async () => {
@@ -116,22 +120,19 @@ test.describe('AI opt-out', () => {
   test('M-07: Blueprint’s assistant can’t see an opted-out artist', async () => {
     const off = await artistIdOf('artistOff');
     const on = await artistIdOf('artistOn');
-    denied((await call('admin', 'GET', `/ai/tools/workspace?artistId=${off}`)).status);
-    expect((await call('admin', 'GET', `/ai/tools/workspace?artistId=${on}`)).status).toBe(200);
+    expect((await aiTool('admin', `/ai/tools/workspace?artistId=${off}`)).status).toBe(403);
+    expect((await aiTool('admin', `/ai/tools/workspace?artistId=${on}`)).status).toBe(200);
 
-    const { artists } = await ok<{ artists: { artistId: string }[] }>(
-      'admin',
-      'GET',
-      '/ai/tools/artists',
-    );
-    const ids = artists.map((a) => a.artistId);
+    const res = await aiTool<{ artists: { artistId: string }[] }>('admin', '/ai/tools/artists');
+    expect(res.status).toBe(200);
+    const ids = res.data.artists.map((a) => a.artistId);
     expect(ids).toContain(on);
     expect(ids).not.toContain(off);
   });
 
   test('M-04: an artist’s assistant can’t read another artist', async () => {
     const other = await artistIdOf('artistOther');
-    denied((await call('artistOn', 'GET', `/ai/tools/workspace?artistId=${other}`)).status);
+    expect((await aiTool('artistOn', `/ai/tools/workspace?artistId=${other}`)).status).toBe(403);
   });
 
   test('A-14: Artists & access shows each artist’s AI choice', async () => {
