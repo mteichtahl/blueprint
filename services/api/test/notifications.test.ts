@@ -4,6 +4,7 @@ import {
   emailText,
   inQuietHours,
   plan,
+  planGroups,
   type Recipient,
 } from '../src/notifications/model.ts';
 
@@ -294,5 +295,70 @@ describe('to-dos shared from a meeting (rev 11 change)', () => {
     const p = plan(ev(['A', 'B', 'C', 'D', 'E'], 7), team);
     expect(p?.draft.body).toBe('“A”, “B”, “C” and 4 more.');
     expect(plan(ev(['Only one']), team)?.draft.title).toBe('Blueprint added a to-do for you');
+  });
+});
+
+describe('documents (rev 8)', () => {
+  it('tells the owner and chosen editors about a new version, never the uploader', () => {
+    const [g] = planGroups(
+      {
+        type: 'file.versionAdded',
+        fileId: 'f1',
+        scope: 'artist',
+        artistId: A,
+        name: 'Rider',
+        v: 3,
+        uploadedBy: 'staffA',
+        ownerSub: 'chloe',
+        editorSubs: ['staffA', 'kyra'],
+      },
+      people,
+    );
+    expect(subs(g)).toEqual(['chloe', 'kyra']);
+    expect(g!.draft).toMatchObject({
+      kind: 'file',
+      title: 'New version of “Rider”',
+      link: `doc:${A}/f1`,
+    });
+  });
+
+  it('words a brought-back version as such', () => {
+    const [g] = planGroups(
+      {
+        type: 'file.versionAdded',
+        fileId: 'f1',
+        scope: 'library',
+        name: 'Rider',
+        v: 4,
+        uploadedBy: 'kyra',
+        ownerSub: 'staffA',
+        editorSubs: [],
+        restoredFrom: 2,
+      },
+      people,
+    );
+    expect(subs(g)).toEqual(['staffA']);
+    expect(g!.draft.body).toBe('Version 2 was brought back as version 4.');
+    expect(g!.draft.link).toBe('doc:library/f1');
+  });
+
+  it('tells new editors and a new owner, each in their own words', () => {
+    const groups = planGroups(
+      {
+        type: 'file.editorsAdded',
+        fileId: 'f1',
+        scope: 'library',
+        name: 'Rider',
+        editorSubs: ['staffA', 'staffB'],
+        ownerSub: 'kyra',
+        bySub: 'staffB',
+        byName: 'Sam',
+      },
+      people,
+    );
+    expect(groups.map((g) => [subs(g), g.draft.title])).toEqual([
+      [['kyra'], 'Sam handed you “Rider”'],
+      [['staffA'], 'Sam gave you edit access to “Rider”'],
+    ]);
   });
 });

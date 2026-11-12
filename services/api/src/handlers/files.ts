@@ -95,6 +95,7 @@ import {
   json,
   parseBody,
   principalFor,
+  publish,
 } from '../lib.ts';
 
 const s3 = new S3Client({});
@@ -403,6 +404,30 @@ async function ownerChanges(
     }
   }
   return { sets, values, next };
+}
+
+/**
+ * Rev 8: people given edit access, or handed the document, hear about it
+ * (in app, and by email and push per their settings). The person who made
+ * the change is never told.
+ */
+async function tellNewEditors(principal: Principal, before: FileRecord, next: Partial<FileRecord>) {
+  const was = new Set(editAccessOf(before) === 'chosen' ? (before.editorIds ?? []) : []);
+  const added = (next.editorIds ?? []).filter((s) => !was.has(s) && s !== principal.sub);
+  const ownerSub = next.ownerId && next.ownerId !== principal.sub ? next.ownerId : undefined;
+  const editors = added.filter((s) => s !== ownerSub);
+  if (!editors.length && !ownerSub) return;
+  const by = (await namesFor([principal.sub])).get(principal.sub)?.displayName ?? 'Someone';
+  await publish('file.editorsAdded', {
+    fileId: before.fileId,
+    scope: before.scope,
+    ...(before.artistId ? { artistId: before.artistId } : {}),
+    name: before.title || before.name,
+    editorSubs: editors,
+    ...(ownerSub ? { ownerSub } : {}),
+    bySub: principal.sub,
+    byName: by,
+  });
 }
 
 /**
@@ -1381,6 +1406,7 @@ export const handler = handle(async (raw) => {
           editAccess: owned.next.editAccess ?? editAccessOf(f),
           transferred: !!owned.next.ownerId,
         });
+      if (owned.sets.length) await tellNewEditors(principal, f, owned.next);
       const next: FileRecord = {
         ...f,
         ...owned.next,
@@ -1606,6 +1632,7 @@ export const handler = handle(async (raw) => {
         });
       if (patch.title !== undefined)
         await audit(event, 'file.rename', 'success', { library: true, fileId: f.fileId });
+      if (owned.sets.length) await tellNewEditors(principal, f, owned.next);
       const next: FileRecord = {
         ...f,
         ...owned.next,
