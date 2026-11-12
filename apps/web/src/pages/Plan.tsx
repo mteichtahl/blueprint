@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { DangerArea, SectionSwitch } from '../components/patterns.tsx';
 import {
   api,
   GOAL_MAX,
@@ -14,7 +15,17 @@ import {
 import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
 import { MarkdownEditor, MarkdownView } from '../components/Markdown.tsx';
-import { Bar, Button, Card, Field, Notice, Tag, TextArea, WaveLoader } from '../components/ui.tsx';
+import {
+  Bar,
+  Button,
+  Card,
+  Field,
+  Icon,
+  Notice,
+  Tag,
+  TextArea,
+  WaveLoader,
+} from '../components/ui.tsx';
 import { PlanTimeline } from '../components/PlanTimeline.tsx';
 import { ChangeOwnerPanel, OwnerChip, OwnerPicker } from '../components/PlanOwner.tsx';
 
@@ -54,22 +65,25 @@ function phaseFrom(stage: {
   } satisfies Phase;
 }
 
-/** Plan section tabs: outcome, one per stage, the alignment check (and "add stage" while editing). */
-type Section =
-  | { kind: 'outcome' }
-  | { kind: 'phase'; id: string }
-  | { kind: 'timeline' }
-  | { kind: 'gaps' }
-  | { kind: 'history' }
-  | { kind: 'add' };
-const sameSection = (a: Section, b: Section) =>
-  a.kind === b.kind && (a.kind !== 'phase' || (b.kind === 'phase' && a.id === b.id));
+/** The plan's views (rev 13): one level, in the workspace's section switch. */
+export type PlanView = 'outcome' | 'stages' | 'timeline' | 'history';
+export const PLAN_VIEWS: { id: PlanView; label: string }[] = [
+  { id: 'outcome', label: 'Outcome' },
+  { id: 'stages', label: 'Stages' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'history', label: 'History' },
+];
+
+/** What's open for editing: the outcome, one stage, or a stage being added. */
+type Target = { kind: 'outcome' } | { kind: 'phase'; id: string } | { kind: 'add' };
 
 /**
- * Artist workspace Plan tab: each section in its own tab (outcome and
- * measures, each stage, the alignment check). BMG edits, with Markdown in a
- * graphical editor; artists read. With no plan yet, BMG sees only "Start a
- * new plan".
+ * Artist workspace Plan (rev 13): a work page with no edit mode. Milestones are
+ * ticked where they are; **Edit outcome** and **Edit stage** open that one part
+ * for editing, with Save and Cancel under it, and Remove stage in the danger
+ * area. **+ Add stage** opens a new stage the same way. Every save is one plan
+ * update (rev 12 notifications). BMG edits; artists read. With no plan yet, BMG
+ * sees only "Start a new plan".
  */
 export function PlanTab({
   cfg,
@@ -80,6 +94,7 @@ export function PlanTab({
   autoStart = false,
   onChanged,
   meSub,
+  view: viewProp,
 }: {
   /** The signed-in person: the default owner of a plan they start (rev 12). */
   meSub?: string;
@@ -93,10 +108,14 @@ export function PlanTab({
   autoStart?: boolean;
   /** Lets the workspace header refresh after a save. */
   onChanged?: () => void;
+  /** Set by the workspace's section switch; without it the plan shows its own switch. */
+  view?: PlanView;
 }) {
   const [data, setData] = useState<PlanResponse | null>(null);
   const [draft, setDraft] = useState<Plan | null>(null);
-  const [section, setSection] = useState<Section>({ kind: 'outcome' });
+  const [target, setTarget] = useState<Target | null>(null);
+  const [ownView, setOwnView] = useState<PlanView>('outcome');
+  const view = viewProp ?? ownView;
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -106,11 +125,16 @@ export function PlanTab({
   const [changingOwner, setChangingOwner] = useState(false);
   const [ownerDone, setOwnerDone] = useState<string | null>(null);
 
+  const stopEditing = () => {
+    setDraft(null);
+    setTarget(null);
+  };
   const load = useCallback(async () => {
     try {
       const res = await api<PlanResponse>(cfg, token, 'GET', `/artists/${artistId}/plan`);
       setData(res);
       setDraft(null);
+      setTarget(null);
       const mine = res.ownerCandidates?.some((c) => c.sub === meSub);
       setOwnerPick(mine && meSub ? meSub : '');
       return res;
@@ -121,9 +145,20 @@ export function PlanTab({
   }, [cfg, token, artistId, meSub]);
   useEffect(() => {
     void load().then((res) => {
-      if (res && !res.exists && autoStart && canEdit) setDraft(structuredClone(res.plan));
+      if (res && !res.exists && autoStart && canEdit) {
+        setDraft(structuredClone(res.plan));
+        setTarget({ kind: 'outcome' });
+      }
     });
   }, [load, autoStart, canEdit]);
+  // Moving to another view leaves an unsaved edit behind (except a plan being started).
+  useEffect(() => {
+    if (data?.exists) {
+      setDraft(null);
+      setTarget(null);
+    }
+    // Only when the view changes, not when the plan reloads.
+  }, [view]);
 
   /** A plan with no owner (new, or from before rev 12) can't be saved without one. */
   const needsOwner = !!data && canEdit && (!data.exists || data.ownerNeeded);
@@ -131,7 +166,7 @@ export function PlanTab({
   async function save(plan: Plan, owner?: { sub: string; note?: string }) {
     setError(null);
     setSaved(false);
-    // The picker only shows while editing; a tick on an ownerless plan asks for one first.
+    // The picker shows while editing; a tick on an ownerless plan asks for one first.
     const ownerSub = owner?.sub ?? (needsOwner && draft ? ownerPick : undefined);
     if (needsOwner && !ownerSub) {
       setError(
@@ -182,8 +217,8 @@ export function PlanTab({
         <Button
           variant="cta"
           onClick={() => {
-            setSection({ kind: 'outcome' });
             setDraft(structuredClone(data.plan));
+            setTarget({ kind: 'outcome' });
           }}
         >
           Start a new plan
@@ -197,52 +232,48 @@ export function PlanTab({
   const plan = draft ?? data.plan;
   const edit = (fn: (p: Plan) => Plan) => setDraft(fn(structuredClone(plan)));
   const progress = phaseProgress(plan);
-  // If the open stage was removed, fall back to the outcome tab.
-  const current: Section =
-    section.kind === 'phase' && !plan.phases.some((p) => p.id === section.id)
-      ? { kind: 'outcome' }
-      : section.kind === 'add' && !editing
-        ? { kind: 'outcome' }
-        : section;
+  const startEdit = (t: Target) => {
+    setChangingOwner(false);
+    setSaved(false);
+    setError(null);
+    setDraft(structuredClone(data.plan));
+    setTarget(t);
+  };
+  const isTarget = (t: Target) =>
+    !!target &&
+    target.kind === t.kind &&
+    (t.kind !== 'phase' || (target.kind === 'phase' && target.id === t.id));
+  // A new plan starts on its outcome, then creates the plan with the template's stages.
+  const shown: PlanView = !data.exists ? 'outcome' : view;
 
-  const tabs: { section: Section; label: React.ReactNode; key: string }[] = [
-    { section: { kind: 'outcome' }, label: 'Outcome & measures', key: 'outcome' },
-    ...plan.phases.map((p, i) => ({
-      section: { kind: 'phase' as const, id: p.id },
-      key: p.id,
-      label: (
-        <>
-          {i + 1}. {p.name}
-          <span
-            aria-hidden
-            className="inline-block size-2 rounded-full"
-            style={{ background: STATUS[progress[i]!.status].color }}
-          />
-        </>
-      ),
-    })),
-    ...(data.exists || canEdit
-      ? [
-          { section: { kind: 'timeline' as const }, key: 'timeline', label: 'Timeline' },
-          {
-            section: { kind: 'gaps' as const },
-            key: 'gaps',
-            label: (
-              <>
-                Alignment check
-                {data.gaps.length > 0 && <Tag tone="c">{data.gaps.length}</Tag>}
-              </>
-            ),
-          },
-        ]
-      : []),
-    ...(data.exists
-      ? [{ section: { kind: 'history' as const }, key: 'history', label: 'History' }]
-      : []),
-    ...(editing && plan.phases.length < MAX_STAGES
-      ? [{ section: { kind: 'add' as const }, key: 'add', label: '+ Add stage' }]
-      : []),
-  ];
+  /** Save and Cancel under the part being edited (P4), with the owner picker when one's needed. */
+  const saveBar = (label: string) => (
+    <div className="flex flex-col gap-3 border-t border-input pt-3">
+      {needsOwner && (
+        <OwnerPicker
+          candidates={data.ownerCandidates ?? []}
+          value={ownerPick}
+          onChange={setOwnerPick}
+        />
+      )}
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="cta" disabled={busy} onClick={() => void save(plan)}>
+          {busy ? 'Saving…' : data.exists ? label : 'Create plan'}
+        </Button>
+        <Button variant="ghost" disabled={busy} onClick={stopEditing}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+  const editButton = (label: string, t: Target) =>
+    canEdit && !editing ? (
+      <Button size="sm" variant="ghost" onClick={() => startEdit(t)}>
+        <Icon name="pencil" size={15} />
+        {label}
+      </Button>
+    ) : undefined;
 
   return (
     <div className="flex flex-col gap-4">
@@ -272,104 +303,130 @@ export function PlanTab({
         />
       )}
       {ownerDone && <Notice tone="success">{ownerDone}</Notice>}
-      <nav
-        role="tablist"
-        aria-label="Plan sections"
-        className="relative flex flex-wrap overflow-x-auto border-b border-input"
-      >
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            className="stab"
-            aria-selected={sameSection(current, t.section)}
-            onClick={() => setSection(t.section)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      {saved && <Notice tone="success">Plan saved.</Notice>}
+      {!editing && error && <Notice tone="error">{error}</Notice>}
+      {viewProp === undefined && data.exists && (
+        <SectionSwitch
+          label="Plan sections"
+          value={view}
+          onChange={setOwnView}
+          options={PLAN_VIEWS}
+        />
+      )}
 
-      {current.kind === 'outcome' && <OutcomeSection plan={plan} editing={editing} edit={edit} />}
+      {shown === 'outcome' && (
+        <>
+          <OutcomeSection
+            plan={plan}
+            editing={isTarget({ kind: 'outcome' })}
+            edit={edit}
+            action={editButton('Edit outcome', { kind: 'outcome' })}
+            footer={isTarget({ kind: 'outcome' }) ? saveBar('Save outcome') : undefined}
+          />
+          {data.exists && (
+            <Card title={<span className="eyebrow">Alignment check</span>}>
+              {data.gaps.length === 0 ? (
+                <p className="m-0 text-[15px]">No gaps: every measure is fed by a milestone.</p>
+              ) : (
+                <ul className="m-0 flex flex-col gap-1 pl-[18px] text-[15px]">
+                  {data.gaps.map((g) => (
+                    <li key={g}>{g}</li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          )}
+        </>
+      )}
 
-      {current.kind === 'phase' &&
-        (() => {
-          const pi = plan.phases.findIndex((p) => p.id === current.id);
-          return (
-            <PhaseSection
-              phase={plan.phases[pi]!}
-              index={pi}
-              count={plan.phases.length}
-              progress={progress[pi]!}
-              editing={editing}
-              canTick={canEdit && !busy}
-              edit={(fn) => edit((p) => ((p.phases[pi] = fn(p.phases[pi]!)), p))}
-              move={(dir) =>
-                edit((p) => {
-                  const [ph] = p.phases.splice(pi, 1);
-                  p.phases.splice(pi + dir, 0, ph!);
-                  return p;
-                })
-              }
-              remove={() => {
-                edit((p) => (p.phases.splice(pi, 1), p));
-                setSection({ kind: 'outcome' });
-              }}
-              onTick={(mi) => {
-                const next = structuredClone(plan);
-                const m = next.phases[pi]!.milestones[mi]!;
-                m.done = !m.done;
-                if (editing) setDraft(next);
-                else void save(next);
+      {shown === 'stages' && (
+        <>
+          {plan.phases.map((ph, pi) => {
+            const mine = isTarget({ kind: 'phase', id: ph.id });
+            return (
+              <PhaseSection
+                key={ph.id}
+                phase={ph}
+                index={pi}
+                count={plan.phases.length}
+                progress={progress[pi]!}
+                editing={mine}
+                canTick={canEdit && !busy && (!editing || mine)}
+                action={editButton('Edit stage', { kind: 'phase', id: ph.id })}
+                edit={(fn) => edit((p) => ((p.phases[pi] = fn(p.phases[pi]!)), p))}
+                move={(dir) =>
+                  edit((p) => {
+                    const [x] = p.phases.splice(pi, 1);
+                    p.phases.splice(pi + dir, 0, x!);
+                    return p;
+                  })
+                }
+                onTick={(mi) => {
+                  const next = structuredClone(plan);
+                  const m = next.phases[pi]!.milestones[mi]!;
+                  m.done = !m.done;
+                  if (editing) setDraft(next);
+                  else void save(next);
+                }}
+                footer={
+                  mine ? (
+                    <>
+                      {saveBar('Save stage')}
+                      {
+                        <DangerArea
+                          title={`Remove ${ph.name || 'this stage'}`}
+                          action="Remove stage"
+                          what="The stage and its milestones come out of the plan when you confirm. The plan's history keeps a record."
+                          blocked={
+                            data.plan.phases.length <= 1
+                              ? { reason: 'A plan needs at least one stage.' }
+                              : null
+                          }
+                          onConfirm={async () => {
+                            const next = structuredClone(data.plan);
+                            next.phases = next.phases.filter((x) => x.id !== ph.id);
+                            await save(next);
+                          }}
+                        />
+                      }
+                    </>
+                  ) : undefined
+                }
+              />
+            );
+          })}
+          {canEdit && !editing && plan.phases.length < MAX_STAGES && (
+            <div>
+              <Button variant="ghost" onClick={() => startEdit({ kind: 'add' })}>
+                + Add stage
+              </Button>
+            </div>
+          )}
+          {isTarget({ kind: 'add' }) && (
+            <AddStage
+              library={data.phaseLibrary}
+              stages={data.stages ?? []}
+              used={new Set(plan.phases.map((p) => p.stageId).filter(Boolean) as string[])}
+              onCancel={stopEditing}
+              onAdd={(stage) => {
+                const phase = phaseFrom(stage);
+                edit((p) => (p.phases.push(phase), p));
+                setTarget({ kind: 'phase', id: phase.id });
               }}
             />
-          );
-        })()}
-
-      {current.kind === 'timeline' && (
-        <Card title={<span className="eyebrow">Timeline</span>}>
-          {editing && (
-            <span className="src">
-              Showing your unsaved dates. Set them on each stage&apos;s tab.
-            </span>
           )}
+        </>
+      )}
+
+      {shown === 'timeline' && (
+        <Card title={<span className="eyebrow">Timeline</span>}>
+          {canEdit && <span className="src">Set the dates with Edit stage on each stage.</span>}
           <PlanTimeline phases={plan.phases} canEdit={canEdit} />
         </Card>
       )}
 
-      {current.kind === 'gaps' && (
-        <Card title={<span className="eyebrow">Alignment check</span>}>
-          {editing && (
-            <span className="src">Shows the saved plan. Save to check your changes.</span>
-          )}
-          {data.gaps.length === 0 ? (
-            <p className="m-0 text-[15px]">No gaps: every measure is fed by a milestone.</p>
-          ) : (
-            <ul className="m-0 flex flex-col gap-1 pl-[18px] text-[15px]">
-              {data.gaps.map((g) => (
-                <li key={g}>{g}</li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      )}
-
-      {current.kind === 'history' && (
+      {shown === 'history' && (
         <PlanHistory cfg={cfg} token={token} artistId={artistId} version={data.plan.version} />
-      )}
-
-      {current.kind === 'add' && editing && (
-        <AddStage
-          library={data.phaseLibrary}
-          stages={data.stages ?? []}
-          used={new Set(plan.phases.map((p) => p.stageId).filter(Boolean) as string[])}
-          onAdd={(stage) => {
-            const phase = phaseFrom(stage);
-            edit((p) => (p.phases.push(phase), p));
-            setSection({ kind: 'phase', id: phase.id });
-          }}
-        />
       )}
 
       {data.exists && !editing && (
@@ -399,38 +456,6 @@ export function PlanTab({
           <span className="src">The whole plan, with the timeline and its history of changes.</span>
         </div>
       )}
-      {canEdit && editing && needsOwner && (
-        <OwnerPicker
-          candidates={data.ownerCandidates ?? []}
-          value={ownerPick}
-          onChange={setOwnerPick}
-        />
-      )}
-      {canEdit && (
-        <div className="flex flex-wrap items-center gap-3">
-          {editing ? (
-            <>
-              <Button variant="cta" disabled={busy} onClick={() => void save(plan)}>
-                {busy ? 'Saving…' : data.exists ? 'Save plan' : 'Create plan'}
-              </Button>
-              <Button variant="ghost" onClick={() => setDraft(null)}>
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <Button
-              onClick={() => {
-                setChangingOwner(false);
-                setDraft(structuredClone(data.plan));
-              }}
-            >
-              Edit plan
-            </Button>
-          )}
-        </div>
-      )}
-      {saved && <Notice tone="success">Plan saved.</Notice>}
-      {error && <Notice tone="error">{error}</Notice>}
     </div>
   );
 }
@@ -517,13 +542,19 @@ function OutcomeSection({
   plan,
   editing,
   edit,
+  action,
+  footer,
 }: {
   plan: Plan;
   editing: boolean;
   edit: (fn: (p: Plan) => Plan) => void;
+  /** Edit outcome (rev 13). */
+  action?: ReactNode;
+  /** Save and Cancel while it's being edited. */
+  footer?: ReactNode;
 }) {
   return (
-    <Card title={<span className="eyebrow">Outcome and success measures</span>}>
+    <Card title={<span className="eyebrow">Outcome and success measures</span>} action={action}>
       {editing ? (
         <MarkdownEditor
           label="What this plan delivers"
@@ -556,6 +587,7 @@ function OutcomeSection({
           </li>
         ))}
       </ul>
+      {footer}
     </Card>
   );
 }
@@ -569,8 +601,9 @@ function PhaseSection({
   canTick,
   edit,
   move,
-  remove,
   onTick,
+  action,
+  footer,
 }: {
   phase: Phase;
   index: number;
@@ -580,8 +613,11 @@ function PhaseSection({
   canTick: boolean;
   edit: (fn: (ph: Phase) => Phase) => void;
   move: (dir: -1 | 1) => void;
-  remove: () => void;
   onTick: (milestoneIndex: number) => void;
+  /** Edit stage (rev 13). */
+  action?: ReactNode;
+  /** Save, Cancel and the danger area while it's being edited. */
+  footer?: ReactNode;
 }) {
   const st = STATUS[progress.status];
   return (
@@ -605,6 +641,7 @@ function PhaseSection({
         <span className="src">
           {progress.done}/{progress.total} done
         </span>
+        {action}
       </div>
       <Bar pct={progress.pct} color={st.color} />
       {editing ? (
@@ -774,19 +811,10 @@ function PhaseSection({
             >
               Move later →
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="ml-auto text-destructive"
-              disabled={count <= 1}
-              title={count <= 1 ? 'A plan needs at least one stage' : undefined}
-              onClick={remove}
-            >
-              Remove stage
-            </Button>
           </div>
         </>
       )}
+      {footer}
     </Card>
   );
 }
@@ -812,21 +840,30 @@ function MilestoneTitle({ title, onChange }: { title: string; onChange: (t: stri
   );
 }
 
-/** Add a stage while editing: from the built-in library, a custom stage, or a blank one. */
+/** + Add stage: from the built-in library, a custom stage, or a blank one. */
 function AddStage({
   library,
   stages,
   used,
   onAdd,
+  onCancel,
 }: {
   library: string[];
   stages: CustomStage[];
   used: Set<string>;
   onAdd: (stage: { name: string; goal?: string; milestones?: string[]; stageId?: string }) => void;
+  onCancel: () => void;
 }) {
   const [name, setName] = useState('');
   return (
-    <Card title={<span className="eyebrow">Add a stage</span>}>
+    <Card
+      title={<span className="eyebrow">Add a stage</span>}
+      action={
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      }
+    >
       {stages.length > 0 && (
         <div className="flex flex-col gap-2">
           <b className="text-[15px]">Custom stages for this artist</b>

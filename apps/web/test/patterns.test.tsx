@@ -88,14 +88,16 @@ describe('Rev 13 patterns', () => {
     render(<DangerArea title="Delete this gig" onConfirm={onConfirm} />);
     fireEvent.click(screen.getByRole('button', { name: 'Delete this gig' }));
     expect(onConfirm).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Confirm: Delete this gig' }).textContent).toBe(
-      'Click again to delete',
-    );
+    expect(
+      screen.getByRole('button', { name: 'Click again to delete: Delete this gig' }).textContent,
+    ).toBe('Click again to delete');
     act(() => void vi.advanceTimersByTime(6100));
     expect(screen.getByRole('button', { name: 'Delete this gig' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Delete this gig' }));
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm: Delete this gig' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Click again to delete: Delete this gig' }),
+      );
     });
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });

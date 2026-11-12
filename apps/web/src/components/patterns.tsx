@@ -222,6 +222,9 @@ export function DangerArea({
     return () => clearTimeout(t);
   }, [confirm]);
   const id = `danger-${title.replace(/\W+/g, '-').toLowerCase()}`;
+  // The accessible name always contains the visible words (WCAG 2.5.3).
+  const visible = busy ? 'Working…' : confirm ? `Click again to ${action.toLowerCase()}` : action;
+  const name = title.toLowerCase().includes(visible.toLowerCase()) ? title : `${visible}: ${title}`;
   return (
     <section
       aria-labelledby={id}
@@ -252,7 +255,7 @@ export function DangerArea({
           type="button"
           variant={confirm ? 'cta' : 'ghost'}
           disabled={busy || disabled || !!blocked}
-          aria-label={confirm ? `Confirm: ${title}` : title}
+          aria-label={name}
           onClick={async () => {
             if (!confirm) return setConfirm(true);
             setBusy(true);
@@ -267,7 +270,7 @@ export function DangerArea({
           }}
         >
           <Icon name="trash" size={16} />
-          {busy ? 'Working…' : confirm ? `Click again to ${action.toLowerCase()}` : action}
+          {visible}
         </Button>
         {extra}
       </span>

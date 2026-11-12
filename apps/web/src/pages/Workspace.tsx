@@ -18,6 +18,7 @@ import { BrandKit } from './BrandKit.tsx';
 import { ArtistFiles, LIBRARY_KIND_OPTIONS, type LibraryKind } from './Library.tsx';
 import { ArtistChatTab, useNarrow } from './Messages.tsx';
 import { PlanTab } from './PlanLazy.tsx';
+import type { PlanView } from './Plan.tsx';
 import { ArtistSubmissions, PRIORITY_TAG } from './Review.tsx';
 import { ArtistTodos } from './Todos.tsx';
 import { LatestMeetingCard, PlanSuggestionsBanner, useArtistMeetings } from './Meetings.tsx';
@@ -40,7 +41,11 @@ const GROUPS = [
     id: 'plan',
     label: 'Plan',
     sections: [
-      { id: 'plan', label: 'Outcome and stages' },
+      // Rev 13: the plan's own sections live here, so there are only two levels.
+      { id: 'plan', label: 'Outcome' },
+      { id: 'stages', label: 'Stages' },
+      { id: 'timeline', label: 'Timeline' },
+      { id: 'history', label: 'History' },
       { id: 'todo', label: 'To-dos' },
     ],
   },
@@ -62,6 +67,13 @@ const GROUPS = [
   },
 ] as const;
 type Group = (typeof GROUPS)[number];
+/** Workspace sections that show the plan, and which part of it. */
+const PLAN_TABS: Partial<Record<string, PlanView>> = {
+  plan: 'outcome',
+  stages: 'stages',
+  timeline: 'timeline',
+  history: 'history',
+};
 type GroupId = Group['id'];
 export type TabId = Group['sections'][number]['id'];
 const groupOf = (s: TabId): Group => GROUPS.find((g) => g.sections.some((x) => x.id === s))!;
@@ -333,11 +345,12 @@ export function ArtistWorkspace({
                 )}
               </>
             )}
-            {tab === 'plan' && onOpenMeeting && (
+            {PLAN_TABS[tab] && onOpenMeeting && (
               <PlanSuggestionsBanner meetings={meetings} onOpen={onOpenMeeting} />
             )}
-            {tab === 'plan' && (
+            {PLAN_TABS[tab] && (
               <PlanTab
+                view={PLAN_TABS[tab]}
                 cfg={cfg}
                 token={token}
                 artistId={artist.artistId}
