@@ -57,6 +57,7 @@ import {
   shortDate,
   Tag,
   TextArea,
+  WaveLoader,
 } from '../components/ui.tsx';
 
 /**
@@ -534,7 +535,7 @@ function MeetingsList({
       {error && <Notice tone="error">{error}</Notice>}
       <Card>
         {meetings === null ? (
-          <p className="src">Loading meetings…</p>
+          <WaveLoader label="Loading meetings" />
         ) : shown.length === 0 ? (
           <p className="src">
             {meetings.length
@@ -1153,7 +1154,7 @@ export function MeetingView({
     return error ? (
       <Notice tone="error">{error}</Notice>
     ) : (
-      <p className="src">Loading the meeting…</p>
+      <WaveLoader label="Loading the meeting" />
     );
   }
   const { meeting: m, content } = data;
