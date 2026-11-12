@@ -1,3 +1,4 @@
+import { BackLink, DangerArea, RecordPage } from '../components/patterns.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -290,21 +291,6 @@ function ContactView({ c }: { c: Contact }) {
   );
 }
 
-/** Two clicks to remove, as elsewhere in the app. */
-function ConfirmButton({ label, onConfirm }: { label: string; onConfirm: () => void }) {
-  const [armed, setArmed] = useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => (armed ? onConfirm() : setArmed(true))}
-      onBlur={() => setArmed(false)}
-    >
-      {armed ? 'Click again to confirm' : label}
-    </Button>
-  );
-}
-
 /**
  * The Contacts list: a table on BMG desktop, cards on the artist's phone.
  * Search, tag filters, add, and open a contact to view or edit it.
@@ -330,102 +316,111 @@ export function Contacts({
   const [actionError, setActionError] = useState<string | null>(null);
 
   async function archive(c: Contact, archived: boolean) {
+    setActionError(null);
     try {
       await api(cfg, token, 'PATCH', `/contacts/${c.contactId}`, { archived });
       setOpen(null);
+      setEditing(false);
       setNote(archived ? `${c.name} archived.` : `${c.name} restored.`);
       await reload();
     } catch (e) {
       setActionError((e as Error).message);
     }
   }
+  /** Throws, so the danger area shows why it couldn't delete. */
   async function remove(c: Contact) {
-    try {
-      await api(cfg, token, 'DELETE', `/contacts/${c.contactId}`);
-      setOpen(null);
-      setNote(`${c.name} removed.`);
-      await reload();
-    } catch (e) {
-      setActionError((e as Error).message);
-    }
+    await api(cfg, token, 'DELETE', `/contacts/${c.contactId}`);
+    setOpen(null);
+    setEditing(false);
+    setNote(`${c.name} removed.`);
+    await reload();
   }
 
   const tagOptions = [{ id: '', label: 'All' }, ...tags.map((t) => ({ id: t, label: t }))];
 
   if (open) {
     const c = open === 'new' ? undefined : open;
-    return (
-      <Card
-        title={c ? c.name : 'Add a contact'}
-        action={
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setOpen(null);
-              setEditing(false);
-            }}
-          >
-            ← Contacts
-          </Button>
-        }
-      >
-        {actionError && <Notice tone="error">{actionError}</Notice>}
-        {c && !editing ? (
-          <div className="flex flex-col gap-3">
-            {c.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
+    const toList = () => {
+      setOpen(null);
+      setEditing(false);
+    };
+    // Rev 13: a contact is a record. Its page shows it; Edit opens the edit
+    // screen, where Archive and Delete sit in the danger area.
+    if (c && !editing) {
+      return (
+        <RecordPage
+          kind="Contact"
+          title={c.name}
+          sub={[c.jobTitle, c.organisation].filter(Boolean).join(' · ') || undefined}
+          badges={
+            c.tags.length > 0 || c.archived ? (
+              <>
+                {c.archived && <Tag tone="c">Archived</Tag>}
                 {c.tags.map((t) => (
                   <Tag key={t}>{t}</Tag>
                 ))}
-              </div>
-            )}
-            <ContactView c={c} />
-            {isBmg && c.bmgNotes && (
-              <Notice>
-                <b>Blueprint notes:</b> {c.bmgNotes}
-              </Notice>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {c.canEdit && (
-                <Button variant="navy" size="sm" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
-              )}
-              {isBmg && (
-                <>
-                  <Button size="sm" variant="ghost" onClick={() => void archive(c, !c.archived)}>
-                    {c.archived ? 'Restore' : 'Archive'}
-                  </Button>
-                  <ConfirmButton label="Delete" onConfirm={() => void remove(c)} />
-                </>
-              )}
-            </div>
-            {!c.canEdit && (
-              <p className="src">Added by Blueprint. Ask Blueprint if something needs changing.</p>
-            )}
-          </div>
-        ) : (
-          <ContactForm
-            cfg={cfg}
-            token={token}
-            {...(c ? { contact: c } : {})}
-            isBmg={isBmg}
-            suggestedTags={tags}
-            onSaved={(saved) => {
-              setEditing(false);
-              setOpen(saved);
-              setNote(c ? 'Saved.' : `${saved.name} added to contacts.`);
-              void reload();
-            }}
-            onUseExisting={(existing) => {
-              setEditing(false);
-              setOpen(existing);
-            }}
-            onCancel={() => {
-              setEditing(false);
-              if (!c) setOpen(null);
-            }}
+              </>
+            ) : undefined
+          }
+          back={{ to: 'Contacts', onClick: toList }}
+          onEdit={c.canEdit ? () => setEditing(true) : undefined}
+        >
+          {actionError && <Notice tone="error">{actionError}</Notice>}
+          {note && <Notice tone="success">{note}</Notice>}
+          <ContactView c={c} />
+          {isBmg && c.bmgNotes && (
+            <Notice>
+              <b>Blueprint notes:</b> {c.bmgNotes}
+            </Notice>
+          )}
+          {!c.canEdit && (
+            <p className="src">Added by Blueprint. Ask Blueprint if something needs changing.</p>
+          )}
+        </RecordPage>
+      );
+    }
+    return (
+      <Card
+        title={c ? 'Edit contact' : 'Add a contact'}
+        action={
+          <BackLink
+            to={c ? c.name : 'Contacts'}
+            onClick={() => (c ? setEditing(false) : toList())}
+          />
+        }
+      >
+        {actionError && <Notice tone="error">{actionError}</Notice>}
+        <ContactForm
+          cfg={cfg}
+          token={token}
+          {...(c ? { contact: c } : {})}
+          isBmg={isBmg}
+          suggestedTags={tags}
+          onSaved={(saved) => {
+            setEditing(false);
+            setOpen(saved);
+            setNote(c ? 'Saved.' : `${saved.name} added to contacts.`);
+            void reload();
+          }}
+          onUseExisting={(existing) => {
+            setEditing(false);
+            setOpen(existing);
+          }}
+          onCancel={() => {
+            setEditing(false);
+            if (!c) setOpen(null);
+          }}
+        />
+        {c && isBmg && (
+          <DangerArea
+            title={`Delete ${c.name}`}
+            what="Removed from the shared list for everyone. A contact used by a venue or event can’t be deleted: archive it instead, which hides it from pickers."
+            onConfirm={() => remove(c)}
+            extra={
+              <Button type="button" variant="ghost" onClick={() => void archive(c, !c.archived)}>
+                {c.archived ? 'Restore' : 'Archive'}
+              </Button>
+            }
           />
         )}
       </Card>
@@ -489,14 +484,26 @@ export function Contacts({
           </thead>
           <tbody>
             {contacts.map((c) => (
-              <tr key={c.contactId} className={c.archived ? 'opacity-60' : ''}>
+              <tr
+                key={c.contactId}
+                className={`cursor-pointer ${c.archived ? 'opacity-60' : ''}`}
+                onClick={() => setOpen(c)}
+              >
                 <td>
-                  <button type="button" className="font-bold underline" onClick={() => setOpen(c)}>
+                  <button type="button" className="font-bold">
                     {c.name}
                   </button>
                 </td>
                 <td>{[c.jobTitle, c.organisation].filter(Boolean).join(', ') || '—'}</td>
-                <td>{c.email ? <a href={`mailto:${c.email}`}>{c.email}</a> : '—'}</td>
+                <td>
+                  {c.email ? (
+                    <a href={`mailto:${c.email}`} onClick={(e) => e.stopPropagation()}>
+                      {c.email}
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td>{c.phone || '—'}</td>
                 <td>
                   <span className="flex flex-wrap gap-1">

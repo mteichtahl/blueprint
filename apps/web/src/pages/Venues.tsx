@@ -1,3 +1,4 @@
+import { BackLink, DangerArea, RecordPage } from '../components/patterns.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -535,20 +536,6 @@ function Person({ role, p }: { role: string; p: VenuePerson | null }) {
   );
 }
 
-function ConfirmButton({ label, onConfirm }: { label: string; onConfirm: () => void }) {
-  const [armed, setArmed] = useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => (armed ? onConfirm() : setArmed(true))}
-      onBlur={() => setArmed(false)}
-    >
-      {armed ? 'Click again to confirm' : label}
-    </Button>
-  );
-}
-
 /** The Venues list: table on desktop, cards on phone; filters by capacity and backline. */
 export function Venues({
   cfg,
@@ -576,119 +563,117 @@ export function Venues({
   const [note, setNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  /** Archive or delete. Throws, so the danger area can show why it didn't work. */
   async function act(v: Venue, method: 'PATCH' | 'DELETE', done: string) {
-    try {
-      await api(
-        cfg,
-        token,
-        method,
-        `/venues/${v.venueId}`,
-        method === 'PATCH' ? { archived: !v.archived } : undefined,
-      );
-      setOpen(null);
-      setNote(done);
-      await reload();
-    } catch (e) {
-      setActionError((e as Error).message);
-    }
+    await api(
+      cfg,
+      token,
+      method,
+      `/venues/${v.venueId}`,
+      method === 'PATCH' ? { archived: !v.archived } : undefined,
+    );
+    setOpen(null);
+    setEditing(false);
+    setNote(done);
+    await reload();
   }
 
   if (open) {
     const v = open === 'new' ? undefined : open;
-    return (
-      <Card
-        title={v ? v.name : 'Add a venue'}
-        action={
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setOpen(null);
-              setEditing(false);
-            }}
-          >
-            ← Venues
-          </Button>
-        }
-      >
-        {actionError && <Notice tone="error">{actionError}</Notice>}
-        {v && !editing ? (
-          <div className="flex flex-col gap-3">
-            {v.logo && <VenueLogo cfg={cfg} token={token} venue={v} size={88} />}
-            <div className="flex flex-wrap gap-1.5">
+    const toList = () => {
+      setOpen(null);
+      setEditing(false);
+    };
+    // Rev 13: a venue is a record. Edit opens the edit screen, where Archive and
+    // Delete sit in the danger area.
+    if (v && !editing) {
+      return (
+        <RecordPage
+          kind="Venue"
+          title={v.name}
+          sub={[v.address, v.suburb].filter(Boolean).join(', ') || undefined}
+          lead={v.logo ? <VenueLogo cfg={cfg} token={token} venue={v} size={88} /> : undefined}
+          badges={
+            <>
+              {v.archived && <Tag tone="c">Archived</Tag>}
               <Tag tone="n">{v.capacity ? `Capacity ${v.capacity}` : 'Capacity not set'}</Tag>
               <Tag tone={v.backline ? 'c' : 's'}>Backline: {v.backline ? 'Yes' : 'No'}</Tag>
               <Tag tone={v.bookings ? 'c' : 's'}>{bookedLabel(v.bookings)}</Tag>
-            </div>
-            {(v.address || v.suburb) && (
-              <p className="m-0">{[v.address, v.suburb].filter(Boolean).join(', ')}</p>
-            )}
-            <VenueMap venue={v} />
-            {v.website && (
-              <a href={v.website} target="_blank" rel="noreferrer">
-                {v.website}
-              </a>
-            )}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Person role="Venue manager" p={v.manager} />
-              <Person role="Venue booker" p={v.booker} />
-            </div>
-            {!v.manager && !v.booker && <p className="src">No manager or booker yet.</p>}
-            {isBmg && v.bmgNotes && (
-              <Notice>
-                <b>Blueprint notes:</b> {v.bmgNotes}
-              </Notice>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {v.canEdit && (
-                <Button variant="navy" size="sm" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
-              )}
-              {isBmg && (
-                <>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      void act(
-                        v,
-                        'PATCH',
-                        v.archived ? `${v.name} restored.` : `${v.name} archived.`,
-                      )
-                    }
-                  >
-                    {v.archived ? 'Restore' : 'Archive'}
-                  </Button>
-                  <ConfirmButton
-                    label="Delete"
-                    onConfirm={() => void act(v, 'DELETE', `${v.name} removed.`)}
-                  />
-                </>
-              )}
-            </div>
+            </>
+          }
+          back={{ to: 'Venues', onClick: toList }}
+          onEdit={v.canEdit ? () => setEditing(true) : undefined}
+        >
+          {actionError && <Notice tone="error">{actionError}</Notice>}
+          {note && <Notice tone="success">{note}</Notice>}
+          <VenueMap venue={v} />
+          {v.website && (
+            <a href={v.website} target="_blank" rel="noreferrer">
+              {v.website}
+            </a>
+          )}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Person role="Venue manager" p={v.manager} />
+            <Person role="Venue booker" p={v.booker} />
           </div>
-        ) : (
-          <VenueForm
-            cfg={cfg}
-            token={token}
-            {...(v ? { venue: v } : {})}
-            isBmg={isBmg}
-            onSaved={(saved, warning) => {
-              setEditing(false);
-              setOpen(saved);
-              setActionError(warning ?? null);
-              setNote(v ? 'Saved.' : `${saved.name} added to venues.`);
-              void reload();
-            }}
-            onUseExisting={(existing) => {
-              setEditing(false);
-              setOpen(existing);
-            }}
-            onCancel={() => {
-              setEditing(false);
-              if (!v) setOpen(null);
-            }}
+          {!v.manager && !v.booker && <p className="src">No manager or booker yet.</p>}
+          {isBmg && v.bmgNotes && (
+            <Notice>
+              <b>Blueprint notes:</b> {v.bmgNotes}
+            </Notice>
+          )}
+        </RecordPage>
+      );
+    }
+    return (
+      <Card
+        title={v ? 'Edit venue' : 'Add a venue'}
+        action={
+          <BackLink to={v ? v.name : 'Venues'} onClick={() => (v ? setEditing(false) : toList())} />
+        }
+      >
+        {actionError && <Notice tone="error">{actionError}</Notice>}
+        <VenueForm
+          cfg={cfg}
+          token={token}
+          {...(v ? { venue: v } : {})}
+          isBmg={isBmg}
+          onSaved={(saved, warning) => {
+            setEditing(false);
+            setOpen(saved);
+            setActionError(warning ?? null);
+            setNote(v ? 'Saved.' : `${saved.name} added to venues.`);
+            void reload();
+          }}
+          onUseExisting={(existing) => {
+            setEditing(false);
+            setOpen(existing);
+          }}
+          onCancel={() => {
+            setEditing(false);
+            if (!v) setOpen(null);
+          }}
+        />
+        {v && isBmg && (
+          <DangerArea
+            title={`Delete ${v.name}`}
+            what="Removed from the shared list for everyone. A venue with gigs or events can’t be deleted: archive it instead, which hides it from the venue picker."
+            onConfirm={() => act(v, 'DELETE', `${v.name} removed.`)}
+            extra={
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  void act(
+                    v,
+                    'PATCH',
+                    v.archived ? `${v.name} restored.` : `${v.name} archived.`,
+                  ).catch((e: Error) => setActionError(e.message))
+                }
+              >
+                {v.archived ? 'Restore' : 'Archive'}
+              </Button>
+            }
           />
         )}
       </Card>
@@ -779,15 +764,15 @@ export function Venues({
           </thead>
           <tbody>
             {venues.map((v) => (
-              <tr key={v.venueId} className={v.archived ? 'opacity-60' : ''}>
+              <tr
+                key={v.venueId}
+                className={`cursor-pointer ${v.archived ? 'opacity-60' : ''}`}
+                onClick={() => setOpen(v)}
+              >
                 <td>
                   <span className="flex items-center gap-2.5">
                     <VenueLogo cfg={cfg} token={token} venue={v} size={32} />
-                    <button
-                      type="button"
-                      className="font-bold underline"
-                      onClick={() => setOpen(v)}
-                    >
+                    <button type="button" className="font-bold">
                       {v.name}
                     </button>
                   </span>
