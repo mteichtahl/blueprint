@@ -20,7 +20,9 @@ test.describe.configure({ mode: 'serial' });
 let artistId: string;
 let shared: Todo;
 let bmgOnly: Todo;
-const tomorrow = () => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+// Far enough ahead that a 1-day reminder is still in the future in Melbourne,
+// whatever the time of day (due dates are Melbourne dates, 9:00 by default).
+const inThreeDays = () => new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
 const list = async (as: 'admin' | 'artistOn') =>
   (await ok<{ todos: Todo[] }>(as, 'GET', `/artists/${artistId}/todos`)).todos;
 
@@ -31,7 +33,7 @@ test.beforeAll(async () => {
 test('D-01: Blueprint adds a to-do the artist can see', async () => {
   shared = await ok<Todo>('admin', 'POST', `/artists/${artistId}/todos`, {
     title: tag('shared to-do'),
-    due: tomorrow(),
+    due: inThreeDays(),
     reminder: '1d',
   });
   expect(shared.bmgOnly).toBe(false);

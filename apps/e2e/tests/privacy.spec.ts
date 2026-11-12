@@ -116,7 +116,7 @@ test.describe('AI opt-out', () => {
   test('M-07: Blueprint’s assistant can’t see an opted-out artist', async () => {
     const off = await artistIdOf('artistOff');
     const on = await artistIdOf('artistOn');
-    denied((await call('admin', 'GET', `/ai/tools/workspace?artistId=${off}`)).status);
+    expect((await call('admin', 'GET', `/ai/tools/workspace?artistId=${off}`)).status).toBe(403);
     expect((await call('admin', 'GET', `/ai/tools/workspace?artistId=${on}`)).status).toBe(200);
 
     const { artists } = await ok<{ artists: { artistId: string }[] }>(
@@ -131,7 +131,9 @@ test.describe('AI opt-out', () => {
 
   test('M-04: an artist’s assistant can’t read another artist', async () => {
     const other = await artistIdOf('artistOther');
-    denied((await call('artistOn', 'GET', `/ai/tools/workspace?artistId=${other}`)).status);
+    expect((await call('artistOn', 'GET', `/ai/tools/workspace?artistId=${other}`)).status).toBe(
+      403,
+    );
   });
 
   test('A-14: Artists & access shows each artist’s AI choice', async () => {

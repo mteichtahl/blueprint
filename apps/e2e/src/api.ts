@@ -136,6 +136,9 @@ export async function call<T = Record<string, unknown>>(
   const headers: Record<string, string> = {};
   if (as) headers.authorization = `Bearer ${await accessToken(as)}`;
   if (body !== undefined) headers['content-type'] = 'application/json';
+  // The assistant's read tools answer 404 unless called as the assistant does
+  // (services/agent), so a missing header can't pass for a refusal.
+  if (path.startsWith('/ai/tools/')) headers['x-bmg-context'] = 'ai';
   const res = await fetch(`${cfg.apiBase}${path}`, {
     method,
     headers,
