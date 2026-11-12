@@ -335,6 +335,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
               setLibraryFile(id);
               setView('library');
             }}
+            onOpenChat={openChat}
           />
         )}
         {view === 'artists' && (
@@ -607,6 +608,7 @@ function StudioHq({
   conversations,
   onNavigate,
   onOpenFile,
+  onOpenChat,
 }: {
   cfg: AppConfig;
   token: string;
@@ -618,6 +620,8 @@ function StudioHq({
   onNavigate: (v: string) => void;
   /** Open a document's detail page (rev 8). */
   onOpenFile: (fileId: string) => void;
+  /** Open Chat straight on one conversation. */
+  onOpenChat: (conversationId: string) => void;
 }) {
   const [plans, setPlans] = useState<Record<string, PlanResponse>>({});
   // "My plans" (rev 12): the artists whose plan this person owns.
@@ -764,7 +768,13 @@ function StudioHq({
           footer={go('messages')}
         >
           {conversations.slice(0, 3).map((c) => (
-            <div key={c.conversationId} className="flex items-center gap-3">
+            // P1: the whole row opens that conversation in Chat.
+            <button
+              type="button"
+              key={c.conversationId}
+              className="-mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-secondary"
+              onClick={() => onOpenChat(c.conversationId)}
+            >
               {c.type === 'announcement' ? (
                 <span className="av bg-[#E6E9ED] text-[11px] text-[#011935]">ALL</span>
               ) : (
@@ -777,8 +787,13 @@ function StudioHq({
                 <b className="block">{c.title}</b>
                 <span className="src block truncate">{c.preview ?? 'No messages yet'}</span>
               </span>
-              {c.unreadCount > 0 && <Tag tone="k">{c.unreadCount}</Tag>}
-            </div>
+              {c.unreadCount > 0 && (
+                <Tag tone="k">
+                  {c.unreadCount}
+                  <span className="sr-only"> unread</span>
+                </Tag>
+              )}
+            </button>
           ))}
         </Card>
 
