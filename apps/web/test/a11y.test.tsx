@@ -414,7 +414,54 @@ function answer(method: string, path: string): [number, unknown] {
         ],
       },
     ],
-    [/^\/review-queue$/, { submissions: [] }],
+    [
+      /^\/review-queue$/,
+      {
+        submissions: [
+          {
+            submissionId: 'sub0000000001',
+            artistId: ARTIST,
+            title: 'Single mix v2',
+            type: 'mix',
+            priority: 'high',
+            neededBy: '2026-12-01',
+            phaseId: null,
+            fileIds: [],
+            fileVersions: {},
+            status: 'open',
+            createdAt: now,
+            changedByBmgAt: null,
+            reviewedAt: null,
+            feedbackAt: null,
+            feedbackTodoIds: [],
+          },
+        ],
+      },
+    ],
+    [
+      /^\/artists\/[^/]+\/submissions\/[^/]+$/,
+      {
+        ...{
+          submissionId: 'sub0000000001',
+          artistId: ARTIST,
+          title: 'Single mix v2',
+          type: 'mix',
+          priority: 'high',
+          neededBy: '2026-12-01',
+          phaseId: null,
+          fileIds: [],
+          fileVersions: {},
+          status: 'open',
+          createdAt: now,
+          changedByBmgAt: null,
+          reviewedAt: null,
+          feedbackAt: null,
+          feedbackTodoIds: [],
+        },
+        note: 'Vocal up a touch?',
+        feedback: null,
+      },
+    ],
     [/^\/artists\/[^/]+\/submissions$/, { submissions: [] }],
     [/^\/gigs$/, { gigs: [] }],
     [
@@ -1189,6 +1236,20 @@ describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
     expect(screen.getByRole('button', { name: 'Resend invitation' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Revoke Mia Ray/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: '← Invitations' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('BMG: a review can be completed, with or after feedback', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Review queue/ })[0]!);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /Single mix v2/ })[0]!);
+    await settle();
+    expect(screen.getByRole('button', { name: 'Send feedback and complete' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Complete review' })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Complete the review when I send this'));
+    expect(screen.getByRole('button', { name: 'Send feedback' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
