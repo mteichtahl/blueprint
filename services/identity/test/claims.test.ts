@@ -53,27 +53,14 @@ describe('buildClaims', () => {
   });
 });
 
-describe('signUpAllowed (invite-only)', () => {
-  const now = 1_800_000_000;
-  const pending = { status: 'pending' as const, expiresAt: now + 60 };
-
-  it('allows users created by the invite flow', () => {
-    expect(signUpAllowed('PreSignUp_AdminCreateUser', undefined, now)).toBe(true);
+describe('signUpAllowed (nobody signs themselves up)', () => {
+  it('allows only accounts Blueprint makes with the invite flow', () => {
+    expect(signUpAllowed('PreSignUp_AdminCreateUser')).toBe(true);
   });
 
-  it('allows a first social sign-in only with a pending, unexpired invite', () => {
-    expect(signUpAllowed('PreSignUp_ExternalProvider', pending, now)).toBe(true);
-    expect(signUpAllowed('PreSignUp_ExternalProvider', undefined, now)).toBe(false);
-    expect(
-      signUpAllowed('PreSignUp_ExternalProvider', { ...pending, expiresAt: now - 1 }, now),
-    ).toBe(false);
-    expect(
-      signUpAllowed('PreSignUp_ExternalProvider', { ...pending, status: 'revoked' }, now),
-    ).toBe(false);
-  });
-
-  it('refuses self sign-up', () => {
-    expect(signUpAllowed('PreSignUp_SignUp', pending, now)).toBe(false);
+  it('never lets a social sign-in, or anyone, make their own account', () => {
+    expect(signUpAllowed('PreSignUp_ExternalProvider')).toBe(false);
+    expect(signUpAllowed('PreSignUp_SignUp')).toBe(false);
   });
 });
 
@@ -117,10 +104,19 @@ describe('social sign-in joins the person’s own account (design D2)', () => {
 
   it('links to the one enabled account with a verified email', () => {
     expect(linkTarget([user('u1')], 'Google', 'true')).toBe('u1');
-    // An invited artist who hasn't set a password yet still joins.
+    // An invited artist who hasn't set a password yet joins, while the invitation is live.
+    const invited = [user('u2', { UserStatus: 'FORCE_CHANGE_PASSWORD' }, 'false')];
+    const now = 1_800_000_000;
     expect(
-      linkTarget([user('u2', { UserStatus: 'FORCE_CHANGE_PASSWORD' }, 'false')], 'Google', 'true'),
+      linkTarget(invited, 'Google', 'true', { status: 'pending', expiresAt: now + 60 }, now),
     ).toBe('u2');
+    expect(
+      linkTarget(invited, 'Google', 'true', { status: 'pending', expiresAt: now - 1 }, now),
+    ).toBeUndefined();
+    expect(
+      linkTarget(invited, 'Google', 'true', { status: 'revoked', expiresAt: now + 60 }, now),
+    ).toBeUndefined();
+    expect(linkTarget(invited, 'Google', 'true', undefined, now)).toBeUndefined();
     // Facebook only gives verified addresses.
     expect(linkTarget([user('u1')], 'Facebook', undefined)).toBe('u1');
   });

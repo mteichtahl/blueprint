@@ -504,7 +504,11 @@ async function invitations(event: APIGatewayProxyEvent) {
           )
           .catch(() => undefined);
         invite.acceptedAt = acceptedAt;
-        if (r.status !== 'active') await setRosterStatus(artistId, 'active');
+      }
+      // Accepted (by a first sign-in, or a first social sign-in recorded by the
+      // identity trigger): the artist is active.
+      if (status === 'accepted' && r.status !== 'active' && r.status !== 'revoked') {
+        await setRosterStatus(artistId, 'active');
       }
       list.push({
         artistId,

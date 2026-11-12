@@ -118,7 +118,8 @@ export class IdentityStack extends BmgStack {
     preSignUp.addToRolePolicy(
       new PolicyStatement({
         sid: 'ReadInvites',
-        actions: ['dynamodb:GetItem'],
+        // UpdateItem: an invited artist's first social sign-in accepts the invitation.
+        actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
         resources: [props.mainTable.tableArn],
       }),
     );

@@ -65,20 +65,13 @@ export interface Invite {
 }
 
 /**
- * Invite-only sign-up (design 6.1). Admin-created users come from the invite
- * flow itself. A first federated sign-in needs a pending, unexpired invite for
- * the same email. Anything else is refused.
+ * Nobody signs themselves up (design 6.1): accounts are only made by
+ * Blueprint's invite flow (AdminCreateUser). A social sign-in never makes an
+ * account either: it can only join one Blueprint already made (see
+ * `linkTarget` and the pre sign-up trigger), so it's refused here.
  */
-export function signUpAllowed(
-  source: SignUpSource,
-  invite: Invite | undefined,
-  nowSeconds: number,
-): boolean {
-  if (source === 'PreSignUp_AdminCreateUser') return true;
-  if (source === 'PreSignUp_ExternalProvider') {
-    return !!invite && invite.status === 'pending' && invite.expiresAt > nowSeconds;
-  }
-  return false;
+export function signUpAllowed(source: SignUpSource): boolean {
+  return source === 'PreSignUp_AdminCreateUser';
 }
 
 /** Cognito names a social sign-in user `<provider>_<id>` (e.g. `Google_1234`). */
@@ -104,6 +97,9 @@ export function linkTarget(
   users: readonly NativeUser[],
   provider: string,
   socialEmailVerified: string | undefined,
+  /** The invitation for this email: an invited account that hasn't signed in yet needs it live. */
+  invite?: Invite,
+  nowSeconds = Math.floor(Date.now() / 1000),
 ): string | undefined {
   if (provider !== 'Facebook' && socialEmailVerified !== 'true') return undefined;
   const attr = (u: NativeUser, n: string) => u.Attributes?.find((a) => a.Name === n)?.Value;
@@ -112,8 +108,11 @@ export function linkTarget(
       u.Enabled !== false &&
       u.UserStatus !== 'EXTERNAL_PROVIDER' &&
       !providerOf(u.Username ?? '') &&
-      // Invited accounts keep the verified email Blueprint set for them.
-      (attr(u, 'email_verified') === 'true' || u.UserStatus === 'FORCE_CHANGE_PASSWORD'),
+      // An invited artist who hasn't signed in yet: only while the invitation
+      // is live (not revoked or expired). Signed-in accounts need a verified email.
+      (u.UserStatus === 'FORCE_CHANGE_PASSWORD'
+        ? !!invite && invite.status === 'pending' && invite.expiresAt > nowSeconds
+        : attr(u, 'email_verified') === 'true'),
   );
   return ok.length === 1 ? ok[0]!.Username : undefined;
 }
