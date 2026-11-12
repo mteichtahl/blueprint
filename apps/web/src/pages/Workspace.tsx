@@ -46,13 +46,14 @@ const GROUPS = [
       { id: 'stages', label: 'Stages' },
       { id: 'timeline', label: 'Timeline' },
       { id: 'history', label: 'History' },
-      { id: 'todo', label: 'To-dos' },
     ],
   },
   {
     id: 'work',
     label: 'Work',
     sections: [
+      // To-dos sit with the other day-to-day work, not inside the plan.
+      { id: 'todo', label: 'To-dos' },
       { id: 'submissions', label: 'Submissions' },
       { id: 'gigs', label: 'Gigs' },
     ],
@@ -220,8 +221,9 @@ export function ArtistWorkspace({
     submissions: { n: counts.submissions, hot: true },
   };
   const groupCount: Partial<Record<GroupId, { n: number; hot?: boolean }>> = {
-    plan: planReview ? { n: planReview, hot: true } : sectionCount.todo,
-    work: sectionCount.submissions,
+    plan: { n: planReview, hot: true },
+    // Work holds to-dos and submissions; submissions waiting on Blueprint show first (coral).
+    work: counts.submissions ? sectionCount.submissions : sectionCount.todo,
   };
   const chat = (
     <ArtistChatTab

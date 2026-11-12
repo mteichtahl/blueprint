@@ -158,6 +158,17 @@ describe('Rev 13 source guards', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('Loading shows the waveform logo (WaveLoader), never loading text', () => {
+    // Button labels while an action runs ("Saving…", "Uploading…") are fine; this
+    // catches placeholders shown while something loads.
+    const offenders = files.filter((f) =>
+      />\s*(Loading|Preparing|Opening|Fetching|Getting)[^<{]*…\s*</.test(
+        readFileSync(join(root, f), 'utf8'),
+      ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it('P5: no home-made second-click buttons (use DangerArea)', () => {
     // Chat keeps WhatsApp's own conventions (docs/patterns.md). Connectors: follow-up.
     const allowed = new Set(['pages/Messages.tsx', 'pages/Connectors.tsx']);
