@@ -148,6 +148,24 @@ export class ToolingStack extends BmgStack {
       }),
     );
 
+    if (spec.deployTarget === 'staging') {
+      // The Staging E2E job signs in as the test accounts (docs/e2e.md). Their
+      // details live in Secrets Manager under this stack's key, never in GitHub.
+      const e2eSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.e2eSecret(cfg, 'staging')}-*`;
+      role.addToPolicy(
+        new PolicyStatement({
+          sid: 'ReadE2eAccounts',
+          actions: ['secretsmanager:GetSecretValue', 'secretsmanager:DescribeSecret'],
+          resources: [e2eSecretArn],
+        }),
+      );
+      acknowledge(
+        role,
+        'One named secret; Secrets Manager appends a random suffix to every secret ARN.',
+        `AwsSolutions-IAM5[Resource::${e2eSecretArn}]`,
+      );
+    }
+
     const project = new CfnProject(this, `${id}Project`, {
       name: projectName,
       description: spec.description,

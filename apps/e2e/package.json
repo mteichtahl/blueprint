@@ -1,0 +1,21 @@
+{
+  "name": "@bmg/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests against a deployed BMG environment (Playwright; docs/e2e.md)",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "e2e": "playwright test",
+    "e2e:list": "playwright test --list",
+    "browsers": "playwright install chromium"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1164.0",
+    "@bmg/config": "*",
+    "otpauth": "^9.6.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
+  }
+}
