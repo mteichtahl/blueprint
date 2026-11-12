@@ -131,9 +131,10 @@ export async function call<T = Record<string, unknown>>(
   method: Method,
   path: string,
   body?: unknown,
+  extraHeaders: Record<string, string> = {},
 ): Promise<ApiResponse<T>> {
   const cfg = await appConfig();
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...extraHeaders };
   if (as) headers.authorization = `Bearer ${await accessToken(as)}`;
   if (body !== undefined) headers['content-type'] = 'application/json';
   const res = await fetch(`${cfg.apiBase}${path}`, {
@@ -164,6 +165,14 @@ export async function ok<T = Record<string, unknown>>(
   }
   return res.data;
 }
+
+/**
+ * The assistant's tool routes (`/ai/tools/…`) answer only requests marked as
+ * coming from the assistant; anything else gets 404. The marker isn't a
+ * credential: the tools still run as the signed-in person.
+ */
+export const aiTool = <T = Record<string, unknown>>(as: E2eAccountKey, path: string) =>
+  call<T>(as, 'GET', path, undefined, { 'x-bmg-context': 'ai' });
 
 /** Shorthands for the ids setup recorded. */
 export async function artistIdOf(key: 'artistOn' | 'artistOff' | 'artistOther'): Promise<string> {
