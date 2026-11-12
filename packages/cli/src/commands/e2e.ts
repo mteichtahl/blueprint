@@ -326,7 +326,7 @@ export async function e2eSetup(opts: E2eSetupOptions): Promise<void> {
           await must('admin', 'PATCH', '/me', { jobTitle: E2E_ACCOUNTS.admin.jobTitle });
           await consent('admin', true);
           await quiet('admin');
-          ok(`admin is ${accounts.admin!.sub}`);
+          ok('admin ready');
         },
       },
       ...ARTISTS.map((key) => ({
@@ -360,7 +360,7 @@ export async function e2eSetup(opts: E2eSetupOptions): Promise<void> {
           accounts[key]!.artistId = artistId;
           await consent(key, def.aiOptIn);
           await quiet(key);
-          ok(`${key} is ${artistId}`);
+          ok(`${key} ready`);
         },
       })),
       {
@@ -382,7 +382,7 @@ export async function e2eSetup(opts: E2eSetupOptions): Promise<void> {
           await enrol('staff');
           await consent('staff', true);
           await quiet('staff');
-          ok(`staff is ${accounts.staff!.sub}`);
+          ok('staff ready');
         },
       },
       {

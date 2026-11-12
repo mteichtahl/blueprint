@@ -1,11 +1,15 @@
-import { readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Secret, TOTP } from 'otpauth';
 
 const PERIOD = 30;
-/** Cognito accepts each code once, so remember the last 30-second step used per account. */
-const LEDGER = join(tmpdir(), 'bmg-e2e-totp.json');
+/**
+ * Cognito accepts each code once, so remember the last 30-second step used per
+ * account. Kept in the package's own (git-ignored) folder, not the shared OS
+ * temp folder, because a test worker that restarts after a failure is a new process.
+ */
+const DIR = fileURLToPath(new URL('../.e2e-cache/', import.meta.url));
+const LEDGER = `${DIR}totp-steps.json`;
 
 function ledger(): Record<string, number> {
   try {
@@ -35,7 +39,8 @@ export async function freshCode(email: string, secretBase32: string): Promise<st
     const left = PERIOD - (now % PERIOD);
     const used = ledger()[email] ?? -1;
     if (step > used && left > 4) {
-      writeFileSync(LEDGER, JSON.stringify({ ...ledger(), [email]: step }));
+      mkdirSync(DIR, { recursive: true, mode: 0o700 });
+      writeFileSync(LEDGER, JSON.stringify({ ...ledger(), [email]: step }), { mode: 0o600 });
       return totp.generate();
     }
     await sleep(Math.ceil(left * 1000) + 250);
