@@ -87,6 +87,9 @@ export interface WorkspaceTarget {
 }
 const groupOf = (s: TabId): Group => GROUPS.find((g) => g.sections.some((x) => x.id === s))!;
 
+/** An unread count as shown on a badge: 99+ past 99. */
+const unreadLabel = (n: number) => (n > 99 ? '99+' : String(n));
+
 /** A count on a tab or section; coral when it's waiting on Blueprint. */
 function Count({ n, hot = false }: { n: number; hot?: boolean }) {
   if (!n) return null;
@@ -163,6 +166,7 @@ export function ArtistWorkspace({
   onRecordMeeting,
   onOpenMeeting,
   target,
+  chatUnread = 0,
 }: {
   cfg: AppConfig;
   token: string;
@@ -181,6 +185,8 @@ export function ArtistWorkspace({
    * update opens Plan, a document link opens it in the Library (rev 8).
    */
   target?: WorkspaceTarget;
+  /** Unread messages in Blueprint's chat with this artist (rev 9), shown on the chat icon. */
+  chatUnread?: number;
 }) {
   const meetings = useArtistMeetings(cfg, token, artist.artistId);
   const planReview = meetings.reduce((n, m) => n + m.suggestionsWaiting, 0);
@@ -266,14 +272,24 @@ export function ArtistWorkspace({
             <Button
               size="sm"
               variant={chatOpen ? 'navy' : 'default'}
-              className="w-[38px] shrink-0 !px-0"
-              aria-label={chatOpen ? 'Close chat' : `Chat with ${artist.displayName}`}
+              className="relative w-[38px] shrink-0 !px-0"
+              aria-label={
+                chatOpen
+                  ? 'Close chat'
+                  : `Chat with ${artist.displayName}${chatUnread ? `, ${unreadLabel(chatUnread)} unread` : ''}`
+              }
               title={chatOpen ? 'Close chat' : 'Chat'}
               aria-expanded={chatOpen}
               aria-controls="ws-chat"
               onClick={() => setChatOpen((v) => !v)}
             >
               <Icon name="chat" size={18} />
+              {/* Rev 9: unread messages from this artist, as on the Chat list. */}
+              {!chatOpen && chatUnread > 0 && (
+                <span className="cnt cnt-hot absolute -top-1.5 -right-1.5 !ml-0">
+                  {unreadLabel(chatUnread)}
+                </span>
+              )}
             </Button>
           </div>
           <p className="m-0 text-[17px] text-muted-foreground">

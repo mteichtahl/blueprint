@@ -376,6 +376,22 @@ export function useInbox(cfg: AppConfig, token: string, me: Me) {
 }
 type Inbox = ReturnType<typeof useInbox>;
 
+/**
+ * Unread messages in Blueprint's chat with one artist (rev 9): the count on
+ * the chat icon in that artist's workspace. Archived chats don't count.
+ */
+export function directUnread(
+  conversations: readonly ConversationSummary[] | null,
+  artistId: string,
+): number {
+  return (conversations ?? [])
+    .filter(
+      (c) =>
+        c.type === 'bmg-artist' && !c.archived && c.artists.some((a) => a.artistId === artistId),
+    )
+    .reduce((n, c) => n + c.unreadCount, 0);
+}
+
 /** People this user can start chats with or add to groups. */
 function useRoster(ctx: ChatCtx, given?: Person[]) {
   const [fetched, setFetched] = useState<Person[] | null>(null);
