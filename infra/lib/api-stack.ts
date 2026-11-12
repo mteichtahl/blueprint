@@ -838,6 +838,7 @@ export class ApiStack extends BmgStack {
           'submission.created',
           'submission.updated',
           'submission.feedbackGiven',
+          'submission.completed',
           'message.created',
           'file.rejected',
           'gig.helpRequested',
