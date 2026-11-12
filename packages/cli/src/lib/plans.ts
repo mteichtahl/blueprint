@@ -3,6 +3,7 @@
  * exact commands and API calls reviewable and unit-tested.
  */
 import { names, type BmgConfig, type EnvironmentName } from '@bmg/config';
+import { compareVersions, parseVersion } from '@bmg/config/release';
 
 export const ENVIRONMENTS: EnvironmentName[] = ['staging', 'prod'];
 
@@ -416,6 +417,8 @@ export interface ShipInputs {
   onMain: boolean;
   /** Commit subjects in the release (since production's commit), newest first. */
   changes: string[];
+  /** VERSION at production's commit, when production has one. */
+  productionVersion?: string;
 }
 
 export interface ShipPlan {
@@ -439,5 +442,16 @@ export function planShip(input: ShipInputs): ShipPlan {
     );
   if (input.changes.length === 0)
     problems.push('nothing to release: production already has this commit');
+  const prodVersion = input.productionVersion?.trim();
+  if (
+    problems.length === 0 &&
+    prodVersion &&
+    /^\d+\.\d+\.\d+$/.test(prodVersion) &&
+    compareVersions(parseVersion(version), parseVersion(prodVersion)) <= 0
+  )
+    problems.push(
+      `production is already on ${prodVersion}. Start the next release in a PR first ` +
+        '(`blueprint release minor`, `major` or `hotfix`), merge it, and let staging deploy it.',
+    );
   return { tag, version, problems };
 }
