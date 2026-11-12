@@ -20,7 +20,8 @@ test.describe.configure({ mode: 'serial' });
 let artistId: string;
 let shared: Todo;
 let bmgOnly: Todo;
-const tomorrow = () => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+// A week out, so a "1 day before" reminder is still ahead whatever time the run starts.
+const nextWeek = () => new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
 const list = async (as: 'admin' | 'artistOn') =>
   (await ok<{ todos: Todo[] }>(as, 'GET', `/artists/${artistId}/todos`)).todos;
 
@@ -31,7 +32,7 @@ test.beforeAll(async () => {
 test('D-01: Blueprint adds a to-do the artist can see', async () => {
   shared = await ok<Todo>('admin', 'POST', `/artists/${artistId}/todos`, {
     title: tag('shared to-do'),
-    due: tomorrow(),
+    due: nextWeek(),
     reminder: '1d',
   });
   expect(shared.bmgOnly).toBe(false);
