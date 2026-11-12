@@ -558,3 +558,10 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **GitHub settings** (`blueprint github protect`): `production` changed from "protected branches" to a custom policy allowing only `v*.*.*` tags; ruleset "Release tags" lets only repository admins create, move or delete `v*` tags. The ruleset and tag policy steps check what exists first, so `protect` can be re-run.
 - **Workflow policy rule 6** (`prod-release-tags`): a workflow with a production job may only start from a tag push or by hand.
 - **Re-deploy and rollback** are a manual run of Release to production on a release tag.
+
+## Interaction patterns (rev 13, 12 Nov 2026)
+
+- The app had three detail-page patterns and four list-row patterns for similar things (rev 8 documents, rev 7 gig rows with Edit, rev 10 folder ⋯ menus, to-dos that opened straight into editing). Rev 13 settles on two: **records** (documents, contacts, venues, folders) open a read-only page with **Edit**, and **work items** (gigs, events, to-dos, plans, meetings, submissions) open a page where the work happens, with **Edit details**. Deleting is only ever in the danger area at the bottom of the edit screen. The full rules are in [`patterns.md`](patterns.md); the plan is the project doc "BMG App: change plan for rev 13".
+- **Shared components** (`components/patterns.tsx`): `BackLink`, `RecordPage`, `WorkPage`, `WorkSection`, `EditScreen`, `DangerArea` and `SectionSwitch`. The document pages were moved onto them first, since they already followed the pattern; Edit document's back link now names the document instead of "← Back".
+- **Source guards** in `test/patterns.test.tsx` stop "← Back" coming back. Screens still being moved over are listed there and drop off as each work package lands.
+- No API, data or permission changes: buttons still only show what the person may do, and the server still enforces every rule.

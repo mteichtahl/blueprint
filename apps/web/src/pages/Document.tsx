@@ -1,3 +1,4 @@
+import { BackLink, DangerArea } from '../components/patterns.tsx';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -139,7 +140,7 @@ export function DocumentPage(props: DocumentPageProps) {
 
   if (!f) {
     return (
-      <Card title="Document" action={<BackButton onClick={props.onBack} label="Library" />}>
+      <Card title="Document" action={<BackLink to="Library" onClick={props.onBack} />}>
         {doc.error ? <Notice tone="error">{doc.error}</Notice> : <WaveLoader />}
       </Card>
     );
@@ -186,14 +187,6 @@ export function DocumentPage(props: DocumentPageProps) {
   );
 }
 
-function BackButton({ onClick, label }: { onClick: () => void; label: string }) {
-  return (
-    <Button size="sm" variant="ghost" onClick={onClick}>
-      ← {label}
-    </Button>
-  );
-}
-
 function DocumentDetail({
   cfg,
   token,
@@ -236,7 +229,7 @@ function DocumentDetail({
   return (
     <Card
       title={<h2 className="t text-[19px]">Document</h2>}
-      action={<BackButton onClick={onBack} label="Library" />}
+      action={<BackLink to="Library" onClick={onBack} />}
     >
       <div className="flex flex-wrap items-start gap-4">
         <FileThumb
@@ -721,7 +714,7 @@ function NewVersion({
   );
 }
 
-/** Delete with a second click to confirm (no browser dialogs). */
+/** P5: delete with a second click to confirm, blocked while it's in use outside chat. */
 function DeleteZone({
   f,
   uses,
@@ -735,74 +728,31 @@ function DeleteZone({
   const chats = (uses?.uses ?? []).filter((u) => u.kind === 'chat').length;
   // Blocked by places this person can't see: the server counts them in inUse.
   const hiddenBlocking = !!uses?.inUse && blocking.length === 0;
-  const blocked = !!uses?.inUse;
-  const [confirm, setConfirm] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!confirm) return;
-    const t = setTimeout(() => setConfirm(false), 6000);
-    return () => clearTimeout(t);
-  }, [confirm]);
   return (
-    <section
-      aria-labelledby="delete-doc"
-      className="mt-2 flex flex-col gap-2 rounded-[10px] border border-[#E7B9B7] bg-[#FDF3F2] p-3.5"
-    >
-      <h3 id="delete-doc" className="text-[15px] font-bold text-[#8E2F2C]">
-        Delete this document
-      </h3>
-      {blocked ? (
-        <>
-          <p className="text-sm">
-            {blocking.length > 0
-              ? `This document is used in ${blocking.length} ${blocking.length === 1 ? 'place' : 'places'}. Remove it from ${blocking.length === 1 ? 'there' : 'them'} before deleting.`
-              : 'This document is used somewhere you can’t see.'}
-          </p>
-          {blocking.length > 0 && (
-            <ul className="list-disc pl-5 text-sm">
-              {blocking.map((u) => (
-                <li key={`${u.kind}-${u.id}`}>
-                  {USE_LABEL[u.kind]}: {u.title}
-                  {u.detail ? ` (${u.detail})` : ''}
-                </li>
-              ))}
-            </ul>
-          )}
-          {hiddenBlocking && <p className="src">Ask Blueprint to remove it there.</p>}
-        </>
-      ) : (
-        <p className="src">
-          It’s removed for everyone it’s shared with
-          {chats > 0 &&
-            `, and shows as “This file was deleted” in ${chats} ${chats === 1 ? 'chat' : 'chats'}`}
-          . An admin can still recover it for 35 days.
-        </p>
-      )}
-      {error && <Notice tone="error">{error}</Notice>}
-      <span>
-        <Button
-          variant={confirm ? 'cta' : 'ghost'}
-          disabled={busy || blocked || !uses}
-          aria-label={confirm ? `Confirm delete ${f.displayName}` : `Delete ${f.displayName}`}
-          onClick={async () => {
-            if (!confirm) return setConfirm(true);
-            setBusy(true);
-            setError(null);
-            try {
-              await onDelete();
-            } catch (e) {
-              setError((e as Error).message);
-              setBusy(false);
-              setConfirm(false);
+    <DangerArea
+      title={`Delete ${f.displayName}`}
+      disabled={!uses}
+      blocked={
+        uses?.inUse
+          ? {
+              reason:
+                blocking.length > 0
+                  ? `This document is used in ${blocking.length} ${blocking.length === 1 ? 'place' : 'places'}. Remove it from ${blocking.length === 1 ? 'there' : 'them'} before deleting.`
+                  : 'This document is used somewhere you can’t see.',
+              places: blocking.map(
+                (u) => `${USE_LABEL[u.kind]}: ${u.title}${u.detail ? ` (${u.detail})` : ''}`,
+              ),
+              hint: hiddenBlocking ? 'Ask Blueprint to remove it there.' : undefined,
             }
-          }}
-        >
-          <Icon name="trash" size={16} />
-          {busy ? 'Deleting…' : confirm ? 'Click again to delete' : 'Delete'}
-        </Button>
-      </span>
-    </section>
+          : null
+      }
+      what={`It’s removed for everyone it’s shared with${
+        chats > 0
+          ? `, and shows as “This file was deleted” in ${chats} ${chats === 1 ? 'chat' : 'chats'}`
+          : ''
+      }. An admin can still recover it for 35 days.`}
+      onConfirm={onDelete}
+    />
   );
 }
 
@@ -932,9 +882,8 @@ function EditDocument({
     <Card
       title={<h2 className="t text-[19px]">Edit document</h2>}
       action={
-        <Button size="sm" variant="ghost" onClick={() => onDone()} disabled={busy}>
-          ← Back
-        </Button>
+        // P8: back to the document this edits, by name.
+        <BackLink to={f.displayName} onClick={() => !busy && onDone()} />
       }
     >
       <form
