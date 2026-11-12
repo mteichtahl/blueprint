@@ -7,6 +7,7 @@ import {
   EDIT_ACCESS_LABEL,
   fileTypeOf,
   formatSize,
+  placeLink,
   uploadVersion,
   waitForVersion,
   type EditAccess,
@@ -15,6 +16,7 @@ import {
   type Person,
 } from '../lib/files.ts';
 import { makeThumbnail } from '../lib/thumbnail.ts';
+import { openLink } from '../lib/push.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
 import { AccessPanel, CustomAccess, MoveDialog, useFolders } from '../components/Folders.tsx';
 import { foldersBase } from '../lib/folders.ts';
@@ -355,7 +357,7 @@ function DocumentDetail({
         <Row label="Who can see it">{whoCanSee(f, names)}</Row>
         <Row label="Who can edit it">{whoCanEdit(f, people)}</Row>
       </dl>
-      <WhereUsed uses={uses} />
+      <WhereUsed uses={uses} f={f} />
       {f.versions.length > 0 && (
         <VersionHistory
           cfg={cfg}
@@ -378,7 +380,13 @@ const USE_LABEL: Record<FileUse['kind'], string> = {
 };
 
 /** Every place the document is used; places you can't open are counted. */
-function WhereUsed({ uses }: { uses: Pick<FileItem, 'uses' | 'hiddenUses'> | null }) {
+function WhereUsed({
+  uses,
+  f,
+}: {
+  uses: Pick<FileItem, 'uses' | 'hiddenUses'> | null;
+  f: Pick<FileItem, 'artistId'>;
+}) {
   return (
     <section
       aria-labelledby="where-used"
@@ -393,25 +401,46 @@ function WhereUsed({ uses }: { uses: Pick<FileItem, 'uses' | 'hiddenUses'> | nul
         <p className="src">Not used anywhere yet.</p>
       ) : (
         <ul className="flex flex-col">
-          {(uses.uses ?? []).map((u) => (
-            <li
-              key={`${u.kind}-${u.id}`}
-              className="flex items-center gap-3 border-b border-input py-2 last:border-b-0"
-            >
-              <span className="min-w-0 flex-1">
-                <b className="block [overflow-wrap:anywhere]">{u.title}</b>
-                <span className="src">
-                  {USE_LABEL[u.kind]}
-                  {u.detail ? ` · ${u.detail}` : ''}
+          {(uses.uses ?? []).map((u) => {
+            // Rev 8: each row opens the place it names (one tap target, P1).
+            const link = placeLink(u, f);
+            const inner = (
+              <>
+                <span className="min-w-0 flex-1">
+                  <b className="block [overflow-wrap:anywhere]">{u.title}</b>
+                  <span className="src">
+                    {USE_LABEL[u.kind]}
+                    {u.detail ? ` · ${u.detail}` : ''}
+                  </span>
                 </span>
-              </span>
-              {u.kind === 'chat' ? (
-                <Tag tone="s">chat</Tag>
-              ) : (
-                u.blocks && <Tag tone="n">In use</Tag>
-              )}
-            </li>
-          ))}
+                {u.kind === 'chat' ? (
+                  <Tag tone="s">chat</Tag>
+                ) : (
+                  u.blocks && <Tag tone="n">In use</Tag>
+                )}
+                {link && (
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    ›
+                  </span>
+                )}
+              </>
+            );
+            return (
+              <li key={`${u.kind}-${u.id}`} className="border-b border-input last:border-b-0">
+                {link ? (
+                  <button
+                    type="button"
+                    onClick={() => openLink(link)}
+                    className="flex min-h-[44px] w-full items-center gap-3 py-2 text-left hover:bg-[#F6F8FA] dark:hover:bg-secondary"
+                  >
+                    {inner}
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-3 py-2">{inner}</div>
+                )}
+              </li>
+            );
+          })}
           {!!uses.hiddenUses && (
             <li className="src py-2">
               + {uses.hiddenUses} {uses.hiddenUses === 1 ? 'place' : 'places'} you don’t have access

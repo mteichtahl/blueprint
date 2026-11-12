@@ -178,6 +178,26 @@ export async function audit(
 }
 
 /** One-way hash of the caller's IP: enough to correlate events, not to identify a person. */
+/**
+ * Puts a workspace event on the environment's bus (source `bmg.workspace`);
+ * the notifier's rule decides who hears about it. Names and ids only, never
+ * file contents.
+ */
+export async function publish(detailType: string, detail: Record<string, unknown>): Promise<void> {
+  await events.send(
+    new PutEventsCommand({
+      Entries: [
+        {
+          EventBusName: env('EVENT_BUS'),
+          Source: 'bmg.workspace',
+          DetailType: detailType,
+          Detail: JSON.stringify({ id: randomUUID(), ...detail }),
+        },
+      ],
+    }),
+  );
+}
+
 export function hashIp(ip: string | undefined): string | undefined {
   if (!ip) return undefined;
   return createHash('sha256').update(`bmg-ip:${ip}`).digest('hex').slice(0, 16);

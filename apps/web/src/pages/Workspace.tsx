@@ -77,6 +77,13 @@ const PLAN_TABS: Partial<Record<string, PlanView>> = {
 };
 type GroupId = Group['id'];
 export type TabId = Group['sections'][number]['id'];
+/** Where to open a workspace; `n` makes the same place open again. */
+export interface WorkspaceTarget {
+  tab: TabId;
+  libKind?: LibraryKind;
+  fileId?: string;
+  n: number;
+}
 const groupOf = (s: TabId): Group => GROUPS.find((g) => g.sections.some((x) => x.id === s))!;
 
 /** A count on a tab or section; coral when it's waiting on Blueprint. */
@@ -154,7 +161,7 @@ export function ArtistWorkspace({
   onOpenChat,
   onRecordMeeting,
   onOpenMeeting,
-  initialTab,
+  target,
 }: {
   cfg: AppConfig;
   token: string;
@@ -168,8 +175,11 @@ export function ArtistWorkspace({
   onRecordMeeting?: () => void;
   /** Opens one of this artist's meetings. */
   onOpenMeeting?: (m: Meeting) => void;
-  /** Open on this section (a notification link, e.g. a plan update). */
-  initialTab?: TabId;
+  /**
+   * Open on this section (a notification or "Where it's used" link): a plan
+   * update opens Plan, a document link opens it in the Library (rev 8).
+   */
+  target?: WorkspaceTarget;
 }) {
   const meetings = useArtistMeetings(cfg, token, artist.artistId);
   const planReview = meetings.reduce((n, m) => n + m.suggestionsWaiting, 0);
@@ -203,14 +213,14 @@ export function ArtistWorkspace({
     ]).then(([submissions, todos]) => setCounts({ submissions, todos }));
   }, [cfg, token, artist.artistId]);
   useEffect(() => {
-    setTabState(initialTab ?? 'summary');
+    setTabState(target?.tab ?? 'summary');
     setLastIn({});
-    setLibKind('all');
+    setLibKind(target?.libKind ?? 'all');
     setChatOpen(false);
     setStartPlan(false);
     loadPlan();
     loadCounts();
-  }, [loadPlan, loadCounts, initialTab]);
+  }, [loadPlan, loadCounts, target]);
   // Counts follow what's open, so a review or a ticked to-do shows on the tabs.
   useEffect(() => loadCounts(), [tab, loadCounts]);
 
@@ -403,6 +413,7 @@ export function ArtistWorkspace({
                     isBmg
                     isAdmin={me.role === 'bmg-admin'}
                     kind={libKind}
+                    openFileId={target?.fileId ?? null}
                   />
                 )}
               </>

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { api } from './api.ts';
 import type { AppConfig } from './config.ts';
 
@@ -47,13 +47,35 @@ export async function disablePush(cfg: AppConfig, token: string): Promise<void> 
   await sub.unsubscribe();
 }
 
+/** The in-app event `openLink` sends, so any screen can open another place. */
+const GO_EVENT = 'bmg-go';
+
+/**
+ * Opens another place in the app by its link, the same links notifications
+ * use (`chat:<id>`, `doc:<space>/<fileId>`, `submission:<artistId>/<id>`,
+ * `brand:<artistId>`, `assets:<artistId>`). The app shell decides what each
+ * opens for the person signed in.
+ */
+export function openLink(link: string): void {
+  window.dispatchEvent(new CustomEvent(GO_EVENT, { detail: link }));
+}
+
 /**
  * Opens the screen a push notification points at: from `?go=` when the app
- * was launched by the notification, or a message from the service worker
- * when the app was already open.
+ * was launched by the notification, a message from the service worker when
+ * the app was already open, or `openLink` from inside the app.
  */
-export function useDeepLink(open: (link: string) => void): void {
+export function useDeepLink(handler: (link: string) => void): void {
+  // The latest handler, so links opened later see the screen as it is then.
+  const latest = useRef(handler);
+  latest.current = handler;
   useEffect(() => {
+    const open = (link: string) => latest.current(link);
+    const onGo = (e: Event) => {
+      const link = (e as CustomEvent<unknown>).detail;
+      if (typeof link === 'string') open(link);
+    };
+    window.addEventListener(GO_EVENT, onGo);
     const url = new URL(window.location.href);
     const go = url.searchParams.get('go');
     if (go) {
@@ -61,12 +83,15 @@ export function useDeepLink(open: (link: string) => void): void {
       url.searchParams.delete('go');
       window.history.replaceState({}, '', url.pathname + url.search);
     }
-    if (!('serviceWorker' in navigator)) return;
+    if (!('serviceWorker' in navigator)) return () => window.removeEventListener(GO_EVENT, onGo);
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === 'bmg-go' && typeof e.data.link === 'string') open(e.data.link);
     };
     navigator.serviceWorker.addEventListener('message', onMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
-    // Runs once: `open` changes identity on every render.
+    return () => {
+      window.removeEventListener(GO_EVENT, onGo);
+      navigator.serviceWorker.removeEventListener('message', onMessage);
+    };
+    // Runs once; `latest` always holds the current handler.
   }, []);
 }
