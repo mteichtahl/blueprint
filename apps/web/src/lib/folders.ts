@@ -87,6 +87,22 @@ export const moveItems = (
   preview: boolean,
 ) => api<Summary>(cfg, token, 'POST', `${base}/move`, { items, to, preview });
 
+/** What Copy to… made (rev 10). */
+export interface CopyResult {
+  files: number;
+  folders: number;
+  skipped: number;
+  firstFolderId?: string;
+}
+
+export const copyItems = (
+  cfg: AppConfig,
+  token: string,
+  base: string,
+  items: ItemRef[],
+  to: string | null,
+) => api<CopyResult>(cfg, token, 'POST', `${base}/copy`, { items, to });
+
 /** "Saving gives 2 people access to 48 files and removes access for 1 person from 12 files." */
 export function describeChanges(s: Summary, noun = 'items'): string {
   const gain = s.changes.filter((c) => c.gains);
@@ -101,4 +117,26 @@ export function describeChanges(s: Summary, noun = 'items'): string {
       `removes access for ${people(lose.length)} from up to ${count(lose, 'loses')} ${noun}`,
     );
   return parts.length ? parts.join(' and ') : 'doesn’t change who can open anything';
+}
+
+/**
+ * One level of a document picker (rev 10: the chat, submit-for-review and
+ * add-to-assets pickers browse folders): the folders and files directly in
+ * `at`, by name. Files in folders this person can't open show at the top,
+ * as in "Shared with me".
+ */
+export function pickerLevel<F extends { folderId: string | null; displayName: string }>(
+  folders: readonly Folder[],
+  files: readonly F[],
+  at: string | null,
+): { folders: Folder[]; files: F[]; here: Folder | undefined } {
+  const ids = new Set(folders.map((f) => f.folderId));
+  const where = (f: F) => (f.folderId && ids.has(f.folderId) ? f.folderId : null);
+  const byName = (a: { name: string }, b: { name: string }) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true });
+  return {
+    here: at ? folders.find((f) => f.folderId === at) : undefined,
+    folders: folders.filter((f) => (f.parentId ?? null) === at).sort(byName),
+    files: files.filter((f) => where(f) === at),
+  };
 }

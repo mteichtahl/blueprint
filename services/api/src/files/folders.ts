@@ -411,6 +411,32 @@ export const MoveBody = z
   })
   .strict();
 
+/** Copy to… (rev 10): files and folders, copied into one folder (or the top) of the same space. */
+export const CopyBody = z
+  .object({
+    items: z.array(ItemRef).min(1).max(100),
+    to: ParentId,
+  })
+  .strict();
+
+/** At most this many files in one copy, so it finishes inside one API call. */
+export const MAX_COPY_FILES = 50;
+
+/**
+ * The name a copied folder gets where it lands: its own, or "Copy of …"
+ * (then "Copy of … (2)", …) when a folder there already has that name.
+ */
+export function copyName(folders: Iterable<FolderRecord>, parentId: string | null, name: string) {
+  const list = [...folders];
+  if (!nameTaken(list, parentId, name)) return name;
+  const base = `Copy of ${name}`.slice(0, 112);
+  if (!nameTaken(list, parentId, base)) return base;
+  for (let i = 2; ; i++) {
+    const next = `${base} (${i})`;
+    if (!nameTaken(list, parentId, next)) return next;
+  }
+}
+
 export const AccessBody = z
   .object({
     item: ItemRef,

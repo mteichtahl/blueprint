@@ -20,6 +20,8 @@ interface Turn {
   from: 'me' | 'ai';
   text: string;
   actions?: Action[];
+  /** What each action would change (moves and access: who gains, who loses). */
+  effects?: (string | null)[];
   actionToken?: string;
   done?: { summary: string; ok: boolean; error?: string }[];
 }
@@ -98,6 +100,7 @@ export function Assistant({
         sessionId: string;
         reply: string;
         actions: Action[];
+        effects?: (string | null)[];
         actionToken?: string;
       }>(cfg, token, 'POST', '/ai/chat', { message: m, ...(sessionId ? { sessionId } : {}) });
       setSessionId(r.sessionId);
@@ -111,7 +114,13 @@ export function Assistant({
         {
           from: 'ai',
           text: r.reply,
-          ...(r.actions.length ? { actions: r.actions, actionToken: r.actionToken } : {}),
+          ...(r.actions.length
+            ? {
+                actions: r.actions,
+                actionToken: r.actionToken,
+                ...(r.effects ? { effects: r.effects } : {}),
+              }
+            : {}),
         },
       ]);
     } catch (e) {
@@ -234,6 +243,7 @@ export function Assistant({
                 {t.actions && t.actions.length > 0 && !t.done && (
                   <Checklist
                     actions={t.actions}
+                    effects={t.effects}
                     onDo={(sel) => void doIt(i, sel)}
                     onCancel={() => cancel(i)}
                   />
@@ -297,10 +307,12 @@ export function Assistant({
 
 function Checklist({
   actions,
+  effects,
   onDo,
   onCancel,
 }: {
   actions: Action[];
+  effects?: (string | null)[] | undefined;
   onDo: (selected: number[]) => void;
   onCancel: () => void;
 }) {
@@ -318,7 +330,11 @@ function Checklist({
             checked={ticked[i]}
             onChange={() => setTicked(ticked.map((t, j) => (j === i ? !t : t)))}
           />
-          <span className="flex-1">{a.summary}</span>
+          <span className="flex-1">
+            {a.summary}
+            {/* P6: a move or an access change says who gains and who loses access. */}
+            {effects?.[i] && <span className="src block">{effects[i]}</span>}
+          </span>
         </label>
       ))}
       <div className="flex flex-wrap gap-1.5">
