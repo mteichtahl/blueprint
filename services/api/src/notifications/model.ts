@@ -124,6 +124,13 @@ export type DomainEvent =
       restoredFrom?: number;
     }
   | {
+      /** A recovery code was used instead of the authenticator. Only that person hears. */
+      type: 'account.recovered';
+      sub: string;
+      /** Recovery codes still unused. */
+      left: number;
+    }
+  | {
       /**
        * Access given in the Access panel, or a library document shared with
        * artists (rev 10): the people who can open it now and couldn't before.
@@ -209,7 +216,9 @@ export interface Draft {
     | 'meeting'
     | 'plan'
     /** An artist's plan, for its Blueprint owner (rev 12). */
-    | 'artistPlan';
+    | 'artistPlan'
+    /** Sign-in and security: a recovery code was used. */
+    | 'account';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
@@ -421,6 +430,20 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
         },
       };
     }
+    case 'account.recovered':
+      return {
+        to: everyone.filter((r) => r.sub === e.sub),
+        draft: {
+          kind: 'account',
+          title: 'Your two-step verification was reset',
+          body: `A recovery code was used on your account, so your authenticator was turned off. Sign in with your password to set up a new one. ${
+            e.left === 0
+              ? 'You have no recovery codes left: make new ones in Profile.'
+              : `You have ${e.left} recovery code${e.left === 1 ? '' : 's'} left.`
+          } If this wasn’t you, change your password and tell Blueprint straight away.`,
+          link: 'profile',
+        },
+      };
     case 'item.shared':
       return {
         to: everyone.filter((r) => e.toSubs.includes(r.sub) && r.sub !== e.bySub),
@@ -631,6 +654,7 @@ const EYEBROW: Record<Draft['kind'], string> = {
   meeting: 'Meeting notes',
   plan: 'Your plan',
   artistPlan: 'Artist plan',
+  account: 'Sign-in & security',
 };
 
 /**

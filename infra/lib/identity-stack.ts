@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import { CfnOutput, Duration, RemovalPolicy, SecretValue } from 'aws-cdk-lib';
 import {
   AccountRecovery,
   CfnUserPool,
@@ -8,14 +8,19 @@ import {
   ManagedLoginVersion,
   Mfa,
   PasskeyUserVerification,
+  ProviderAttribute,
   StandardThreatProtectionMode,
   StringAttribute,
   UserPool,
   UserPoolDomain,
+  UserPoolIdentityProviderApple,
+  UserPoolIdentityProviderFacebook,
+  UserPoolIdentityProviderGoogle,
   UserPoolOperation,
+  type IUserPoolIdentityProvider,
 } from 'aws-cdk-lib/aws-cognito';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { PolicyDocument, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import type { IKey } from 'aws-cdk-lib/aws-kms';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import type { Construct } from 'constructs';
@@ -48,6 +53,16 @@ const PRECEDENCE: Record<(typeof USER_GROUPS)[number], number> = {
 export class IdentityStack extends BmgStack {
   readonly userPool: UserPool;
   readonly domain: UserPoolDomain;
+  /** Social sign-in providers turned on. */
+  readonly socialProviders: IUserPoolIdentityProvider[] = [];
+  /**
+   * Their Cognito names (Google, SignInWithApple, Facebook): fixed strings, so
+   * the web stack refers to them without cross-stack exports (which would
+   * stop a provider being turned off later).
+   */
+  readonly socialProviderNames: string[] = [];
+  /** Text-message codes: the role Cognito sends SMS with, when they're on. */
+  readonly sms?: { roleArn: string; externalId: string };
 
   constructor(scope: Construct, id: string, props: IdentityStackProps) {
     const env = props.envName;
@@ -103,7 +118,8 @@ export class IdentityStack extends BmgStack {
     preSignUp.addToRolePolicy(
       new PolicyStatement({
         sid: 'ReadInvites',
-        actions: ['dynamodb:GetItem'],
+        // UpdateItem: an invited artist's first social sign-in accepts the invitation.
+        actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
         resources: [props.mainTable.tableArn],
       }),
     );
@@ -116,7 +132,49 @@ export class IdentityStack extends BmgStack {
       }),
     );
     props.platformKey.grant(preSignUp, 'kms:Decrypt');
+    // Social sign-in: a first Google, Apple or Facebook sign-in is linked to
+    // the person's own account (same verified email), so it signs in as them
+    // with their group and artist id. The pool's id isn't known here (the
+    // pool refers to this function), so the ARN ends in a wildcard.
+    const anyPoolHere = `arn:aws:cognito-idp:${this.region}:${this.account}:userpool/*`;
+    preSignUp.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'LinkSocialSignIns',
+        actions: ['cognito-idp:ListUsers', 'cognito-idp:AdminLinkProviderForUser'],
+        resources: [anyPoolHere],
+      }),
+    );
+    acknowledge(
+      preSignUp.role!,
+      'The user pool refers to this trigger, so its ARN can only be matched with a wildcard; the actions are list and link only.',
+      `AwsSolutions-IAM5[Resource::${anyPoolHere}]`,
+    );
     props.platformKey.grant(postConfirmation, 'kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey');
+
+    // Text-message codes (when turned on): Cognito sends them through SNS with this role.
+    const envCfg = cfg.environments[env];
+    let smsRole: Role | undefined;
+    if (envCfg.smsMfa) {
+      const externalId = `${cfg.project}-${env}-cognito-sms`;
+      smsRole = new Role(this, 'SmsRole', {
+        roleName: `${cfg.project}-${env}-cognito-sms`,
+        description: 'Cognito sends sign-in text messages with this role',
+        assumedBy: new ServicePrincipal('cognito-idp.amazonaws.com', {
+          conditions: { StringEquals: { 'sts:ExternalId': externalId } },
+        }),
+        inlinePolicies: {
+          Sms: new PolicyDocument({
+            statements: [new PolicyStatement({ actions: ['sns:Publish'], resources: ['*'] })],
+          }),
+        },
+      });
+      acknowledge(
+        smsRole,
+        'Text messages are published straight to phone numbers, which have no ARN.',
+        'AwsSolutions-IAM5[Resource::*]',
+      );
+      this.sms = { roleArn: smsRole.roleArn, externalId };
+    }
 
     this.userPool = new UserPool(this, 'Users', {
       userPoolName: `${cfg.project}-${env}`,
@@ -124,13 +182,14 @@ export class IdentityStack extends BmgStack {
       selfSignUpEnabled: false,
       signInAliases: { email: true },
       signInCaseSensitive: false,
-      autoVerify: { email: true },
+      autoVerify: { email: true, ...(envCfg.smsMfa ? { phone: true } : {}) },
       keepOriginal: { email: true },
       standardAttributes: { email: { required: true, mutable: true } },
       // Set once by the invite flow; users can never change it (not writable by the client either).
       customAttributes: { artistId: new StringAttribute({ mutable: false, maxLen: 40 }) },
       mfa: Mfa.REQUIRED,
-      mfaSecondFactor: { otp: true, sms: false, email: false },
+      mfaSecondFactor: { otp: true, sms: envCfg.smsMfa, email: false },
+      ...(smsRole && this.sms ? { smsRole, smsRoleExternalId: this.sms.externalId } : {}),
       passwordPolicy: {
         minLength: 12,
         requireLowercase: true,
@@ -173,6 +232,62 @@ export class IdentityStack extends BmgStack {
         precedence: PRECEDENCE[group],
         description: `BMG ${group}. Membership is set only by the API or the bmg CLI.`,
       });
+    }
+
+    // Social sign-in (design D2): each provider's OAuth app is in Secrets
+    // Manager; listing it in config turns it on. The web client then offers it.
+    for (const provider of envCfg.socialProviders) {
+      const secret = names.socialSecret(cfg, env, provider);
+      const field = (f: string) => SecretValue.secretsManager(secret, { jsonField: f });
+      const userPool = this.userPool;
+      this.socialProviderNames.push(provider === 'Apple' ? 'SignInWithApple' : provider);
+      if (provider === 'Google') {
+        this.socialProviders.push(
+          new UserPoolIdentityProviderGoogle(this, 'Google', {
+            userPool,
+            clientId: field('clientId').unsafeUnwrap(),
+            clientSecretValue: field('clientSecret'),
+            scopes: ['openid', 'email', 'profile'],
+            attributeMapping: {
+              email: ProviderAttribute.GOOGLE_EMAIL,
+              emailVerified: ProviderAttribute.GOOGLE_EMAIL_VERIFIED,
+              givenName: ProviderAttribute.GOOGLE_GIVEN_NAME,
+              familyName: ProviderAttribute.GOOGLE_FAMILY_NAME,
+            },
+          }),
+        );
+      } else if (provider === 'Apple') {
+        this.socialProviders.push(
+          new UserPoolIdentityProviderApple(this, 'Apple', {
+            userPool,
+            clientId: field('clientId').unsafeUnwrap(),
+            teamId: field('teamId').unsafeUnwrap(),
+            keyId: field('keyId').unsafeUnwrap(),
+            privateKeyValue: field('privateKey'),
+            scopes: ['name', 'email'],
+            attributeMapping: {
+              email: ProviderAttribute.APPLE_EMAIL,
+              emailVerified: ProviderAttribute.APPLE_EMAIL_VERIFIED,
+              givenName: ProviderAttribute.APPLE_FIRST_NAME,
+              familyName: ProviderAttribute.APPLE_LAST_NAME,
+            },
+          }),
+        );
+      } else {
+        this.socialProviders.push(
+          new UserPoolIdentityProviderFacebook(this, 'Facebook', {
+            userPool,
+            clientId: field('clientId').unsafeUnwrap(),
+            clientSecret: field('clientSecret').unsafeUnwrap(),
+            scopes: ['public_profile', 'email'],
+            attributeMapping: {
+              email: ProviderAttribute.FACEBOOK_EMAIL,
+              givenName: ProviderAttribute.FACEBOOK_FIRST_NAME,
+              familyName: ProviderAttribute.FACEBOOK_LAST_NAME,
+            },
+          }),
+        );
+      }
     }
 
     this.domain = this.userPool.addDomain('Domain', {

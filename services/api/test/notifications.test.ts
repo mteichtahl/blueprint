@@ -399,3 +399,16 @@ describe('shared with you (rev 10)', () => {
     expect(doc!.draft.link).toBe('doc:library/f9');
   });
 });
+
+describe('account security', () => {
+  it('tells only that person when a recovery code was used, and how many are left', () => {
+    const p = plan({ type: 'account.recovered', sub: 'chloe', left: 0 }, people);
+    expect(subs(p)).toEqual(['chloe']);
+    expect(p!.draft).toMatchObject({
+      kind: 'account',
+      title: 'Your two-step verification was reset',
+      link: 'profile',
+    });
+    expect(p!.draft.body).toContain('no recovery codes left');
+  });
+});

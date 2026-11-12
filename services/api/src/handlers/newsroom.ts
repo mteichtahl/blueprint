@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { InvocationType, InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import { DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  DeleteCommand,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { authorize, type Action, type Principal } from '@bmg/authz';
 import {
   audit,
@@ -17,6 +23,9 @@ import {
   DEFAULT_SETTINGS,
   DraftEdit,
   draftSk,
+  issueHtml,
+  MailchimpBody,
+  type MailchimpState,
   NEWSROOM_PK,
   Settings,
   SETTINGS_SK,
@@ -25,6 +34,14 @@ import {
   siteSk,
   type Draft,
 } from '../newsroom/model.ts';
+import { loadConnection } from '../connectors/store.ts';
+import {
+  call,
+  mailchimp,
+  MailchimpError,
+  makeCampaign,
+  quarterHour,
+} from '../connectors/mailchimp.ts';
 
 /**
  * Newsroom (BMG only): the weekly draft, its settings and the managed industry
@@ -90,7 +107,9 @@ export const handler = handle(async (event) => {
         })),
         settings,
         sites: items.filter((i) => String(i.SK).startsWith('SITE#')).map(strip),
-        mailchimpConnected: false,
+        mailchimpConnected: await loadConnection('bmg', 'mailchimp')
+          .then((c) => !!c && c.status === 'connected' && !!c.settings?.listId)
+          .catch(() => false),
       });
     }
 
@@ -150,6 +169,82 @@ export const handler = handle(async (event) => {
       }
       await audit(event, 'newsroom.approved', 'success', { weekOf: id });
       return json(200, { ok: true });
+    }
+
+    // ── Mailchimp sending (connectors) ──
+    // Test any time; send or schedule only an approved issue, once. Admins
+    // only, with a fresh sign-in, like approval.
+    case 'POST /drafts/:id/mailchimp': {
+      ensure(principal, 'admin');
+      if (!WEEK.test(id)) throw new HttpError(404, 'No such draft');
+      const body = parseBody(event, MailchimpBody);
+      const got = await db.send(
+        new GetCommand({ TableName: table(), Key: { PK: NEWSROOM_PK, SK: draftSk(id) } }),
+      );
+      const d = got.Item as (Draft & { PK: string }) | undefined;
+      if (!d) throw new HttpError(404, 'No such draft');
+      if (body.action !== 'test' && d.status !== 'approved') {
+        throw new HttpError(409, 'Approve the issue before it’s sent');
+      }
+      if (d.mailchimp?.status === 'sent')
+        throw new HttpError(409, 'This issue has already been sent');
+      if (body.action === 'unschedule' && d.mailchimp?.status !== 'scheduled') {
+        throw new HttpError(409, 'This issue isn’t scheduled');
+      }
+      try {
+        const mc = await mailchimp();
+        let campaignId = d.mailchimp?.campaignId;
+        let state: MailchimpState;
+        if (body.action === 'unschedule') {
+          await call(mc, 'POST', `/campaigns/${campaignId}/actions/unschedule`);
+          state = { campaignId: campaignId!, status: 'draft' };
+        } else {
+          // A scheduled campaign has to be unscheduled before its content changes.
+          if (d.mailchimp?.status === 'scheduled') {
+            await call(mc, 'POST', `/campaigns/${campaignId}/actions/unschedule`);
+          }
+          campaignId = await makeCampaign(
+            mc,
+            { title: d.title, weekOf: d.weekOf, html: issueHtml(d) },
+            campaignId,
+          );
+          if (body.action === 'test') {
+            await call(mc, 'POST', `/campaigns/${campaignId}/actions/test`, {
+              test_emails: body.emails,
+              send_type: 'html',
+            });
+            state = { campaignId, status: 'draft' };
+          } else if (body.action === 'send') {
+            await call(mc, 'POST', `/campaigns/${campaignId}/actions/send`);
+            state = { campaignId, status: 'sent', at: now, by: principal.sub };
+          } else {
+            const at = quarterHour(body.at);
+            if (Date.parse(at) < Date.now() + 15 * 60_000) {
+              throw new HttpError(400, 'Pick a time at least 15 minutes from now');
+            }
+            await call(mc, 'POST', `/campaigns/${campaignId}/actions/schedule`, {
+              schedule_time: at,
+            });
+            state = { campaignId, status: 'scheduled', at, by: principal.sub };
+          }
+        }
+        await db.send(
+          new UpdateCommand({
+            TableName: table(),
+            Key: { PK: NEWSROOM_PK, SK: draftSk(id) },
+            UpdateExpression: 'SET mailchimp = :m',
+            ExpressionAttributeValues: { ':m': state },
+          }),
+        );
+        await audit(event, `newsroom.mailchimp.${body.action}`, 'success', {
+          weekOf: id,
+          ...(body.action === 'test' ? { recipients: body.emails.length } : {}),
+        });
+        return json(200, { mailchimp: state });
+      } catch (err) {
+        if (err instanceof MailchimpError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
     }
 
     case 'POST /regenerate': {

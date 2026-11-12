@@ -18,13 +18,19 @@ import {
   FunctionEventType,
   FunctionRuntime,
 } from 'aws-cdk-lib/aws-cloudfront';
-import { HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { FunctionUrlOrigin, HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   ClientAttributes,
+  OAuthScope,
   UserPoolClient,
   UserPoolClientIdentityProvider,
   type IUserPool,
 } from 'aws-cdk-lib/aws-cognito';
+import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
+import type { IEventBus } from 'aws-cdk-lib/aws-events';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import type { IKey } from 'aws-cdk-lib/aws-kms';
+import { FunctionUrlAuthType } from 'aws-cdk-lib/aws-lambda';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import {
@@ -36,7 +42,7 @@ import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import type { Construct } from 'constructs';
 import { names, type EnvironmentName } from '@bmg/config';
 import { acknowledge, BmgStack, type BmgStackProps } from './common.ts';
-import { REPO_ROOT } from './function.ts';
+import { BmgFunction, REPO_ROOT } from './function.ts';
 
 export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   readonly envName: EnvironmentName;
@@ -49,6 +55,17 @@ export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly downloadOrigins: string[];
   /** AppSync Events domains for realtime inbox nudges. */
   readonly realtime: { httpDns: string; realtimeDns: string };
+  /**
+   * Social sign-in providers turned on, by Cognito name (identity stack, which
+   * deploys first); none means no OAuth on the client.
+   */
+  readonly socialProviders?: string[];
+  /** Text-message codes, when on: the role Cognito sends them with. */
+  readonly sms?: { roleArn: string; externalId: string } | undefined;
+  /** For the public endpoints (newsletter sign-up, recovery codes). */
+  readonly mainTable: ITable;
+  readonly platformKey: IKey;
+  readonly bus: IEventBus;
 }
 
 const WEB_DIST = resolve(REPO_ROOT, 'apps/web/dist');
@@ -100,6 +117,10 @@ export class WebStack extends BmgStack {
     // Sign-in runs on the app's own screens against Cognito's user-pool API
     // (no hosted UI), so the browser only talks to cognito-idp.
     const cognitoIdp = `https://cognito-idp.${this.region}.amazonaws.com`;
+    // Social sign-in (design D2) goes through Cognito's domain: the browser
+    // is sent there to pick the provider, and swaps the code for tokens there.
+    const social = props.socialProviders ?? [];
+    const loginHost = `${names.cognitoDomainPrefix(cfg, env)}.auth.${this.region}.amazoncognito.com`;
     const headers = new ResponseHeadersPolicy(this, 'SecurityHeaders', {
       responseHeadersPolicyName: `${p}-web-security`,
       securityHeadersBehavior: {
@@ -114,7 +135,7 @@ export class WebStack extends BmgStack {
             // blob: lets the browser read a picked video locally to draw its preview.
             `media-src 'self' blob: ${props.downloadOrigins.join(' ')}`,
             // Download origins: the app reads images itself (brand kit PDF, profile pictures).
-            `connect-src 'self' ${cognitoIdp} ${props.uploadOrigin} ${props.downloadOrigins.join(' ')} wss://${props.realtime.realtimeDns}`,
+            `connect-src 'self' ${cognitoIdp}${social.length ? ` https://${loginHost}` : ''} ${props.uploadOrigin} ${props.downloadOrigins.join(' ')} wss://${props.realtime.realtimeDns}`,
             // Venue details show the address on an embedded Google map.
             'frame-src https://www.google.com',
             "frame-ancestors 'none'",
@@ -161,6 +182,48 @@ export class WebStack extends BmgStack {
         "function handler(event) { var r = event.request; if (r.uri.indexOf('.') === -1) { r.uri = '/index.html'; } return r; }",
       ),
     });
+    // ── Public endpoints (no sign-in): newsletter sign-up and recovery codes ──
+    const publicFn = new BmgFunction(this, 'Public', {
+      entry: 'services/api/src/handlers/public.ts',
+      description: `BMG ${env}: public endpoints (newsletter sign-up, recovery codes)`,
+      prod,
+      timeout: Duration.seconds(15),
+      environment: {
+        MAIN_TABLE: props.mainTable.tableName,
+        EVENT_BUS: props.bus.eventBusName,
+        USER_POOL_ID: props.userPool.userPoolId,
+      },
+    });
+    publicFn.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'SignupsRecoveryAndRateLimits',
+        actions: [
+          'dynamodb:GetItem',
+          'dynamodb:PutItem',
+          'dynamodb:UpdateItem',
+          'dynamodb:DeleteItem',
+        ],
+        resources: [props.mainTable.tableArn],
+      }),
+    );
+    publicFn.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'RecoveryCodes',
+        actions: ['cognito-idp:ListUsers', 'cognito-idp:AdminSetUserMFAPreference'],
+        resources: [props.userPool.userPoolArn],
+      }),
+    );
+    publicFn.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'TellThePerson',
+        actions: ['events:PutEvents'],
+        resources: [props.bus.eventBusArn],
+      }),
+    );
+    // Opens Blueprint's Mailchimp token (sealed under the platform key).
+    props.platformKey.grant(publicFn, 'kms:Decrypt');
+    const publicUrl = publicFn.addFunctionUrl({ authType: FunctionUrlAuthType.AWS_IAM });
+
     const distribution = new Distribution(this, 'Distribution', {
       comment: `BMG ${env} web app`,
       defaultRootObject: 'index.html',
@@ -187,6 +250,16 @@ export class WebStack extends BmgStack {
           originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
           responseHeadersPolicy: headers,
         },
+        // The public endpoints (newsletter sign-up, recovery codes): this
+        // function's URL, signed by CloudFront (origin access control).
+        '/public/*': {
+          origin: FunctionUrlOrigin.withOriginAccessControl(publicUrl),
+          viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+          cachePolicy: CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          responseHeadersPolicy: headers,
+        },
         // Settings change per deploy; never cache them.
         '/config.json': {
           origin: S3BucketOrigin.withOriginAccessControl(site),
@@ -205,8 +278,22 @@ export class WebStack extends BmgStack {
       // Choice-based sign-in (passkey or password, then the authenticator code)
       // from the app's own screens. No OAuth, so Cognito's hosted UI can't be used.
       authFlows: { user: true },
-      disableOAuth: true,
-      supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
+      // OAuth (code + PKCE) only for social sign-in; the app's own screens
+      // still do every other sign-in. Without providers it stays off.
+      ...(social.length
+        ? {
+            oAuth: {
+              flows: { authorizationCodeGrant: true },
+              scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+              callbackUrls: [`https://${distribution.distributionDomainName}/auth/callback`],
+              logoutUrls: [`https://${distribution.distributionDomainName}/`],
+            },
+          }
+        : { disableOAuth: true }),
+      supportedIdentityProviders: [
+        UserPoolClientIdentityProvider.COGNITO,
+        ...social.map((name) => UserPoolClientIdentityProvider.custom(name)),
+      ],
       accessTokenValidity: Duration.minutes(15),
       idTokenValidity: Duration.minutes(15),
       refreshTokenValidity: Duration.days(30),
@@ -214,9 +301,18 @@ export class WebStack extends BmgStack {
       enableTokenRevocation: true,
       preventUserExistenceErrors: true,
       readAttributes: new ClientAttributes()
-        .withStandardAttributes({ email: true, emailVerified: true })
+        .withStandardAttributes({
+          email: true,
+          emailVerified: true,
+          phoneNumber: !!props.sms,
+          phoneNumberVerified: !!props.sms,
+        })
         .withCustomAttributes('artistId'),
-      writeAttributes: new ClientAttributes().withStandardAttributes({ email: true }),
+      writeAttributes: new ClientAttributes().withStandardAttributes({
+        email: true,
+        // Text-message codes: people add and verify their own number.
+        phoneNumber: !!props.sms,
+      }),
     });
     // Passkeys belong to the address people sign in on: the app itself, not
     // Cognito's domain. The relying party is set with SetUserPoolMfaConfig
@@ -231,6 +327,17 @@ export class WebStack extends BmgStack {
         UserPoolId: props.userPool.userPoolId,
         MfaConfiguration: 'ON',
         SoftwareTokenMfaConfiguration: { Enabled: true },
+        // Text-message codes, when on (kept in step with the identity stack).
+        ...(props.sms
+          ? {
+              SmsMfaConfiguration: {
+                SmsConfiguration: {
+                  SnsCallerArn: props.sms.roleArn,
+                  ExternalId: props.sms.externalId,
+                },
+              },
+            }
+          : {}),
         WebAuthnConfiguration: {
           RelyingPartyId: rpId,
           UserVerification: 'required',
@@ -277,6 +384,10 @@ export class WebStack extends BmgStack {
           region: this.region,
           userPoolId: props.userPool.userPoolId,
           apiBase: '/v1',
+          // Social sign-in buttons (design D2) and text-message codes.
+          loginDomain: loginHost,
+          socialProviders: social,
+          smsMfa: !!props.sms,
           realtime: { http: props.realtime.httpDns, ws: props.realtime.realtimeDns },
         }),
       ],

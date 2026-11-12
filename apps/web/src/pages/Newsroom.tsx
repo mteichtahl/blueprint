@@ -47,6 +47,8 @@ interface Draft {
   generatedAt: string;
   generatedBy: 'ai' | 'fallback';
   approvedAt?: string;
+  /** Where it is in Mailchimp: a campaign made for a test, scheduled, or sent. */
+  mailchimp?: { campaignId: string; status: 'draft' | 'scheduled' | 'sent'; at?: string };
 }
 interface Site {
   siteId: string;
@@ -397,11 +399,17 @@ export function Newsroom({
               <input className="chk" type="checkbox" checked disabled />
               Never send without my approval
             </label>
-            <span className="src">
-              {s.mailchimpConnected
-                ? 'Sends through Mailchimp'
-                : 'Sending through Mailchimp starts when Mailchimp is connected. Until then, copy the approved issue into a campaign.'}
-            </span>
+            {s.mailchimpConnected && d && isAdmin ? (
+              <MailchimpSend cfg={cfg} token={token} d={d} dirty={dirty} run={run} />
+            ) : (
+              <span className="src">
+                {s.mailchimpConnected
+                  ? d?.mailchimp?.status === 'sent'
+                    ? `Sent through Mailchimp ${shortDate(d.mailchimp.at!)}`
+                    : 'An admin sends each approved issue through Mailchimp.'
+                  : 'Sending through Mailchimp starts once Mailchimp is connected and an audience chosen (Connectors). Until then, copy the approved issue into a campaign.'}
+              </span>
+            )}
           </Card>
 
           <WhatGoesIn
@@ -430,6 +438,124 @@ export function Newsroom({
       </div>
 
       <Sites cfg={cfg} token={token} sites={s.sites} isAdmin={isAdmin} run={run} />
+    </div>
+  );
+}
+
+/**
+ * Mailchimp sending (connectors): a test to a few addresses at any time,
+ * then, once approved, send now or schedule. Sending is final, so it asks
+ * twice; an admin with a fresh sign-in does it, like approval.
+ */
+function MailchimpSend({
+  cfg,
+  token,
+  d,
+  dirty,
+  run,
+}: {
+  cfg: AppConfig;
+  token: string;
+  d: Draft;
+  dirty: boolean;
+  run: (fn: () => Promise<unknown>, done: string, reload?: boolean) => Promise<void>;
+}) {
+  const [emails, setEmails] = useState('');
+  const [at, setAt] = useState('');
+  const [confirm, setConfirm] = useState(false);
+  const path = `/newsroom/drafts/${d.weekOf}/mailchimp`;
+  const send = (body: Record<string, unknown>, done: string) =>
+    run(() => api(cfg, token, 'POST', path, body), done);
+  const list = emails
+    .split(/[\s,;]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const m = d.mailchimp;
+  if (m?.status === 'sent') {
+    return <Tag tone="n">Sent through Mailchimp {m.at ? shortDate(m.at) : ''}</Tag>;
+  }
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-input pt-3">
+      <span className="eyebrow">Send through Mailchimp</span>
+      {dirty && <span className="src">Save your changes first.</span>}
+      <div className="flex flex-wrap items-end gap-2">
+        <Field
+          label="Send a test to"
+          placeholder="you@example.com, kyra@example.com"
+          value={emails}
+          onChange={(e) => setEmails(e.target.value)}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={dirty || list.length === 0 || list.length > 5}
+          onClick={() =>
+            void send({ action: 'test', emails: list }, `Test sent to ${list.join(', ')}.`)
+          }
+        >
+          Send test
+        </Button>
+      </div>
+      {list.length > 5 && <span className="src">Up to 5 test addresses.</span>}
+      {d.status !== 'approved' ? (
+        <span className="src">Approve the issue to send or schedule it.</span>
+      ) : m?.status === 'scheduled' ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag tone="s">
+            Scheduled for{' '}
+            {new Date(m.at!).toLocaleString('en-AU', {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            })}
+          </Tag>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void send({ action: 'unschedule' }, 'Unscheduled. It hasn’t been sent.')}
+          >
+            Unschedule
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-2">
+            <Field
+              label="Schedule for"
+              type="datetime-local"
+              value={at}
+              onChange={(e) => setAt(e.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={dirty || !at}
+              onClick={() =>
+                void send(
+                  { action: 'schedule', at: new Date(at).toISOString() },
+                  'Scheduled. Mailchimp sends it on the quarter hour nearest that time.',
+                )
+              }
+            >
+              Schedule
+            </Button>
+          </div>
+          <Button
+            variant="cta"
+            disabled={dirty}
+            onClick={() => {
+              if (!confirm) {
+                setConfirm(true);
+                setTimeout(() => setConfirm(false), 6000);
+                return;
+              }
+              setConfirm(false);
+              void send({ action: 'send' }, 'Sent to the Mailchimp audience.');
+            }}
+          >
+            {confirm ? 'Send to everyone now? Click again' : 'Send now'}
+          </Button>
+        </>
+      )}
     </div>
   );
 }

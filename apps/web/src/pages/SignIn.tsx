@@ -21,6 +21,8 @@ import {
 } from '../lib/cognito.ts';
 import { lastEmail, rememberEmail, storeTokens, type Session } from '../lib/auth.ts';
 import { cancelled, createPasskey, getPasskey, passkeysSupported } from '../lib/webauthn.ts';
+import { postPublic } from '../lib/publicApi.ts';
+import { SOCIAL_LABEL, socialProviders, startSocial } from '../lib/social.ts';
 import { AuthFrame } from '../components/Shell.tsx';
 import { Button, Card, Field, Notice, WaveLoader } from '../components/ui.tsx';
 
@@ -35,6 +37,7 @@ type Screen =
   | { kind: 'email' }
   | Exclude<Step, { kind: 'done' }>
   | { kind: 'forgot'; sent: boolean }
+  | { kind: 'recovery' }
   | { kind: 'offerPasskey'; session: Session }
   | { kind: 'working'; label: string };
 
@@ -50,15 +53,19 @@ const HEADINGS: Record<NonNullable<SignInReason> | 'default', [string, string]> 
 export function SignIn({
   cfg,
   reason,
+  problem,
   onSignedIn,
 }: {
   cfg: AppConfig;
   reason?: SignInReason;
+  /** Why the last sign-in didn't work (a social sign-in that came back with an error). */
+  problem?: string;
   onSignedIn: (s: Session) => void;
 }) {
   const [screen, setScreen] = useState<Screen>({ kind: 'email' });
   const [email, setEmail] = useState(lastEmail());
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(problem ?? null);
+  const social = socialProviders(cfg);
   const [notice, setNotice] = useState<string | null>(
     reason === 'reauth' ? 'This action needs a recent sign-in. Please sign in again.' : null,
   );
@@ -127,17 +134,32 @@ export function SignIn({
     <AuthFrame eyebrow={eyebrow} title={title} sub="Your artist development workspace.">
       <Card>
         {screen.kind === 'email' && (
-          <EmailStep
-            email={email}
-            setEmail={setEmail}
-            notice={notice}
-            onSubmit={() => {
-              setNotice(null);
-              void run('Checking your account…', async () =>
-                asChoice(await start(cfg, email.trim().toLowerCase())),
-              );
-            }}
-          />
+          <>
+            <EmailStep
+              email={email}
+              setEmail={setEmail}
+              notice={notice}
+              onSubmit={() => {
+                setNotice(null);
+                void run('Checking your account…', async () =>
+                  asChoice(await start(cfg, email.trim().toLowerCase())),
+                );
+              }}
+            />
+            {social.length > 0 && (
+              <SocialButtons
+                providers={social}
+                onPick={(p) => {
+                  setError(null);
+                  setScreen({ kind: 'working', label: `Opening ${SOCIAL_LABEL[p]}…` });
+                  void startSocial(cfg, p).catch((e: Error) => {
+                    setError(e.message);
+                    setScreen({ kind: 'email' });
+                  });
+                }}
+              />
+            )}
+          </>
         )}
 
         {screen.kind === 'choose' && (
@@ -208,6 +230,81 @@ export function SignIn({
               )
             }
             onCancel={startOver}
+            onRecovery={() => {
+              setError(null);
+              setScreen({ kind: 'recovery' });
+            }}
+          />
+        )}
+
+        {screen.kind === 'smsCode' && (
+          <CodeStep
+            sub={`Enter the 6-digit code we texted to ${screen.destination}.`}
+            onSubmit={(code) =>
+              void run('Checking your code…', () =>
+                respond(cfg, 'SMS_MFA', screen.session, {
+                  USERNAME: email,
+                  SMS_MFA_CODE: code,
+                }),
+              )
+            }
+            onCancel={startOver}
+            onRecovery={() => {
+              setError(null);
+              setScreen({ kind: 'recovery' });
+            }}
+          />
+        )}
+
+        {screen.kind === 'chooseMfa' && (
+          <div className="flex flex-col gap-3">
+            <Heading title="Two-step verification" sub="How would you like to get your code?" />
+            {screen.app && (
+              <Button
+                variant="cta"
+                className="min-h-[50px] w-full"
+                onClick={() =>
+                  void run('One moment…', () =>
+                    respond(cfg, 'SELECT_MFA_TYPE', screen.session, {
+                      USERNAME: email,
+                      ANSWER: 'SOFTWARE_TOKEN_MFA',
+                    }),
+                  )
+                }
+              >
+                Authenticator app
+              </Button>
+            )}
+            {screen.sms && (
+              <Button
+                variant="ghost"
+                className="min-h-[50px] w-full"
+                onClick={() =>
+                  void run('Texting you a code…', () =>
+                    respond(cfg, 'SELECT_MFA_TYPE', screen.session, {
+                      USERNAME: email,
+                      ANSWER: 'SMS_MFA',
+                    }),
+                  )
+                }
+              >
+                Text me a code
+              </Button>
+            )}
+          </div>
+        )}
+
+        {screen.kind === 'recovery' && (
+          <RecoveryStep
+            email={email}
+            setEmail={setEmail}
+            onDone={() => {
+              setNotice(
+                'Two-step verification is reset. Sign in with your password to set up a new authenticator.',
+              );
+              setScreen({ kind: 'email' });
+            }}
+            onBack={startOver}
           />
         )}
 
@@ -578,9 +675,14 @@ function CodeField({ code, setCode }: { code: string; setCode: (c: string) => vo
 function CodeStep({
   onSubmit,
   onCancel,
+  onRecovery,
+  sub = 'Enter the 6-digit code from your authenticator app.',
 }: {
   onSubmit: (code: string) => void;
   onCancel: () => void;
+  /** "Lost your authenticator?": use a recovery code instead. */
+  onRecovery?: () => void;
+  sub?: string;
 }) {
   const [code, setCode] = useState('');
   return (
@@ -591,10 +693,7 @@ function CodeStep({
         if (code.length === 6) onSubmit(code);
       }}
     >
-      <Heading
-        title="Two-step verification"
-        sub="Enter the 6-digit code from your authenticator app."
-      />
+      <Heading title="Two-step verification" sub={sub} />
       <CodeField code={code} setCode={setCode} />
       <Button
         type="submit"
@@ -604,8 +703,111 @@ function CodeStep({
       >
         Verify
       </Button>
+      {onRecovery && (
+        <button
+          type="button"
+          className="self-start text-sm font-bold underline"
+          onClick={onRecovery}
+        >
+          Lost your authenticator? Use a recovery code
+        </button>
+      )}
       <button type="button" className="self-start text-sm font-bold underline" onClick={onCancel}>
         Use a different account
+      </button>
+    </form>
+  );
+}
+
+/** Google, Apple and Facebook, where they're turned on (design D2). */
+function SocialButtons({
+  providers,
+  onPick,
+}: {
+  providers: string[];
+  onPick: (provider: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 border-t border-input pt-3">
+      <span className="src text-center">or</span>
+      {providers.map((p) => (
+        <Button key={p} variant="ghost" className="min-h-[50px] w-full" onClick={() => onPick(p)}>
+          Continue with {SOCIAL_LABEL[p]}
+        </Button>
+      ))}
+      <span className="src">
+        Use the same email Blueprint invited you with. You’ll confirm it’s you with your
+        authenticator after.
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A recovery code instead of the authenticator: it turns the authenticator
+ * off, and the next sign-in (with the password) sets up a new one.
+ */
+function RecoveryStep({
+  email,
+  setEmail,
+  onDone,
+  onBack,
+}: {
+  email: string;
+  setEmail: (v: string) => void;
+  onDone: () => void;
+  onBack: () => void;
+}) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError(null);
+        postPublic('/public/recovery', { email: email.trim().toLowerCase(), code })
+          .then(onDone)
+          .catch((err: Error) => setError(err.message))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <Heading
+        title="Use a recovery code"
+        sub="One of the codes you saved when you made them. Each works once. Your password is still needed after."
+      />
+      <Field
+        label="Email"
+        type="email"
+        autoComplete="username"
+        required
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <Field
+        label="Recovery code"
+        autoComplete="off"
+        autoCapitalize="characters"
+        spellCheck={false}
+        placeholder="ABCDE-FGHJK"
+        maxLength={20}
+        required
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+      />
+      {error && <Notice tone="error">{error}</Notice>}
+      <Button
+        type="submit"
+        variant="cta"
+        className="min-h-[50px] w-full"
+        disabled={busy || !email.trim() || code.replace(/[^A-Za-z0-9]/g, '').length !== 10}
+      >
+        {busy ? 'Checking…' : 'Reset two-step verification'}
+      </Button>
+      <button type="button" className="self-start text-sm font-bold underline" onClick={onBack}>
+        Back to sign in
       </button>
     </form>
   );

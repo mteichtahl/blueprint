@@ -652,3 +652,35 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **Now enforced:** the **CI checks** job runs `tools/release/version-check.mjs` on pull requests. It fails unless `VERSION` is newer than both the `VERSION` at production's last successful deployment and the newest `vX.Y.Z` tag, and says to run `blueprint release minor|major|hotfix`. Merges to `main` and Dependabot PRs skip it. The job now needs `deployments: read`, granted by the Deploy staging call too.
 - **`blueprint release ship`** also refuses a version production already runs, even when it was never tagged.
 - **1.6.0** starts the next release, with notes for #132–#147.
+
+## Sign-in and newsletter gaps (12 Nov 2026)
+
+- **Social sign-in buttons** (Google, Apple, Facebook; design D2).
+  - **Turning one on:** `blueprint social setup <google|apple|facebook> --env <env>` prints the redirect URI to register (`https://<cognito domain>/oauth2/idpresponse`) and stores the OAuth app in Secrets Manager (`<project>/<env>/social/<provider>`, under the platform key). It then lists the provider in `bmg.config.json` (`environments.<env>.socialProviders`). The next deploy adds it to Cognito.
+  - **The web client** gets OAuth (code + PKCE, callback `/auth/callback`) only while at least one provider is on, and `config.json` tells the app which buttons to show.
+  - **The buttons** go to Cognito's `/oauth2/authorize` with `identity_provider`, so people go straight to the provider and back, never to a Cognito page. Cognito's domain is added to the CSP's `connect-src` only while a provider is on (for the token exchange).
+  - **First sign-in:** the pre sign-up trigger links it to the person's own account. That's the one enabled account with that email, verified (or invited and not yet signed in), and only if the provider vouches for the email: Google and Apple send `email_verified`; Facebook only gives verified addresses. From then on it signs in as that account, with its group, artist id and data. Cognito still tries to make a separate user on that first attempt, so the trigger links, stops it with a marker, and the app signs in again by itself.
+  - **Nobody signs themselves up.** A social sign-in never makes an account: with no invited account to join it's refused ("There's no Blueprint account for that Google email…"), and the pre sign-up trigger now only ever allows accounts Blueprint's invite flow makes. An invited artist who hasn't set a password yet can use social sign-in while their invitation is live (not expired or revoked); doing so accepts the invitation, so Invite artist → Invitations shows them as accepted and their roster entry becomes active.
+  - **Two-step check:** the app's step-up (an authenticator code) still applies to every social sign-in, because Cognito applies no MFA to them.
+- **Text-message codes.** `environments.<env>.smsMfa: true` turns them on once SNS is out of the SMS sandbox.
+  - **Infrastructure:** an SMS role for Cognito, phone verification, SMS as a second factor in the pool, and the same in the web stack's `SetUserPoolMfaConfig`, so the two stay in step.
+  - **Profile → Security → Text-message codes:** add a mobile (Australian 04… or +…), confirm it with a texted code, and text codes are on. The authenticator stays the preferred way.
+  - **Sign-in** handles `SMS_MFA` ("we texted it to +*******678") and, with both on, asks which way.
+  - Changing the pool's attribute schema would replace it, so `phone_number` is only made readable and writable on the web client; the schema isn't touched.
+- **Recovery codes.**
+  - **Making them:** Profile → Security → Make recovery codes (`POST /access/recovery-codes`, inside the existing access proxy) needs a sign-in in the last 5 minutes. It makes 10 one-time codes like `ABCDE-FGHJK` (no 0/O/1/I/L; about 49 bits each), shows them once, and keeps only scrypt hashes, each with its own salt. Making new ones stops the old ones working.
+  - **Using one:** "Lost your authenticator? Use a recovery code" on the code screen. Email plus a code turns the authenticator (and text codes, and a social sign-in's step-up authenticator) off. The next sign-in, with the password, then sets up a new authenticator. A code alone never opens an account.
+  - **Answers and limits:** a wrong code, an unknown email and a locked account get the same answer. Five wrong codes lock the account's codes for an hour, and there are at most 20 tries per network per hour.
+  - **Telling the person:** using a code tells them (`account.recovered`: in app and email, with how many codes are left and what to do if it wasn't them).
+- **The public endpoints** (`/public/*`) are one function in the web stack, reached only through CloudFront: its URL needs IAM auth, and CloudFront signs requests with origin access control for Lambda. For a body, CloudFront needs its SHA-256, so the app sends `x-amz-content-sha256`. This stays out of the API stack, which is at its resource guardrail. Nothing on these endpoints needs a sign-in, so every answer is the same whether or not an account or address exists, and they're rate limited per network: only a salted hour bucket of the address is stored, with a TTL.
+- **The public newsletter sign-up page** is `https://<app>/newsletter`: first name (optional), email and a consent tick, with a hidden field that only bots fill in. It's the address to link from the website's "Join Our Mailing List".
+  - **Mailchimp connected:** the address goes into the chosen audience as `pending` (Mailchimp's double opt-in email), tagged "Signed up on the app". People already on the list are left as they are.
+  - **Mailchimp not connected yet:** the sign-up is kept, and the hourly connector sync adds it once Mailchimp is connected.
+  - The same address isn't emailed twice within 10 minutes, and each network can sign up 10 addresses an hour.
+- **Mailchimp sending** (Newsroom, admins with a fresh sign-in, like approval):
+  - **Send test** goes to up to 5 addresses, at any time.
+  - Once approved: **Send now** (it asks twice) or **Schedule** (Mailchimp sends on the quarter hour; at least 15 minutes ahead), and **Unschedule**.
+  - The campaign goes to the audience chosen in Connectors, using the audience's own From name and address, with the issue's HTML (built on the server, the same content as Copy as HTML). Mailchimp adds its footer with the unsubscribe link and address.
+  - One campaign per issue is reused for tests and the send, and an issue is sent only once.
+  - The Mailchimp token is opened only on the server, and Mailchimp's error bodies (which can echo what was sent) are cut down to their short title.
+  - The Newsroom now shows whether Mailchimp is connected. Before, it always said it wasn't.

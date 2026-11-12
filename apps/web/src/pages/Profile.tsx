@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react';
-import { api, type Me } from '../lib/api.ts';
+import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError, type Me } from '../lib/api.ts';
+import {
+  setPhone as setPhoneNumber,
+  setSmsMfa,
+  smsStatus,
+  toE164,
+  verifyPhone,
+} from '../lib/cognito.ts';
 import type { AppConfig } from '../lib/config.ts';
 import type { Preferences } from '../lib/notifications.ts';
 import { disablePush, enablePush, pushSupported } from '../lib/push.ts';
@@ -20,6 +27,7 @@ export function Profile({
   theme,
   onTheme,
   onSignOut,
+  onReauth,
   onJobTitle,
   onAvatar,
   compact = false,
@@ -31,6 +39,8 @@ export function Profile({
   theme: Theme;
   onTheme: (t: Theme) => void;
   onSignOut: () => void;
+  /** A fresh sign-in, for making recovery codes. */
+  onReauth?: () => void;
   onJobTitle?: (t: string) => void;
   onAvatar?: (avatar: string | null) => void;
   compact?: boolean;
@@ -166,6 +176,7 @@ export function Profile({
         )}
         {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       </Card>
+      <Security cfg={cfg} token={token} {...(onReauth ? { onReauth } : {})} />
       <Card className="flex-[1_1_280px] self-stretch" title="Account">
         <div className="flex flex-col gap-1 text-[15px]">
           <b>{userName}</b>
@@ -198,6 +209,241 @@ export function Profile({
           Sign out
         </Button>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * Security: recovery codes (for when the authenticator is lost) and, where
+ * they're on, text-message codes as a second way to get a code.
+ */
+function Security({
+  cfg,
+  token,
+  onReauth,
+}: {
+  cfg: AppConfig;
+  token: string;
+  onReauth?: () => void;
+}) {
+  const [info, setInfo] = useState<{ left: number; createdAt: string | null } | null>(null);
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [fresh, setFresh] = useState(false);
+  useEffect(() => {
+    api<{ left: number; createdAt: string | null }>(cfg, token, 'GET', '/access/recovery-codes')
+      .then(setInfo)
+      .catch(() => setInfo({ left: 0, createdAt: null }));
+  }, [cfg, token]);
+
+  async function make() {
+    setMsg(null);
+    setFresh(false);
+    try {
+      const r = await api<{ codes: string[]; createdAt: string }>(
+        cfg,
+        token,
+        'POST',
+        '/access/recovery-codes',
+        {},
+      );
+      setCodes(r.codes);
+      setInfo({ left: r.codes.length, createdAt: r.createdAt });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403 && /step-up/.test(e.message)) setFresh(true);
+      else setMsg({ tone: 'error', text: (e as Error).message });
+    }
+  }
+
+  return (
+    <Card className="flex-[1_1_320px] self-stretch" title="Security">
+      <div className="flex flex-col gap-2">
+        <b className="text-[15px]">Recovery codes</b>
+        <span className="src">
+          {info === null
+            ? '…'
+            : info.createdAt
+              ? `${info.left} of 10 left · made ${new Date(info.createdAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`
+              : 'None yet. Make some now, in case you lose your phone.'}
+        </span>
+        {codes ? (
+          <div className="flex flex-col gap-2 rounded-lg border-2 border-[#D9534F] p-3">
+            <span className="text-[15px] font-bold">
+              Save these now. They won’t be shown again.
+            </span>
+            <ul
+              className="m-0 grid list-none grid-cols-2 gap-1 p-0 font-mono text-[15px]"
+              aria-label="Your recovery codes"
+            >
+              {codes.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+            <span className="src">
+              Each code works once, with your email, if you can’t use your authenticator. Your
+              password is still needed.
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(codes.join('\n'))
+                    .then(() => setMsg({ tone: 'success', text: 'Copied.' }))
+                    .catch(() => setMsg({ tone: 'error', text: 'Couldn’t copy. Write them down.' }))
+                }
+              >
+                Copy codes
+              </Button>
+              <Button size="sm" variant="navy" onClick={() => setCodes(null)}>
+                I’ve saved them
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button size="sm" variant="ghost" className="self-start" onClick={() => void make()}>
+            {info?.createdAt ? 'Make new codes' : 'Make recovery codes'}
+          </Button>
+        )}
+        {info?.createdAt && !codes && (
+          <span className="src">Making new codes stops the old ones working.</span>
+        )}
+        {fresh && (
+          <Notice tone="error">
+            This needs a recent sign-in.{' '}
+            {onReauth && (
+              <button type="button" className="font-bold underline" onClick={onReauth}>
+                Sign in again
+              </button>
+            )}
+          </Notice>
+        )}
+        {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      </div>
+      {cfg.smsMfa && <TextCodes cfg={cfg} token={token} />}
+    </Card>
+  );
+}
+
+/** Text-message codes: add a number, confirm it with a texted code, then turn them on. */
+function TextCodes({ cfg, token }: { cfg: AppConfig; token: string }) {
+  const [state, setState] = useState<{
+    phone: string | null;
+    verified: boolean;
+    on: boolean;
+  } | null>(null);
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const load = useCallback(
+    () =>
+      smsStatus(cfg, token)
+        .then((st) => {
+          setState(st);
+          setPhone(st.phone ?? '');
+        })
+        .catch(() => setState({ phone: null, verified: false, on: false })),
+    [cfg, token],
+  );
+  useEffect(() => void load(), [load]);
+
+  const act = async (fn: () => Promise<unknown>, done: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await fn();
+      setMsg({ tone: 'success', text: done });
+      await load();
+    } catch (e) {
+      setMsg({ tone: 'error', text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const e164 = toE164(phone);
+  return (
+    <div className="flex flex-col gap-2 border-t border-input pt-3">
+      <b className="text-[15px]">Text-message codes</b>
+      <span className="src">A second way to get your code if your authenticator isn’t handy.</span>
+      {state === null ? null : state.verified && state.phone === e164 && !sent ? (
+        <label className="flex min-h-11 items-center gap-3">
+          <span className="flex-1">
+            Text codes to <b>{state.phone}</b>
+          </span>
+          <input
+            className="switch"
+            type="checkbox"
+            checked={state.on}
+            disabled={busy}
+            onChange={(ev) =>
+              void act(
+                () => setSmsMfa(cfg, token, ev.target.checked),
+                ev.target.checked ? 'Text codes are on.' : 'Text codes are off.',
+              )
+            }
+          />
+        </label>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-2">
+            <Field
+              label="Mobile number"
+              type="tel"
+              autoComplete="tel"
+              placeholder="0412 345 678"
+              value={phone}
+              onChange={(ev) => setPhone(ev.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || !e164}
+              onClick={() =>
+                void act(async () => {
+                  await setPhoneNumber(cfg, token, e164!);
+                  setSent(true);
+                }, 'We’ve texted you a code.')
+              }
+            >
+              Text me a code
+            </Button>
+          </div>
+          {phone && !e164 && (
+            <span className="src">Use an Australian mobile (04…) or a number starting with +.</span>
+          )}
+          {sent && (
+            <div className="flex flex-wrap items-end gap-2">
+              <Field
+                label="Code from the text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChange={(ev) => setCode(ev.target.value.replace(/\D/g, ''))}
+              />
+              <Button
+                size="sm"
+                variant="navy"
+                disabled={busy || code.length !== 6}
+                onClick={() =>
+                  void act(async () => {
+                    await verifyPhone(cfg, token, code);
+                    await setSmsMfa(cfg, token, true);
+                    setSent(false);
+                    setCode('');
+                  }, 'Number confirmed. Text codes are on.')
+                }
+              >
+                Confirm
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
     </div>
   );
 }

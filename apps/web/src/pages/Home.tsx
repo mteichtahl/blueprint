@@ -159,6 +159,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     gigs: 'gigs',
     connectors: 'connectors',
     todos: 'todos',
+    profile: 'profile',
   };
   const [meetingsTarget, setMeetingsTarget] = useState<MeetingsTarget>({ kind: 'list' });
   const openMeetings = (t: MeetingsTarget) => {
@@ -426,6 +427,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
               theme={theme}
               onTheme={setTheme}
               onSignOut={onSignOut}
+              onReauth={onReauth}
               onJobTitle={setJobTitle}
               onAvatar={setAvatar}
             />
@@ -1198,7 +1200,7 @@ type ArtistView =
   | 'stats'
   | 'contacts';
 
-function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
+function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const [avatar, setAvatar] = useState(me.avatar ?? null);
   useOwnAvatar(me.sub, me.artistId, avatar);
@@ -1245,8 +1247,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
           ? link
           : link === 'todos'
             ? 'todo'
-            : link === 'plan'
-              ? 'plan'
+            : link === 'plan' || link === 'profile'
+              ? link
               : 'home',
     );
   });
@@ -1507,6 +1509,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut }: HomeProps) {
           theme={theme}
           onTheme={setTheme}
           onSignOut={onSignOut}
+          onReauth={onReauth}
           onAvatar={setAvatar}
           compact
         />

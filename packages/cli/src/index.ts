@@ -8,6 +8,7 @@ import { doctor } from './commands/doctor.ts';
 import { e2eSetup } from './commands/e2e.ts';
 import { connectorsSetup, connectorsStatus } from './commands/connectors.ts';
 import { emailSetup } from './commands/email.ts';
+import { socialSetup } from './commands/social.ts';
 import { githubConnect, githubProtect } from './commands/github.ts';
 import { init } from './commands/init.ts';
 import { pipelineDeploy } from './commands/pipeline.ts';
@@ -91,6 +92,17 @@ email
   .option('--env <env>', 'staging or prod', 'prod')
   .option('--test-to <address>', 'send a test email after verifying the login')
   .action(wrap((o: { env: string; testTo?: string }) => emailSetup({ ...g(), ...o })));
+
+const socialCmd = program
+  .command('social')
+  .description('Google, Apple and Facebook sign-in (each needs its OAuth app)');
+socialCmd
+  .command('setup <provider>')
+  .description(
+    'store a provider’s OAuth app, turn it on in bmg.config.json, and print its redirect URI',
+  )
+  .option('--env <env>', 'staging or prod', 'prod')
+  .action(wrap((provider: string, o: { env: string }) => socialSetup(provider, { ...g(), ...o })));
 
 const connectorsCmd = program
   .command('connectors')

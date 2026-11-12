@@ -65,21 +65,60 @@ export interface Invite {
 }
 
 /**
- * Invite-only sign-up (design 6.1). Admin-created users come from the invite
- * flow itself. A first federated sign-in needs a pending, unexpired invite for
- * the same email. Anything else is refused.
+ * Nobody signs themselves up (design 6.1): accounts are only made by
+ * Blueprint's invite flow (AdminCreateUser). A social sign-in never makes an
+ * account either: it can only join one Blueprint already made (see
+ * `linkTarget` and the pre sign-up trigger), so it's refused here.
  */
-export function signUpAllowed(
-  source: SignUpSource,
-  invite: Invite | undefined,
-  nowSeconds: number,
-): boolean {
-  if (source === 'PreSignUp_AdminCreateUser') return true;
-  if (source === 'PreSignUp_ExternalProvider') {
-    return !!invite && invite.status === 'pending' && invite.expiresAt > nowSeconds;
-  }
-  return false;
+export function signUpAllowed(source: SignUpSource): boolean {
+  return source === 'PreSignUp_AdminCreateUser';
 }
+
+/** Cognito names a social sign-in user `<provider>_<id>` (e.g. `Google_1234`). */
+export function providerOf(userName: string): { provider: string; id: string } | undefined {
+  const m = /^(Google|SignInWithApple|Facebook)_(.+)$/.exec(userName);
+  return m ? { provider: m[1]!, id: m[2]! } : undefined;
+}
+
+export interface NativeUser {
+  Username?: string;
+  Enabled?: boolean;
+  UserStatus?: string;
+  Attributes?: { Name?: string; Value?: string }[];
+}
+
+/**
+ * Which of the people with this email a social sign-in joins (design D2):
+ * an enabled account of their own (not another social sign-in) whose email
+ * is verified, and only when the provider vouches for the email too.
+ * Facebook only gives verified addresses, so it has no flag.
+ */
+export function linkTarget(
+  users: readonly NativeUser[],
+  provider: string,
+  socialEmailVerified: string | undefined,
+  /** The invitation for this email: an invited account that hasn't signed in yet needs it live. */
+  invite?: Invite,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): string | undefined {
+  if (provider !== 'Facebook' && socialEmailVerified !== 'true') return undefined;
+  const attr = (u: NativeUser, n: string) => u.Attributes?.find((a) => a.Name === n)?.Value;
+  const ok = users.filter(
+    (u) =>
+      u.Enabled !== false &&
+      u.UserStatus !== 'EXTERNAL_PROVIDER' &&
+      !providerOf(u.Username ?? '') &&
+      // An invited artist who hasn't signed in yet: only while the invitation
+      // is live (not revoked or expired). Signed-in accounts need a verified email.
+      (u.UserStatus === 'FORCE_CHANGE_PASSWORD'
+        ? !!invite && invite.status === 'pending' && invite.expiresAt > nowSeconds
+        : attr(u, 'email_verified') === 'true'),
+  );
+  return ok.length === 1 ? ok[0]!.Username : undefined;
+}
+
+/** Tells the app the account was just linked, so it signs in once more straight away. */
+export const LINKED_MARKER = 'BMG_LINKED';
 
 /** Key of the invite item in the main table. Emails are matched case-insensitively. */
 export function inviteKey(email: string): { PK: string; SK: string } {

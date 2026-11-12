@@ -1,19 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Me } from './lib/api.ts';
-import { currentSession, profileOf, refresh, signOut, type Session } from './lib/auth.ts';
+import {
+  currentSession,
+  profileOf,
+  refresh,
+  signOut,
+  storeTokens,
+  type Session,
+} from './lib/auth.ts';
+import { finishSocial, isSocialCallback } from './lib/social.ts';
 import { loadConfig, type AppConfig } from './lib/config.ts';
 import { captureCallback } from './lib/connectors.ts';
 import { Notice, WaveLoader } from './components/ui.tsx';
 import { WhatsNew } from './components/WhatsNew.tsx';
 import { Consent } from './pages/Consent.tsx';
 import { Home } from './pages/Home.tsx';
+import { NewsletterSignup } from './pages/NewsletterSignup.tsx';
 import { SignIn, type SignInReason } from './pages/SignIn.tsx';
 import { StepUp } from './pages/StepUp.tsx';
 
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'signedOut'; cfg: AppConfig; reason?: SignInReason }
+  | { kind: 'signedOut'; cfg: AppConfig; reason?: SignInReason; problem?: string }
+  | { kind: 'public' }
   | { kind: 'ready'; cfg: AppConfig; token: string; me: Me; userName: string };
 
 function nameOf(s: Session): string {
@@ -62,11 +72,22 @@ export function App() {
   useEffect(() => {
     void (async () => {
       try {
+        // The public newsletter sign-up page needs no account.
+        if (/^\/newsletter\/?$/.test(window.location.pathname)) return setState({ kind: 'public' });
         // A connector's sign-in returns here; keep its code for the Connectors page.
         captureCallback();
         const cfg = await loadConfig();
-        // Old hosted-UI links land here; the app signs in on its own screens now.
-        if (/^\/(auth\/callback|signed-out)/.test(window.location.pathname)) {
+        // Back from Google, Apple or Facebook (design D2): swap the code for tokens.
+        const url = new URL(window.location.href);
+        if (isSocialCallback(url)) {
+          window.history.replaceState({}, '', '/');
+          const done = await finishSocial(cfg, url);
+          if ('redirecting' in done) return;
+          if ('error' in done) return setState({ kind: 'signedOut', cfg, problem: done.error });
+          await enter(cfg, await storeTokens(done.tokens));
+          return;
+        }
+        if (/^\/signed-out/.test(window.location.pathname)) {
           window.history.replaceState({}, '', '/');
         }
         await resume(cfg);
@@ -75,7 +96,7 @@ export function App() {
       }
     })();
     return () => clearTimeout(timer.current);
-  }, [resume]);
+  }, [resume, enter]);
 
   if (state.kind === 'loading') {
     return (
@@ -84,6 +105,7 @@ export function App() {
       </div>
     );
   }
+  if (state.kind === 'public') return <NewsletterSignup />;
   if (state.kind === 'error') {
     return (
       <main className="mx-auto max-w-md p-8">
@@ -97,6 +119,7 @@ export function App() {
       <SignIn
         cfg={cfg}
         reason={state.reason}
+        {...(state.problem ? { problem: state.problem } : {})}
         onSignedIn={(session) =>
           void enter(cfg, session).catch((e: Error) =>
             setState({ kind: 'error', message: e.message }),

@@ -16,7 +16,8 @@ export interface AppNotification {
     | 'meeting'
     | 'plan'
     /** An artist's plan, for its Blueprint owner (rev 12). */
-    | 'artistPlan';
+    | 'artistPlan'
+    | 'account';
   title: string;
   body: string;
   link: string;

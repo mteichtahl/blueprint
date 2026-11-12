@@ -111,9 +111,78 @@ export interface Draft {
   editedAt?: string;
   approvedBy?: string;
   approvedAt?: string;
+  /** Sent through Mailchimp (or scheduled, or a campaign made for a test send). */
+  mailchimp?: MailchimpState;
 }
 
 export const DraftEdit = z.object({ sections: Sections }).strict();
+
+/** Where an approved issue is in Mailchimp (the newsletter is sent from there). */
+export interface MailchimpState {
+  campaignId: string;
+  status: 'draft' | 'scheduled' | 'sent';
+  /** When it was sent, or when it's scheduled for. */
+  at?: string;
+  by?: string;
+}
+
+/** Test, send now, or schedule (admins, fresh sign-in). Test can go before approval. */
+export const MailchimpBody = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('test'),
+      emails: z.array(z.email().max(200)).min(1).max(5),
+    })
+    .strict(),
+  z.object({ action: z.literal('send') }).strict(),
+  z.object({ action: z.literal('schedule'), at: z.iso.datetime() }).strict(),
+  z.object({ action: z.literal('unschedule') }).strict(),
+]);
+
+const esc = (s: string) =>
+  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+/**
+ * The issue as email HTML: the same content "Copy as HTML" puts on the
+ * clipboard, in a plain page Mailchimp wraps with the audience's footer
+ * (which carries the unsubscribe link and address it requires).
+ */
+export function issueHtml(d: Pick<Draft, 'title' | 'week' | 'weekOf' | 'sections'>): string {
+  const sec = (title: string, body: string) => (body ? `<h2>${esc(title)}</h2>${body}` : '');
+  const date = new Date(`${d.weekOf}T00:00:00Z`).toLocaleDateString('en-AU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+  const body = [
+    `<h1>${esc(d.title)}</h1><p>Week ${d.week} · ${esc(date)}</p>`,
+    sec(
+      'From Blueprint',
+      d.sections.blueprint
+        .map(
+          (b) =>
+            `${b.heading ? `<h3>${esc(b.heading)}</h3>` : ''}<p>${esc(b.text)}</p>${
+              b.link
+                ? `<p><a href="${esc(b.link)}">${esc(b.linkLabel || 'Find out more')}</a></p>`
+                : ''
+            }`,
+        )
+        .join(''),
+    ),
+    sec('From our artists', d.sections.artists.map((b) => `<p>${esc(b.text)}</p>`).join('')),
+    sec(
+      'Industry news',
+      d.sections.industry
+        .map(
+          (s) =>
+            `<p><b>${esc(s.title)}</b> ${esc(s.summary)} <a href="${esc(s.url)}">Read more</a></p>`,
+        )
+        .join(''),
+    ),
+  ].join('\n');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(d.title)}</title></head><body style="font-family:Arial,Helvetica,sans-serif;color:#011935;max-width:640px;margin:0 auto;padding:16px">${body}</body></html>`;
+}
 
 /** The Monday that starts the week of `d` (ISO week), as YYYY-MM-DD. */
 export function weekOf(d: Date): string {

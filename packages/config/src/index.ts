@@ -23,6 +23,17 @@ const environmentSchema = z.object({
   subdomain: z.string(),
   /** Cognito feature plan for this environment (D3). */
   cognitoPlan: z.enum(['ESSENTIALS', 'PLUS']),
+  /**
+   * Social sign-in providers turned on (design D2). Each needs its OAuth app
+   * registered and its secret in Secrets Manager (`<project>/<env>/social/<provider>`)
+   * before it's listed here: `blueprint social setup`.
+   */
+  socialProviders: z.array(z.enum(['Google', 'Apple', 'Facebook'])).default([]),
+  /**
+   * Text-message codes as a second factor. Needs Amazon SNS out of its SMS
+   * sandbox (production access) for the account and region first.
+   */
+  smsMfa: z.boolean().default(false),
 });
 
 export const BmgConfigSchema = z.object({
@@ -158,6 +169,9 @@ export const names = {
   mailerRole: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}-${env}-mailer`,
   /** Secrets Manager id of the Gmail SMTP credentials for an environment. */
   smtpSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/gmail-smtp`,
+  /** One social sign-in provider's OAuth app (JSON: clientId and clientSecret, or Apple's teamId, keyId, privateKey). */
+  socialSecret: (cfg: BmgConfig, env: EnvironmentName, provider: string) =>
+    `${cfg.project}/${env}/social/${provider.toLowerCase()}`,
   /** Secrets Manager id of the end-to-end test accounts (docs/e2e.md); read by the Staging E2E job. */
   e2eSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/e2e-accounts`,
   /** Secrets Manager id prefix for the connector OAuth apps: `<prefix>/<provider>` (Phase 4). */
