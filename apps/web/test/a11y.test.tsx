@@ -836,7 +836,7 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
 });
 
 describe('WCAG 2.2 AA (axe-core): folders (rev 10)', () => {
-  it('BMG: the library shows folders, and a folder’s Access panel', async () => {
+  it('BMG: the library shows folders, and a folder’s details, Access panel and edit screen', async () => {
     render(<Home {...props('bmg-admin')} />);
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Document library/ })[0]!);
@@ -845,8 +845,16 @@ describe('WCAG 2.2 AA (axe-core): folders (rev 10)', () => {
     expect(screen.getAllByText('Contracts').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /New folder/ })).toBeTruthy();
     expect(await violations()).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: 'More for Contracts' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Access' }));
+    // Rev 13: no ⋯ on folder rows. Open the folder, then Folder details.
+    expect(screen.queryByRole('button', { name: 'More for Contracts' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Contracts/ }).at(-1)!);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Folder details' }));
+    expect(screen.getByRole('heading', { name: 'Folder' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '← Contracts' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /delete/i })).toBeNull();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
     await settle();
     expect(screen.getByRole('dialog', { name: /Access · Contracts/ })).toBeTruthy();
     expect(screen.getByText('Set here')).toBeTruthy();
