@@ -785,6 +785,15 @@ describe('WCAG 2.2 AA (axe-core): more screens and open states', () => {
     expect(screen.getByText('Booked 3 times')).toBeTruthy();
     expect(screen.getByTitle('Map of The Toff in Town')).toBeTruthy();
     expect(await violations()).toEqual([]);
+    // Rev 13: a record page has Edit and no Delete; Delete is on the edit screen.
+    expect(screen.getByRole('button', { name: '← Venues' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull();
+    await click('Edit');
+    expect(screen.getByRole('heading', { name: 'Edit venue' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '← The Toff in Town' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete The Toff in Town' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
   });
 
   it('artist phone: a document’s detail page, then its Edit page (rev 8)', async () => {
