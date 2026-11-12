@@ -30,7 +30,7 @@ import {
 } from '../files/model.ts';
 import { detectFileType } from '../files/type.ts';
 import { artistPk } from '../workspace/model.ts';
-import { db, env } from '../lib.ts';
+import { db, env, publish } from '../lib.ts';
 
 // Checksums only when S3 requires them: the body is a stream of known length.
 const s3 = new S3Client({ requestChecksumCalculation: 'WHEN_REQUIRED' });
@@ -650,6 +650,20 @@ async function settleVersion(
     if ((err as Error).name !== 'ConditionalCheckFailedException') throw err;
     return;
   }
+  // Rev 8: the owner and the chosen editors hear about the new version (the
+  // "new version" email), never the person who uploaded it.
+  const owner = rec.ownerId ?? rec.uploadedBy;
+  await publish('file.versionAdded', {
+    fileId: ref.fileId,
+    scope: ref.scope,
+    ...(ref.scope === 'artist' ? { artistId: ref.artistId } : {}),
+    name: rec.title || pending.name,
+    v: ref.v,
+    uploadedBy: pending.uploadedBy,
+    ownerSub: owner,
+    editorSubs: rec.editAccess === 'chosen' ? (rec.editorIds ?? []) : [],
+    ...(pending.restoredFrom ? { restoredFrom: pending.restoredFrom } : {}),
+  });
   // Beyond the history limit, the oldest versions' bytes go.
   if (dropped.length) {
     const dest = await destination(ref, rec);

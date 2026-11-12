@@ -854,6 +854,9 @@ export class ApiStack extends BmgStack {
           // Rev 12: the 10-minute roll-up schedule, and a plan changing owner.
           'plan.digest',
           'plan.handover',
+          // Rev 8: a new version of a document, and new editors or a new owner.
+          'file.versionAdded',
+          'file.editorsAdded',
         ],
       },
       targets: [

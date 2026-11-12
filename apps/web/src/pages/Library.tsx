@@ -520,12 +520,15 @@ export function ArtistFiles({
   isBmg,
   kind = 'all',
   onOpenChange,
+  openFileId,
 }: {
   cfg: AppConfig;
   token: string;
   artistId: string;
   isBmg: boolean;
   isAdmin?: boolean;
+  /** Open this document's page straight away (a notification or "Where it's used" link). */
+  openFileId?: string | null;
   /** Library type filter: everything, or documents only (assets have their own gallery). */
   kind?: Exclude<LibraryKind, 'assets'>;
   /** A document page opened or closed (so the screen can hide what's around it). */
@@ -539,11 +542,15 @@ export function ArtistFiles({
   const [visibility, setVisibility] = useState('normal');
   const [editAccess, setEditAccess] = useState('owner');
   const [filter, setFilter] = useState<ArtistFilter>('all');
+  const [mine, setMine] = useState<MineFilter>('all');
   // Phones get an "Upload document" button that opens the upload page.
   const phone = usePhone();
   const [uploading, setUploading] = useState(false);
   // The document whose detail (or edit) page is open (rev 8).
   const [opened, setOpened] = useState<FileItem | null>(null);
+  useEffect(() => {
+    if (openFileId) setOpened({ fileId: openFileId } as FileItem);
+  }, [openFileId]);
   useEffect(() => onOpenChange?.(!!opened), [opened, onOpenChange]);
 
   const upload = (
@@ -602,7 +609,7 @@ export function ArtistFiles({
         token={token}
         collection={collection}
         fileId={opened.fileId}
-        initial={opened}
+        initial={opened.displayName ? opened : undefined}
         onBack={() => setOpened(null)}
         onChanged={() => void load()}
         onOpenFolder={(id) => {
@@ -619,12 +626,13 @@ export function ArtistFiles({
         {phone ? <UploadDocumentButton onClick={() => setUploading(true)} /> : upload}
         {error && <Notice tone="error">{error}</Notice>}
         <div className="eyebrow pt-2 text-muted-foreground">My uploads and files</div>
+        <Chips label="Show" value={mine} onChange={setMine} options={MINE_FILTER_OPTIONS} />
         <FolderBrowser
           cfg={cfg}
           token={token}
           collection={collection}
           rootLabel="My library"
-          files={ofKind}
+          files={ofKind && ofKind.filter((f) => MINE_FILTERS[mine].test(f))}
           place={place}
           onPlace={setPlace}
           onChanged={() => void load()}
@@ -686,6 +694,44 @@ export function ArtistFiles({
   );
 }
 
+/**
+ * Rev 8 filters, in every library: documents only their owner can change,
+ * ones used outside chat (they can't be deleted until removed from there),
+ * and the viewer's own.
+ */
+const OWNERSHIP_FILTERS = {
+  locked: { label: 'Locked', test: (f: FileItem) => f.locked },
+  'in-use': { label: 'In use', test: (f: FileItem) => !!f.inUse },
+  mine: { label: 'Owned by me', test: (f: FileItem) => f.ownedByMe },
+} as const;
+
+/** The artist's own Library: everything, or one of the rev 8 filters. */
+const MINE_FILTERS = { all: { label: 'All', test: () => true }, ...OWNERSHIP_FILTERS } as const;
+type MineFilter = keyof typeof MINE_FILTERS;
+const MINE_FILTER_OPTIONS = (Object.keys(MINE_FILTERS) as MineFilter[]).map((id) => ({
+  id,
+  label: MINE_FILTERS[id].label,
+}));
+
+/** Blueprint's library: who it's shared with, or one of the rev 8 filters (no "In use":
+ * library documents are only ever posted in chats, which don't count). */
+const LIBRARY_FILTERS = {
+  all: { label: 'All', test: () => true },
+  'all-artists': { label: 'All artists', test: (f: FileItem) => f.sharing === 'all-artists' },
+  selected: { label: 'Selected artists', test: (f: FileItem) => f.sharing === 'selected' },
+  'bmg-only': {
+    label: 'BMG only',
+    test: (f: FileItem) => (f.sharing ?? 'bmg-only') === 'bmg-only',
+  },
+  locked: OWNERSHIP_FILTERS.locked,
+  mine: OWNERSHIP_FILTERS.mine,
+} as const;
+type LibraryFilter = keyof typeof LIBRARY_FILTERS;
+const LIBRARY_FILTER_OPTIONS = (Object.keys(LIBRARY_FILTERS) as LibraryFilter[]).map((id) => ({
+  id,
+  label: LIBRARY_FILTERS[id].label,
+}));
+
 const ARTIST_FILTERS = {
   all: { label: 'All', test: () => true },
   shared: { label: 'Shared', test: (f: FileItem) => f.visibility === 'normal' },
@@ -693,6 +739,7 @@ const ARTIST_FILTERS = {
   artist: { label: 'From the artist', test: (f: FileItem) => f.uploaderRole === 'artist' },
   bmg: { label: 'From Blueprint', test: (f: FileItem) => f.uploaderRole !== 'artist' },
   scanning: { label: 'Scanning or rejected', test: (f: FileItem) => f.status !== 'available' },
+  ...OWNERSHIP_FILTERS,
 } as const;
 type ArtistFilter = keyof typeof ARTIST_FILTERS;
 const ARTIST_FILTER_OPTIONS = (Object.keys(ARTIST_FILTERS) as ArtistFilter[]).map((id) => ({
@@ -732,9 +779,7 @@ export function Library({
   const inFolder = folderOf(place);
   const [sharing, setSharing] = useState('bmg-only');
   const [editAccess, setEditAccess] = useState('everyone');
-  const [libraryFilter, setLibraryFilter] = useState<
-    'all' | 'all-artists' | 'selected' | 'bmg-only'
-  >('all');
+  const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>('all');
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
   const phone = usePhone();
   const [uploading, setUploading] = useState(false);
@@ -831,9 +876,7 @@ export function Library({
   );
   if (phone && uploading) return uploadBox;
 
-  const visible =
-    files &&
-    files.filter((f) => libraryFilter === 'all' || (f.sharing ?? 'bmg-only') === libraryFilter);
+  const visible = files && files.filter((f) => LIBRARY_FILTERS[libraryFilter].test(f));
   return (
     <div className="flex flex-wrap items-start gap-5">
       <Card
@@ -846,12 +889,7 @@ export function Library({
           label="Quick filters"
           value={libraryFilter}
           onChange={setLibraryFilter}
-          options={[
-            { id: 'all', label: 'All' },
-            { id: 'all-artists', label: 'All artists' },
-            { id: 'selected', label: 'Selected artists' },
-            { id: 'bmg-only', label: 'BMG only' },
-          ]}
+          options={LIBRARY_FILTER_OPTIONS}
         />
         {error && <Notice tone="error">{error}</Notice>}
         <FolderBrowser

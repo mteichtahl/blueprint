@@ -108,6 +108,34 @@ export type DomainEvent =
       reason: string;
     }
   | {
+      /**
+       * A new version of a document is in (rev 8): uploaded and scanned, or an
+       * earlier one brought back. Its owner and chosen editors hear about it.
+       */
+      type: 'file.versionAdded';
+      fileId: string;
+      scope: 'artist' | 'library';
+      artistId?: string;
+      name: string;
+      v: number;
+      uploadedBy: string;
+      ownerSub: string;
+      editorSubs: string[];
+      restoredFrom?: number;
+    }
+  | {
+      /** People given edit access to a document, or handed it (rev 8). */
+      type: 'file.editorsAdded';
+      fileId: string;
+      scope: 'artist' | 'library';
+      artistId?: string;
+      name: string;
+      editorSubs: string[];
+      ownerSub?: string;
+      bySub: string;
+      byName: string;
+    }
+  | {
       /** A meeting's transcript is in, or it couldn't be made (rev 11). Only the recorder hears. */
       type: 'meeting.processed';
       meetingId: string;
@@ -380,18 +408,31 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
     }
     case 'plan.updated':
     case 'plan.ownerChanged':
+    case 'file.versionAdded':
+    case 'file.editorsAdded':
       // Worded per person; see planGroups. This is the first group (the artist, or the new owner).
       return planGroups(e, everyone)[0];
   }
 }
+
+/** A document's own page, for notifications about it (rev 8). */
+export const docLink = (e: { fileId: string; artistId?: string }) =>
+  `doc:${e.artistId ?? 'library'}/${e.fileId}`;
+
+/** Multi-group events: each group is worded for what it means to them. */
+const GROUPED = new Set([
+  'plan.updated',
+  'plan.ownerChanged',
+  'file.versionAdded',
+  'file.editorsAdded',
+]);
 
 /**
  * Every recipient group, each with its own wording (rev 12: a plan update
  * reads differently for the artist and for the plan owner).
  */
 export function planGroups(e: DomainEvent, everyone: Recipient[]): Planned[] {
-  const isPlanEvent = e.type === 'plan.updated' || e.type === 'plan.ownerChanged';
-  if (!isPlanEvent) {
+  if (!GROUPED.has(e.type)) {
     const one = plan(e, everyone);
     return one ? [one] : [];
   }
@@ -432,6 +473,48 @@ export function planGroups(e: DomainEvent, everyone: Recipient[]): Planned[] {
       ];
     }
 
+    case 'file.versionAdded': {
+      const subs = new Set([e.ownerSub, ...e.editorSubs]);
+      subs.delete(e.uploadedBy);
+      return [
+        {
+          to: everyone.filter((r) => subs.has(r.sub)),
+          draft: {
+            kind: 'file',
+            title: `New version of “${e.name}”`,
+            body: e.restoredFrom
+              ? `Version ${e.restoredFrom} was brought back as version ${e.v}.`
+              : `Version ${e.v} is up. Open the document to see it and its history.`,
+            link: docLink(e),
+          },
+        },
+      ];
+    }
+
+    case 'file.editorsAdded': {
+      const notActor = (r: Recipient) => r.sub !== e.bySub;
+      return [
+        {
+          to: everyone.filter((r) => r.sub === e.ownerSub).filter(notActor),
+          draft: {
+            kind: 'file',
+            title: `${e.byName} handed you “${e.name}”`,
+            body: 'You own it now, so you decide who can see it and who can edit it.',
+            link: docLink(e),
+          },
+        },
+        {
+          to: everyone.filter((r) => e.editorSubs.includes(r.sub)).filter(notActor),
+          draft: {
+            kind: 'file',
+            title: `${e.byName} gave you edit access to “${e.name}”`,
+            body: 'You can now rename it and upload new versions.',
+            link: docLink(e),
+          },
+        },
+      ];
+    }
+
     case 'plan.ownerChanged': {
       const to = everyone.find((r) => r.sub === e.toSub && isBmg(r));
       const from = e.fromSub ? everyone.find((r) => r.sub === e.fromSub && isBmg(r)) : undefined;
@@ -462,6 +545,7 @@ export function planGroups(e: DomainEvent, everyone: Recipient[]): Planned[] {
       ];
     }
   }
+  return [];
 }
 
 // ── Preferences (Profile & preferences) ───────────────────────────────────
