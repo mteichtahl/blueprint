@@ -217,7 +217,195 @@ export interface NavItem {
 
 export interface NavSection {
   label?: string;
+  /** A searchable dropdown at the top of the section, in place of one row per option. */
+  picker?: NavPicker;
   items: NavItem[];
+}
+
+export interface NavPicker {
+  /** Names the search box, e.g. "Find an artist workspace". */
+  label: string;
+  /** The trigger's text when none of the options is open. */
+  placeholder: string;
+  options: NavItem[];
+}
+
+/** Every word typed appears in the name, ignoring case and accents. */
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLocaleLowerCase();
+export function matchesWords(name: string, query: string): boolean {
+  const n = fold(name);
+  return fold(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((w) => n.includes(w));
+}
+
+/**
+ * Side menu: one row that opens a search box over the options (the artist
+ * workspaces), instead of a row per artist. Opens in place, so it works the
+ * same in the desktop sidebar and the phone menu.
+ */
+function WorkspacePicker({
+  picker,
+  current,
+  onPick,
+}: {
+  picker: NavPicker;
+  current: string;
+  onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [active, setActive] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const id = `picker-${picker.label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
+  const shown = picker.options.filter((o) => matchesWords(o.label, q));
+  const here = picker.options.find((o) => o.id === current);
+  const waiting = picker.options.reduce(
+    (n, o) => n + (typeof o.badge === 'number' ? o.badge : 0),
+    0,
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    input.current?.focus();
+    const away = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open]);
+  useEffect(() => setActive(0), [q]);
+
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    setQ('');
+    if (refocus) trigger.current?.focus();
+  };
+  const pick = (o: NavItem) => {
+    close(false);
+    onPick(o.id);
+  };
+
+  return (
+    <div ref={root} className="flex flex-col gap-0.5">
+      <button
+        ref={trigger}
+        type="button"
+        className="nav"
+        aria-expanded={open}
+        aria-controls={open ? `${id}-panel` : undefined}
+        aria-current={here ? 'page' : undefined}
+        onClick={() => (open ? close(false) : setOpen(true))}
+      >
+        {here?.avatar ? (
+          <Avatar
+            name={here.avatar}
+            artistId={here.avatarArtistId}
+            size={26}
+            className="!bg-[#F1F4F7] !text-[#011935]"
+          />
+        ) : (
+          <span className="appsq">
+            <Icon name="search" size={14} strokeWidth={2.4} />
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate">{here?.label ?? picker.placeholder}</span>
+        {!here && waiting > 0 && <span className="tag tk">{waiting}</span>}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`flex-none transition-transform ${open ? 'rotate-180' : ''}`}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div id={`${id}-panel`} className="navpicker">
+          <input
+            ref={input}
+            type="search"
+            role="combobox"
+            aria-label={picker.label}
+            aria-expanded="true"
+            aria-controls={shown.length > 0 ? `${id}-list` : undefined}
+            aria-autocomplete="list"
+            aria-activedescendant={shown[active] ? `${id}-${active}` : undefined}
+            placeholder="Type an artist’s name"
+            autoComplete="off"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setActive((i) => Math.min(i + 1, shown.length - 1));
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActive((i) => Math.max(i - 1, 0));
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (shown[active]) pick(shown[active]);
+              } else if (e.key === 'Escape') {
+                // Close the dropdown only, not the phone menu around it.
+                e.preventDefault();
+                e.stopPropagation();
+                e.nativeEvent.stopImmediatePropagation();
+                close(true);
+              }
+            }}
+          />
+          {shown.length > 0 && (
+            <ul
+              id={`${id}-list`}
+              role="listbox"
+              aria-label={picker.label}
+              className="navpicker-list"
+            >
+              {shown.map((o, i) => (
+                <li
+                  key={o.id}
+                  id={`${id}-${i}`}
+                  role="option"
+                  aria-selected={o.id === current}
+                  className={`navpicker-opt ${i === active ? 'navpicker-active' : ''}`}
+                  onMouseEnter={() => setActive(i)}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pick(o)}
+                >
+                  {o.avatar && (
+                    <Avatar
+                      name={o.avatar}
+                      artistId={o.avatarArtistId}
+                      size={24}
+                      className="!bg-[#F1F4F7] !text-[#011935]"
+                    />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                  {o.badge !== undefined && o.badge !== 0 && (
+                    <span className={`tag t${o.badgeTone ?? 'k'}`}>{o.badge}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {shown.length === 0 && (
+            <p className="navpicker-empty" role="status">
+              {picker.options.length === 0 ? 'No artists yet.' : `No artist matches “${q}”.`}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function BmgShell({
@@ -339,9 +527,12 @@ export function BmgShell({
     .filter((section): section is NavSection & { label: string } => !!section.label)
     .map((section) => ({
       label: section.label,
+      picker: section.picker,
       items: section.items.filter((item) => !pinnedIds.has(item.id)),
     }))
-    .filter((section) => section.items.length > 0);
+    .filter((section) => section.items.length > 0 || !!section.picker);
+  const picker = (section: NavSection) =>
+    section.picker && <WorkspacePicker picker={section.picker} current={current} onPick={go} />;
 
   const navButton = (item: NavItem, square: boolean) => (
     <button
@@ -396,7 +587,9 @@ export function BmgShell({
             const isOpen = expanded.has(section.label);
             const id = `nav-${section.label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
             const waiting = section.items.reduce((n, item) => n + (item.urgent?.waiting ?? 0), 0);
-            const here = section.items.some((item) => item.id === current);
+            const here =
+              section.items.some((item) => item.id === current) ||
+              !!section.picker?.options.some((item) => item.id === current);
             return (
               <div key={section.label} className="flex flex-col gap-0.5">
                 <button
@@ -429,6 +622,7 @@ export function BmgShell({
                 </button>
                 {isOpen && (
                   <div id={id} className="flex flex-col gap-0.5">
+                    {picker(section)}
                     {section.items.map((item) => navButton(item, true))}
                   </div>
                 )}
@@ -440,6 +634,7 @@ export function BmgShell({
         sections.map((section, i) => (
           <div key={section.label ?? i} className="flex flex-col gap-0.5">
             {section.label && <div className="navlabel">{section.label}</div>}
+            {picker(section)}
             {section.items.map((item) => navButton(item, !!section.label))}
           </div>
         ))
