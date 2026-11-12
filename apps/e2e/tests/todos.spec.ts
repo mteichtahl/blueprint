@@ -22,8 +22,15 @@ let shared: Todo;
 let bmgOnly: Todo;
 // A week out, so a "1 day before" reminder is still ahead whatever time the run starts.
 const nextWeek = () => new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
-const list = async (as: 'admin' | 'artistOn') =>
-  (await ok<{ todos: Todo[] }>(as, 'GET', `/artists/${artistId}/todos`)).todos;
+/** Open to-dos by default; done ones only with `?filter=done` (as on the screens). */
+const list = async (as: 'admin' | 'artistOn', filter?: 'done') =>
+  (
+    await ok<{ todos: Todo[] }>(
+      as,
+      'GET',
+      `/artists/${artistId}/todos${filter ? `?filter=${filter}` : ''}`,
+    )
+  ).todos;
 
 test.beforeAll(async () => {
   artistId = await artistIdOf('artistOn');
@@ -73,7 +80,9 @@ test('D-06, D-07: the artist and Blueprint talk on the to-do', async () => {
 test('D-08, D-09: the artist marks it done, and not done', async () => {
   const path = `/artists/${artistId}/todos/${shared.todoId}`;
   expect((await ok<Todo>('artistOn', 'PATCH', path, { done: true })).done).toBe(true);
-  expect((await list('admin')).find((t) => t.todoId === shared.todoId)?.done).toBe(true);
+  // Blueprint sees it move from the open list to the done list.
+  expect((await list('admin')).map((t) => t.todoId)).not.toContain(shared.todoId);
+  expect((await list('admin', 'done')).find((t) => t.todoId === shared.todoId)?.done).toBe(true);
   expect((await ok<Todo>('artistOn', 'PATCH', path, { done: false })).done).toBe(false);
   await ok('artistOn', 'PATCH', path, { done: true });
 });
