@@ -1,3 +1,4 @@
+import { BackLink } from '../components/patterns.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
@@ -436,6 +437,7 @@ function SubmissionView({
   artistId,
   submissionId,
   isBmg,
+  backTo,
   onBack,
   onChanged,
 }: {
@@ -444,6 +446,8 @@ function SubmissionView({
   artistId: string;
   submissionId: string;
   isBmg: boolean;
+  /** P8: the page Back goes to ("Review queue", "Submissions"). */
+  backTo: string;
   onBack: () => void;
   onChanged: () => void;
 }) {
@@ -478,9 +482,7 @@ function SubmissionView({
 
   return (
     <div className="space-y-4">
-      <button className="text-sm text-muted-foreground hover:underline" onClick={onBack}>
-        ← Back
-      </button>
+      <BackLink to={backTo} onClick={onBack} />
       <h2 className="font-title text-2xl">{sub.title}</h2>
       {error && <Notice tone="error">{error}</Notice>}
       {!isBmg && sub.changedByBmgAt && open && (
@@ -703,6 +705,7 @@ export function ArtistSubmissions({
         artistId={artistId}
         submissionId={openId}
         isBmg={isBmg}
+        backTo="Submissions"
         onBack={() => setOpenId(null)}
         onChanged={() => void load()}
       />
@@ -796,6 +799,7 @@ export function ReviewQueue({
         artistId={opened.artistId}
         submissionId={opened.submissionId}
         isBmg
+        backTo="Review queue"
         onBack={() => setOpened(null)}
         onChanged={() => {
           void load();

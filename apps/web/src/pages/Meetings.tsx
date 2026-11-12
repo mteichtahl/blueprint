@@ -1,3 +1,4 @@
+import { BackLink, DangerArea, EditScreen } from '../components/patterns.tsx';
 import {
   createContext,
   useCallback,
@@ -1113,6 +1114,7 @@ export function MeetingView({
   const [error, setError] = useState('');
   const [section, pick] = useState<Section>('summary');
   const [picked, setPicked] = useState(false);
+  const [editing, setEditing] = useState(false);
   const setSection = (x: Section) => {
     pick(x);
     setPicked(true);
@@ -1172,6 +1174,16 @@ export function MeetingView({
     { id: 'details', label: 'Details' },
   ];
   const ctx = { cfg, token, meeting: m, content, reload: load, setData, playAt };
+  if (editing) {
+    return (
+      <EditMeeting
+        ctx={ctx}
+        artistName={artist?.displayName}
+        onDone={() => setEditing(false)}
+        onDeleted={onBack}
+      />
+    );
+  }
   // Opens on Details when there's no transcript to make; picking a tab still works.
   const shown: Section =
     transcriptOff && (section === 'transcript' || (section === 'summary' && !picked))
@@ -1181,11 +1193,14 @@ export function MeetingView({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <Icon name="back" size={16} /> Meetings
-        </Button>
+        <BackLink to="Meetings" onClick={onBack} />
         <Tag tone={statusLabel(m)[0]}>{statusLabel(m)[1]}</Tag>
         {m.shared && <Tag tone="n">Shared with {artist?.displayName ?? 'the artist'}</Tag>}
+        <span className="ml-auto">
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+            <Icon name="pencil" size={16} /> Edit details
+          </Button>
+        </span>
       </div>
       <Card
         title={<h2 className="t text-[24px]">{m.title}</h2>}
@@ -1234,9 +1249,7 @@ export function MeetingView({
       {shown === 'plan' && (
         <PlanSection {...ctx} artistName={artist?.displayName ?? 'the artist'} />
       )}
-      {shown === 'details' && (
-        <DetailsSection {...ctx} artistName={artist?.displayName} onDeleted={onBack} />
-      )}
+      {shown === 'details' && <DetailsSection {...ctx} artistName={artist?.displayName} />}
     </div>
   );
 }
@@ -2553,38 +2566,9 @@ function SuggestionCard({
 }
 
 // ── Details (spec 5.3, 9) ──
-function DetailsSection(ctx: Ctx & { artistName?: string; onDeleted: () => void }) {
+/** Read only (rev 13): sharing, the title and Delete are on Edit details. */
+function DetailsSection(ctx: Ctx & { artistName?: string }) {
   const { meeting: m, artistName } = ctx;
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [confirm, setConfirm] = useState(false);
-  const share = async (shared: boolean) => {
-    setBusy(true);
-    setError('');
-    try {
-      await patchMeeting(ctx.cfg, ctx.token, m, { shared });
-      await ctx.reload();
-    } catch (e) {
-      setError(problemText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const remove = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      // The recording and note are documents: delete them where allowed, then the meeting.
-      for (const id of [m.noteFileId, m.audioFileId]) {
-        if (id) await api(ctx.cfg, ctx.token, 'DELETE', filePath(m, id)).catch(() => undefined);
-      }
-      await api(ctx.cfg, ctx.token, 'DELETE', meetingPath(m));
-      ctx.onDeleted();
-    } catch (e) {
-      setError(problemText(e));
-      setBusy(false);
-    }
-  };
   return (
     <Card title="Details">
       <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2">
@@ -2610,46 +2594,101 @@ function DetailsSection(ctx: Ctx & { artistName?: string; onDeleted: () => void 
             .join(' and ') || 'None yet'}
         </dd>
       </dl>
-      {m.artistId && (
-        <div>
-          <Button variant="ghost" disabled={busy} onClick={() => void share(!m.shared)}>
-            {m.shared
-              ? `Stop sharing with ${artistName ?? 'the artist'}`
-              : `Share with ${artistName ?? 'the artist'}`}
-          </Button>
-        </div>
-      )}
-      {error && <Notice tone="error">{error}</Notice>}
-      {m.canDelete && (
-        <div className="mt-2 flex flex-col gap-2 rounded-lg border border-[#D9534F] p-3">
-          <b>Delete meeting</b>
-          <span className="src">
-            Deletes the meeting, its transcript and summaries, and the recording and note where you
-            may delete them. A Blueprint admin can recover the files for 35 days.
-          </span>
-          {m.undoUntil && Date.parse(m.undoUntil) > Date.now() ? (
-            <span className="src">
-              Its plan update can be undone until {shortDate(m.undoUntil)}; delete it after that.
-            </span>
-          ) : confirm ? (
-            <div className="flex gap-2">
-              <Button variant="cta" disabled={busy} onClick={() => void remove()}>
-                Yes, delete
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirm(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <div>
-              <Button variant="ghost" onClick={() => setConfirm(true)}>
-                <Icon name="trash" size={16} /> Delete meeting
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
     </Card>
+  );
+}
+
+/** Edit details (rev 13, P4): the title and sharing, then Delete in the danger area. */
+function EditMeeting({
+  ctx,
+  artistName,
+  onDone,
+  onDeleted,
+}: {
+  ctx: Ctx;
+  artistName?: string | undefined;
+  onDone: () => void;
+  onDeleted: () => void;
+}) {
+  const { meeting: m } = ctx;
+  const [title, setTitle] = useState(m.title);
+  const [shared, setShared] = useState(m.shared);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const who = artistName ?? 'the artist';
+  const undoOpen = !!m.undoUntil && Date.parse(m.undoUntil) > Date.now();
+  const changed = title.trim() !== m.title || shared !== m.shared;
+  return (
+    <EditScreen
+      title="Edit meeting"
+      back={{ to: m.title, onClick: onDone }}
+      busy={busy}
+      error={error || null}
+      canSave={!!title.trim() && changed}
+      onCancel={onDone}
+      onSave={async () => {
+        setBusy(true);
+        setError('');
+        try {
+          await patchMeeting(ctx.cfg, ctx.token, m, {
+            ...(title.trim() !== m.title ? { title: title.trim() } : {}),
+            ...(shared !== m.shared ? { shared } : {}),
+          });
+          await ctx.reload();
+          onDone();
+        } catch (e) {
+          setError(problemText(e));
+        } finally {
+          setBusy(false);
+        }
+      }}
+      danger={
+        m.canDelete && (
+          <DangerArea
+            title="Delete meeting"
+            what="Deletes the meeting, its transcript and summaries, and the recording and note where you may delete them. A Blueprint admin can recover the files for 35 days."
+            blocked={
+              undoOpen
+                ? {
+                    reason: `Its plan update can be undone until ${shortDate(m.undoUntil!)}; delete it after that.`,
+                  }
+                : null
+            }
+            onConfirm={async () => {
+              try {
+                // The recording and note are documents: delete them where allowed, then the meeting.
+                for (const id of [m.noteFileId, m.audioFileId]) {
+                  if (id)
+                    await api(ctx.cfg, ctx.token, 'DELETE', filePath(m, id)).catch(() => undefined);
+                }
+                await api(ctx.cfg, ctx.token, 'DELETE', meetingPath(m));
+              } catch (e) {
+                throw new Error(problemText(e), { cause: e });
+              }
+              onDeleted();
+            }}
+          />
+        )
+      }
+    >
+      <Field
+        label="Title"
+        value={title}
+        maxLength={200}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      {m.artistId && (
+        <label className="flex min-h-9 items-center gap-2.5 text-[15px]">
+          <input
+            type="checkbox"
+            className="chk"
+            checked={shared}
+            onChange={(e) => setShared(e.target.checked)}
+          />
+          Share with {who}
+        </label>
+      )}
+    </EditScreen>
   );
 }
 
