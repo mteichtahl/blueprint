@@ -17,9 +17,7 @@ describe('invitation status', () => {
     expect(hasSignedIn({ userStatus: 'EXTERNAL_PROVIDER' })).toBe(true);
     expect(invitationStatus(pending, { userStatus: 'CONFIRMED' }, NOW)).toBe('accepted');
     // Recorded as accepted: stays accepted.
-    expect(invitationStatus({ status: 'accepted', expiresAt: 0 }, undefined, NOW)).toBe(
-      'accepted',
-    );
+    expect(invitationStatus({ status: 'accepted', expiresAt: 0 }, undefined, NOW)).toBe('accepted');
   });
 
   it('is pending until it expires, and revoked when revoked', () => {
