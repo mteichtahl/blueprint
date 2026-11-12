@@ -12,7 +12,52 @@ How to release (see `docs/releases.md`):
 2. Write the summary and bullets for artists and the Blueprint team: what
    changed for them, not how it was built.
 3. Commit both files with the change and merge to `main`. Staging (beta)
-   shows `beta-X.Y.Z`; production shows `X.Y.Z` after approval.
+   shows `beta-X.Y.Z`. Later PRs add bullets to the same section.
+4. `blueprint release ship` sends it to production as `X.Y.Z`. After that,
+   the next PR must start a new release (CI checks that `VERSION` is newer
+   than production's).
+
+## 1.6.0 — 2026-11-12
+
+Every screen now works the same way: tap a row to open it, then act on it.
+Plus invitation tracking, finished reviews, and a smarter library.
+
+### New
+
+- **Invitations** are listed under Invite artist, showing whether each is
+  waiting, expired, accepted or revoked. Open one to **Resend** or
+  **Revoke** it. The invitation email now explains the website, installing
+  the app and the first sign-in.
+- **Reviews have an end.** Blueprint presses **Complete review** (or leaves
+  it ticked when sending feedback), and whoever asked for the review is told.
+- **Library filters:** Locked, In use and Owned by me. Each "Where it's
+  used" entry opens the chat, submission, brand kit or asset library it
+  points to.
+- **New-version emails:** a document's owner and editors hear when a new
+  version is added or an old one brought back, and new editors hear they
+  were added.
+
+### Improved
+
+- **Tap the whole row** to open a gig, folder, contact, venue, to-do or
+  plan stage. Edit buttons and ⋯ menus have gone from the lists.
+- **One way to edit:** gigs, events, meetings, folders, contacts, venues and
+  plan parts open first, then **Edit details** opens its own screen with
+  Save and Cancel. The plan no longer has an edit mode.
+- **Deleting, archiving and removing** always sit in one marked area at the
+  bottom of the edit screen.
+- **Back links say where they go**, such as "← Review queue".
+- A gig opens one page with its help, checklist, money and photos.
+- A to-do opens to show **Mark done**, Edit details and its conversation.
+- In a workspace, **Work** is now To-dos · Submissions · Gigs, and **Plan**
+  is Outcome · Stages · Timeline · History.
+- Picking a chat on the overview's Chat card opens that conversation.
+- The waveform logo shows while things load, instead of "Loading…".
+
+### Fixed
+
+- On phones, the chat message box stays at the bottom when the keyboard
+  opens, instead of being pushed off screen.
 
 ## 1.5.1 — 2026-11-11
 

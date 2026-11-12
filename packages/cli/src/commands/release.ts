@@ -144,6 +144,13 @@ export async function releaseShip(opts: GlobalOptions & { sha?: string }): Promi
     existingTags: (await git(['tag', '--list', 'v*'])).split('\n').filter(Boolean),
     onMain,
     changes,
+    ...(prodSha
+      ? {
+          productionVersion: (
+            await run('git', ['show', `${prodSha}:VERSION`], { capture: true, allowFailure: true })
+          ).stdout,
+        }
+      : {}),
   });
 
   log(`  Release ${plan.version} (${plan.tag}) at ${sha.slice(0, 7)}`);

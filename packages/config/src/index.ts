@@ -158,6 +158,8 @@ export const names = {
   mailerRole: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}-${env}-mailer`,
   /** Secrets Manager id of the Gmail SMTP credentials for an environment. */
   smtpSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/gmail-smtp`,
+  /** Secrets Manager id of the end-to-end test accounts (docs/e2e.md); read by the Staging E2E job. */
+  e2eSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/e2e-accounts`,
   /** Secrets Manager id prefix for the connector OAuth apps: `<prefix>/<provider>` (Phase 4). */
   connectorSecretPrefix: (cfg: BmgConfig, env: EnvironmentName) =>
     `${cfg.project}/${env}/connectors`,
