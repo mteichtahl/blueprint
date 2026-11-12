@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { BackLink, WorkPage, WorkSection } from '../components/patterns.tsx';
 import { api, type ArtistSummary } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
@@ -446,10 +447,168 @@ const matches = (g: Gig, f: Filter) =>
   f === 'help' ? g.help?.status === 'open' : f === 'past' ? isPast(g) : !isPast(g);
 
 /**
- * Workspace Gigs tab (BMG): the stats, the gig list and "Add a gig". No gig detail on
- * the page: opening a gig (row or Edit) opens its editor, with the help request,
- * checklist and money underneath while it is open.
+ * The gig page (rev 13, P3 work page): the work on a gig happens here, on
+ * every screen (workspace Gigs, BMG Artist gigs, the artist's My gigs). The
+ * help request, checklist, money and photos sit in sections and save as they
+ * go; the gig's own fields sit behind Edit details. Gigs aren't deleted (set
+ * the status to Cancelled), so there's no danger area.
  */
+function GigPage({
+  cfg,
+  token,
+  gig,
+  isArtist,
+  artistName,
+  back,
+  more,
+  onChanged,
+  onPatch,
+}: {
+  cfg: AppConfig;
+  token: string;
+  gig: Gig;
+  isArtist: boolean;
+  artistName: string;
+  back: { to: string; onClick: () => void };
+  /** Extra header actions (Open the artist's workspace). */
+  more?: ReactNode;
+  /** After any change: reload the list the gig came from. */
+  onChanged: () => Promise<void> | void;
+  onPatch: (body: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const first = artistName.split(' ')[0];
+  const phone = usePhone();
+  useEffect(() => {
+    if (phone) window.scrollTo?.({ top: 0 });
+  }, [phone, editing]);
+  if (editing) {
+    return (
+      <Card
+        title={<h2 className="t text-[19px]">Edit gig</h2>}
+        action={<BackLink to={gig.title} onClick={() => setEditing(false)} />}
+      >
+        <GigForm
+          cfg={cfg}
+          token={token}
+          artistId={gig.artistId}
+          gig={gig}
+          isArtist={isArtist}
+          onCancel={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setSaved(isArtist ? 'Saved.' : `Saved. ${first} can see the change.`);
+            void onChanged();
+          }}
+        />
+      </Card>
+    );
+  }
+  const [tone, label] = STATUS[gig.status];
+  const helpOpen = gig.help?.status === 'open';
+  return (
+    <WorkPage
+      kind="Gig"
+      title={gig.title}
+      lead={<DateBlock date={gig.date} />}
+      sub={[
+        longDate(gig.date),
+        timeRange(gig.startTime, gig.endTime),
+        gig.venue,
+        gig.deal !== 'tbc' ? dealLabel(gig) : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')}
+      badges={
+        <>
+          <Tag tone={tone}>{label}</Tag>
+          {helpOpen && <Tag tone="k">{helpLabel(gig)}</Tag>}
+          {isArtist && !gig.shared && <Tag tone="s">Not shared</Tag>}
+          {gig.plannedBy === 'bmg' && <Tag tone="n">Added by Blueprint</Tag>}
+        </>
+      }
+      back={back}
+      onEdit={() => {
+        setSaved(null);
+        setEditing(true);
+      }}
+      more={more}
+    >
+      {saved && <Notice tone="success">{saved}</Notice>}
+      {gig.notes && <p className="m-0 whitespace-pre-line">{gig.notes}</p>}
+      {gig.ticketUrl && (
+        <a href={gig.ticketUrl} target="_blank" rel="noreferrer" className="w-fit">
+          Tickets
+        </a>
+      )}
+      {helpOpen &&
+        (isArtist ? (
+          <WorkSection title="Help from Blueprint">
+            <p className="m-0 text-sm font-bold text-[#8E2F2C]">
+              You asked for help with {helpLabel(gig).toLowerCase()}. Blueprint is on it.
+            </p>
+          </WorkSection>
+        ) : (
+          <HelpCard
+            cfg={cfg}
+            token={token}
+            gig={gig}
+            artistName={artistName}
+            onDone={() => void onPatch({ helpDone: true })}
+          />
+        ))}
+      {gig.checklist.length > 0 && (
+        <WorkSection
+          title={`Checklist · ${done(gig)}`}
+          action={
+            <span className="src">
+              {gig.plannedBy === 'artist' ? (isArtist ? 'Yours' : `${first}'s`) : 'Blueprint'}
+            </span>
+          }
+        >
+          <Checklist gig={gig} onPatch={(b) => void onPatch(b)} />
+        </WorkSection>
+      )}
+      <WorkSection title="Tickets, takings and profit">
+        <MoneyEditor
+          key={gig.gigId}
+          value={gig.money}
+          onSave={async (money) => {
+            await api(cfg, token, 'PATCH', `/artists/${gig.artistId}/gigs/${gig.gigId}`, {
+              money,
+            });
+            await onChanged();
+          }}
+        />
+      </WorkSection>
+      <div className="border-t border-input pt-4">
+        <GigMedia cfg={cfg} token={token} artistId={gig.artistId} gigId={gig.gigId} />
+      </div>
+    </WorkPage>
+  );
+}
+
+/** Adding a gig: the form on its own page, with Back to the list. */
+function NewGig({
+  title,
+  back,
+  ...form
+}: {
+  title: string;
+  back: { to: string; onClick: () => void };
+} & Parameters<typeof GigForm>[0]) {
+  return (
+    <Card
+      title={<h2 className="t text-[19px]">{title}</h2>}
+      action={<BackLink to={back.to} onClick={back.onClick} />}
+    >
+      <GigForm {...form} />
+    </Card>
+  );
+}
+
+/** Workspace Gigs tab (BMG): the stats, the gig list and "Add a gig". A row opens the gig page. */
 export function GigsTab({
   cfg,
   token,
@@ -462,8 +621,7 @@ export function GigsTab({
   const { gigs, error, load, patch } = useGigs(cfg, token, `/artists/${artist.artistId}/gigs`);
   const [filter, setFilter] = useState<Filter>('upcoming');
   const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const first = artist.displayName.split(' ')[0];
   const all = gigs ?? [];
   const played = all.filter((g) => g.status === 'played').length;
@@ -471,94 +629,38 @@ export function GigsTab({
   const helping = all.filter((g) => g.help?.status === 'open');
   const byArtist = all.filter((g) => g.plannedBy === 'artist').length;
   // Read the gig from the latest list so checklist, money and help changes show at once.
-  const editing = all.find((g) => g.gigId === editingId) ?? null;
-  const close = () => {
-    setAdding(false);
-    setEditingId(null);
-  };
-  const edit = (g: Gig) => {
-    setAdding(false);
-    setSaved(null);
-    setEditingId(g.gigId);
-  };
-  // On a phone, adding or editing a gig is its own page, not a form above the list.
-  const phone = usePhone();
-  const formOpen = adding || !!editing;
-  useEffect(() => {
-    if (phone && formOpen) window.scrollTo?.({ top: 0 });
-  }, [phone, formOpen, editingId]);
+  const open = all.find((g) => g.gigId === openId) ?? null;
+  const toList = { to: 'Gigs', onClick: () => setOpenId(null) };
 
-  const form = formOpen && (
-    <div
-      className={
-        phone ? 'flex flex-col gap-4' : 'flex flex-col gap-4 rounded-lg border border-input p-4'
-      }
-    >
-      <GigForm
-        key={editing?.gigId ?? 'new'}
+  if (open) {
+    return (
+      <GigPage
+        cfg={cfg}
+        token={token}
+        gig={open}
+        isArtist={false}
+        artistName={artist.displayName}
+        back={toList}
+        onChanged={load}
+        onPatch={(b) => patch(open, b)}
+      />
+    );
+  }
+  if (adding) {
+    return (
+      <NewGig
+        title={`Add a gig for ${first}`}
+        back={{ to: 'Gigs', onClick: () => setAdding(false) }}
         cfg={cfg}
         token={token}
         artistId={artist.artistId}
-        {...(editing ? { gig: editing } : {})}
         isArtist={false}
-        onCancel={close}
+        onCancel={() => setAdding(false)}
         onSaved={() => {
-          setSaved(editing ? `Saved ${editing.title}. ${first} can see the change.` : null);
-          close();
+          setAdding(false);
           void load();
         }}
       />
-      {editing?.help?.status === 'open' && (
-        <HelpCard
-          cfg={cfg}
-          token={token}
-          gig={editing}
-          artistName={artist.displayName}
-          onDone={() => void patch(editing, { helpDone: true })}
-        />
-      )}
-      {editing && editing.checklist.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <span className="eyebrow">
-            Gig checklist ({editing.plannedBy === 'artist' ? `${first}'s` : 'Blueprint'})
-          </span>
-          <Checklist gig={editing} onPatch={(b) => void patch(editing, b)} />
-        </div>
-      )}
-      {editing && (
-        <div className="flex flex-col gap-2">
-          <b className="text-[15px]">Tickets, takings and profit</b>
-          <MoneyEditor
-            key={editing.gigId}
-            value={editing.money}
-            onSave={async (money) => {
-              await api(cfg, token, 'PATCH', `/artists/${editing.artistId}/gigs/${editing.gigId}`, {
-                money,
-              });
-              await load();
-            }}
-          />
-        </div>
-      )}
-      {editing && (
-        <GigMedia cfg={cfg} token={token} artistId={editing.artistId} gigId={editing.gigId} />
-      )}
-    </div>
-  );
-
-  if (phone && formOpen) {
-    return (
-      <Card
-        title={editing ? `Edit ${editing.title}` : `Add a gig for ${first}`}
-        action={
-          <Button size="sm" variant="ghost" onClick={close}>
-            ← Gigs
-          </Button>
-        }
-      >
-        {error && <Notice tone="error">{error}</Notice>}
-        {form}
-      </Card>
     );
   }
 
@@ -592,33 +694,19 @@ export function GigsTab({
         action={
           <>
             <Chips label="Filter gigs" value={filter} onChange={setFilter} options={FILTERS} />
-            <Button
-              size="sm"
-              variant="cta"
-              onClick={() => {
-                setEditingId(null);
-                setSaved(null);
-                setAdding(true);
-              }}
-            >
+            <Button size="sm" variant="cta" onClick={() => setAdding(true)}>
               Add a gig for {first}
             </Button>
           </>
         }
       >
-        {saved && <Notice tone="success">{saved}</Notice>}
-        {form}
         {gigs === null ? (
           <WaveLoader />
         ) : (
           <GigTable
             gigs={all.filter((g) => matches(g, filter))}
             artistName={first}
-            {...(editingId ? { selected: editingId } : {})}
-            onOpen={(gigId) => {
-              const g = all.find((x) => x.gigId === gigId);
-              if (g) edit(g);
-            }}
+            onOpen={(gigId) => setOpenId(gigId)}
             empty={`No ${filter === 'help' ? 'help requests' : `${filter} gigs`} for ${first} yet.`}
           />
         )}
@@ -738,51 +826,32 @@ export function AllGigs({
   onOpenArtist: (artistId: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>('help');
-  const { gigs, error, load } = useGigs(cfg, token, `/gigs?filter=${filter}`);
-  const [editing, setEditing] = useState<Gig | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
+  const { gigs, error, load, patch } = useGigs(cfg, token, `/gigs?filter=${filter}`);
+  // Keep the last copy: a change (help done) can move the gig out of this filter.
+  const [openGig, setOpenGig] = useState<Gig | null>(null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
-  const phone = usePhone();
-  useEffect(() => {
-    if (phone && editing) window.scrollTo?.({ top: 0 });
-  }, [phone, editing]);
-  const form = editing && (
-    <div className="flex flex-col gap-4">
-      <span>
-        <Button size="sm" variant="ghost" onClick={() => onOpenArtist(editing.artistId)}>
-          Open {names[editing.artistId] ?? 'the artist'}’s workspace
-        </Button>
-      </span>
-      <GigForm
-        key={editing.gigId}
+  const open = openGig ? (gigs?.find((g) => g.gigId === openGig.gigId) ?? openGig) : null;
+  if (open) {
+    const name = names[open.artistId] ?? 'Artist';
+    return (
+      <GigPage
         cfg={cfg}
         token={token}
-        artistId={editing.artistId}
-        gig={editing}
+        gig={open}
         isArtist={false}
-        onCancel={() => setEditing(null)}
-        onSaved={() => {
-          setSaved(`Saved ${editing.title}.`);
-          setEditing(null);
-          void load();
-        }}
-      />
-      <GigMedia cfg={cfg} token={token} artistId={editing.artistId} gigId={editing.gigId} />
-    </div>
-  );
-  // On a phone, editing a gig is its own page, not a form above the list.
-  if (phone && editing) {
-    return (
-      <Card
-        title={`Edit ${editing.title}`}
-        action={
-          <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-            ← Artist gigs
+        artistName={name}
+        back={{ to: 'Artist gigs', onClick: () => setOpenGig(null) }}
+        more={
+          <Button variant="ghost" onClick={() => onOpenArtist(open.artistId)}>
+            {name.split(' ')[0]}’s workspace
           </Button>
         }
-      >
-        {form}
-      </Card>
+        onChanged={load}
+        onPatch={async (b) => {
+          await patch(open, b);
+          setOpenGig({ ...open, ...(b as Partial<Gig>) });
+        }}
+      />
     );
   }
   return (
@@ -791,18 +860,13 @@ export function AllGigs({
       action={<Chips label="Filter gigs" value={filter} onChange={setFilter} options={FILTERS} />}
     >
       {error && <Notice tone="error">{error}</Notice>}
-      {saved && <Notice tone="success">{saved}</Notice>}
-      {form}
       {gigs === null ? (
         <WaveLoader />
       ) : (
         <GigTable
           gigs={gigs}
           names={names}
-          onOpen={(gigId) => {
-            setSaved(null);
-            setEditing(gigs.find((g) => g.gigId === gigId) ?? null);
-          }}
+          onOpen={(gigId) => setOpenGig(gigs.find((g) => g.gigId === gigId) ?? null)}
           empty={
             filter === 'help'
               ? 'No artist is asking for help right now.'
@@ -815,7 +879,7 @@ export function AllGigs({
   );
 }
 
-/** Artist app: My gigs (cards by date) and Plan a gig. */
+/** Artist app: My gigs (cards by date), Plan a gig, and each gig's page. */
 export function ArtistGigs({
   cfg,
   token,
@@ -827,70 +891,44 @@ export function ArtistGigs({
 }) {
   const { gigs, error, load, patch } = useGigs(cfg, token, `/artists/${artistId}/gigs`);
   const [view, setView] = useState<'upcoming' | 'ideas' | 'past'>('upcoming');
-  const [editing, setEditing] = useState<Gig | 'new' | null>(null);
+  const [opened, setOpened] = useState<string | 'new' | null>(null);
   const all = gigs ?? [];
   const ideas = all.filter((g) => g.status === 'idea' && !isPast(g));
   const upcoming = all.filter((g) => g.status !== 'idea' && !isPast(g));
   const past = all.filter(isPast).reverse();
   const shown = view === 'ideas' ? ideas : view === 'past' ? past : upcoming;
+  const toList = { to: 'My gigs', onClick: () => setOpened(null) };
 
-  if (editing) {
-    const gig = editing === 'new' ? undefined : editing;
+  if (opened === 'new') {
     return (
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-            ← My gigs
-          </Button>
-        </div>
-        <h2 className="t text-[22px]">{gig ? gig.title : 'Plan a gig'}</h2>
-        <GigForm
-          cfg={cfg}
-          token={token}
-          artistId={artistId}
-          gig={gig}
-          isArtist
-          onCancel={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            void load();
-          }}
-        />
-        {gig && (
-          <div className="card !gap-2 !p-3">
-            <b className="text-[15px]">Tickets, takings and profit</b>
-            <MoneyEditor
-              key={gig.gigId}
-              value={gig.money}
-              onSave={async (money) => {
-                await api(cfg, token, 'PATCH', `/artists/${artistId}/gigs/${gig.gigId}`, {
-                  money,
-                });
-                setEditing({ ...gig, money });
-                await load();
-              }}
-            />
-          </div>
-        )}
-        {gig && gig.checklist.length > 0 && (
-          <div className="card !gap-0.5 !p-3">
-            <b className="text-[15px]">Checklist</b>
-            <Checklist
-              gig={gig}
-              onPatch={(b) =>
-                void patch(gig, b).then((ok) =>
-                  ok ? setEditing({ ...gig, ...(b as Partial<Gig>) }) : undefined,
-                )
-              }
-            />
-          </div>
-        )}
-        {gig && (
-          <div className="card !p-3">
-            <GigMedia cfg={cfg} token={token} artistId={artistId} gigId={gig.gigId} />
-          </div>
-        )}
-      </div>
+      <NewGig
+        title="Plan a gig"
+        back={toList}
+        cfg={cfg}
+        token={token}
+        artistId={artistId}
+        isArtist
+        onCancel={() => setOpened(null)}
+        onSaved={() => {
+          setOpened(null);
+          void load();
+        }}
+      />
+    );
+  }
+  const open = opened ? all.find((g) => g.gigId === opened) : undefined;
+  if (open) {
+    return (
+      <GigPage
+        cfg={cfg}
+        token={token}
+        gig={open}
+        isArtist
+        artistName="You"
+        back={toList}
+        onChanged={load}
+        onPatch={(b) => patch(open, b)}
+      />
     );
   }
 
@@ -918,7 +956,7 @@ export function ArtistGigs({
           ))}
         </div>
       </div>
-      <Button variant="cta" onClick={() => setEditing('new')}>
+      <Button variant="cta" onClick={() => setOpened('new')}>
         Plan a gig
       </Button>
       {error && <Notice tone="error">{error}</Notice>}
@@ -933,7 +971,7 @@ export function ArtistGigs({
         </p>
       )}
       {shown.map((g) => (
-        <GigCard key={g.gigId} gig={g} onOpen={() => setEditing(g)} />
+        <GigCard key={g.gigId} gig={g} onOpen={() => setOpened(g.gigId)} />
       ))}
       <p className="src leading-snug">
         Gigs you share with Blueprint show up in your workspace for the team, so they can help with
