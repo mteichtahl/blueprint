@@ -1262,6 +1262,23 @@ html {
     background: #011935;
     color: #f1f4f7;
   }
+  /* Team chats (rev 14): Blueprint-only groups and the TEAM tag, in Headliner lilac with navy text. */
+  .wa-av-team {
+    background: var(--color-lilac);
+    color: #011935;
+  }
+  .wa-teamtag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--color-lilac);
+    color: #011935;
+    font: 700 10.5px var(--font-sans);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: 1px;
+  }
   .wa-av-act {
     width: 48px;
     height: 48px;
