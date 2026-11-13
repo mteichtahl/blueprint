@@ -423,6 +423,43 @@ export const AddMembers = z
   .object({ artistIds: z.array(ArtistId).min(1, 'Pick an artist').max(100) })
   .strict();
 
+/** The four quick reactions, in the order the bar shows them (rev 14). */
+export const QUICK_REACTIONS = ['👍', '👎', '😊', '😢'] as const;
+export type QuickReaction = (typeof QUICK_REACTIONS)[number];
+
+/** Stored on the message item: one entry per person (Cognito sub). */
+export type StoredReactions = Record<string, { e: QuickReaction; n: string; at: string }>;
+
+export interface ReactionCount {
+  emoji: QuickReaction;
+  count: number;
+  mine: boolean;
+  /** Who reacted, for the tooltip ("You" for the viewer). */
+  names: string[];
+}
+
+/** Groups a message's reactions for one viewer, in bar order, skipping empty ones. */
+export function reactionSummary(
+  stored: StoredReactions | undefined,
+  viewerSub: string,
+): ReactionCount[] {
+  if (!stored) return [];
+  const out: ReactionCount[] = [];
+  for (const emoji of QUICK_REACTIONS) {
+    const who = Object.entries(stored)
+      .filter(([, r]) => r.e === emoji)
+      .sort(([, a], [, b]) => a.at.localeCompare(b.at));
+    if (!who.length) continue;
+    out.push({
+      emoji,
+      count: who.length,
+      mine: who.some(([sub]) => sub === viewerSub),
+      names: who.map(([sub, r]) => (sub === viewerSub ? 'You' : r.n)),
+    });
+  }
+  return out;
+}
+
 /** Team groups (rev 14): add staff. */
 export const AddStaff = z
   .object({ staffSubs: z.array(StaffSub).min(1, 'Pick a team member').max(MAX_STAFF_GROUP) })
@@ -438,6 +475,15 @@ export const UpdateMine = z
     archived: z.boolean().optional(),
     clear: z.literal(true).optional(),
     star: z.object({ messageId: z.string().uuid(), starred: z.boolean() }).strict().optional(),
+    /** Quick reaction on a message; `null` takes yours off. One per person per message. */
+    react: z
+      .object({
+        messageId: z.string().uuid(),
+        createdAt: z.string().datetime(),
+        emoji: z.enum(QUICK_REACTIONS).nullable(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, 'Nothing to change');
