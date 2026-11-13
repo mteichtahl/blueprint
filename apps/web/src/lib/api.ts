@@ -6,9 +6,22 @@ export class ApiError extends Error {
     message: string,
     /** The parsed response body, e.g. the existing contact on a 409. */
     readonly data?: unknown,
+    /** The server wants a sign-in in the last 5 minutes before this action (design 6.3). */
+    readonly reauth = false,
   ) {
     super(message);
   }
+}
+
+/** Fired on `window` whenever an action is refused for want of a recent sign-in. */
+export const REAUTH_EVENT = 'bmg:reauth-needed';
+
+/** What people see instead of the server's "… needs a fresh step-up". */
+export const REAUTH_MESSAGE = 'For security, sign in again, then try that again.';
+
+/** True when the error means "sign in again, then retry" (admin actions, recovery codes). */
+export function needsFreshSignIn(e: unknown): boolean {
+  return e instanceof ApiError && e.reauth;
 }
 
 /** Calls the BMG API (same origin, via CloudFront) with the Cognito access token. */
@@ -29,12 +42,16 @@ export async function api<T>(
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
-  if (!res.ok)
-    throw new ApiError(
-      res.status,
-      data.detail ?? data.title ?? data.message ?? 'Request failed',
-      data,
-    );
+  if (!res.ok) {
+    const message: string = data.detail ?? data.title ?? data.message ?? 'Request failed';
+    // Admin actions need a sign-in in the last 5 minutes (design 6.3). Every
+    // screen gets the same plain message, and the app offers "Sign in again".
+    if (res.status === 403 && /fresh step-up/i.test(message)) {
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(REAUTH_EVENT));
+      throw new ApiError(res.status, REAUTH_MESSAGE, data, true);
+    }
+    throw new ApiError(res.status, message, data);
+  }
   return data as T;
 }
 

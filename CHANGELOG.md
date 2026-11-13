@@ -61,6 +61,9 @@ Plus invitation tracking, finished reviews, and a smarter library.
 
 ### Fixed
 
+- **Admin changes that need a recent sign-in** now say so plainly on every
+  screen, with a **Confirm it's you** prompt to sign in again, instead of
+  "admin actions need a fresh step-up".
 - On phones, the chat message box stays at the bottom when the keyboard
   opens, instead of being pushed off screen.
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AvatarProvider, useOwnAvatar } from '../components/avatars.tsx';
 import {
   api,
-  ApiError,
+  needsFreshSignIn,
   type ArtistSummary,
   type Me,
   type PlanResponse,
@@ -1180,7 +1180,7 @@ function InviteArtist({
       setDisplayName('');
       onInvited();
     } catch (e) {
-      const reauth = e instanceof ApiError && e.status === 403 && /step-up/.test(e.message);
+      const reauth = needsFreshSignIn(e);
       setResult({
         tone: 'error',
         text: reauth ? 'For security, sign in again to invite artists.' : (e as Error).message,

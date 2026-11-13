@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api } from '../lib/api.ts';
+import { api, needsFreshSignIn } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
   ago,
@@ -63,7 +63,7 @@ function useCards(cfg: AppConfig, token: string, path: string) {
       if (ok) setMsg({ tone: 'success', text: ok });
     } catch (e) {
       const text = (e as Error).message;
-      setMsg({ tone: 'error', text, reauth: /fresh step-up/.test(text) });
+      setMsg({ tone: 'error', text, reauth: needsFreshSignIn(e) });
     }
     await load();
   };
@@ -611,7 +611,7 @@ function ConnectorApps({
       await onChanged();
     } catch (e) {
       const text = (e as Error).message;
-      setMsg({ tone: 'error', text, reauth: /fresh step-up/.test(text) });
+      setMsg({ tone: 'error', text, reauth: needsFreshSignIn(e) });
     }
   };
 

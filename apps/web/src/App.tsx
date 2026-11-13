@@ -12,6 +12,7 @@ import { finishSocial, isSocialCallback } from './lib/social.ts';
 import { loadConfig, type AppConfig } from './lib/config.ts';
 import { captureCallback } from './lib/connectors.ts';
 import { Notice, WaveLoader } from './components/ui.tsx';
+import { ReauthPrompt } from './components/ReauthPrompt.tsx';
 import { WhatsNew } from './components/WhatsNew.tsx';
 import { Consent } from './pages/Consent.tsx';
 import { Home } from './pages/Home.tsx';
@@ -157,6 +158,8 @@ export function App() {
         // Admin actions need a sign-in within 5 minutes (design 6.3): sign in again on our screens.
         onReauth={() => leave('reauth')}
       />
+      {/* Any screen: an admin action refused for want of a recent sign-in. */}
+      <ReauthPrompt onReauth={() => leave('reauth')} />
       {/* Once per release, after sign-in and consent (CHANGELOG.md). */}
       <WhatsNew />
     </>
