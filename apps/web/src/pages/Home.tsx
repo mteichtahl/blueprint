@@ -63,7 +63,9 @@ import { AllTodos, ArtistTodos } from './Todos.tsx';
 import { Events } from './Events.tsx';
 import { Prompts } from './Prompts.tsx';
 import { Newsroom } from './Newsroom.tsx';
-import { AllGigs, ArtistGigs } from './Gigs.tsx';
+import { AllGigs, ArtistGigs, type Gig } from './Gigs.tsx';
+import { TicketTracker } from '../components/TicketTracker.tsx';
+import type { TicketGig } from '../lib/tickets.ts';
 import { ArtistWorkspace, type WorkspaceTarget } from './Workspace.tsx';
 import { MeetingsPage, RecorderProvider, RecordingBar, type MeetingsTarget } from './Meetings.tsx';
 import { FileThumb } from '../components/FileThumb.tsx';
@@ -129,6 +131,14 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [libraryFile, setLibraryFile] = useState<string | null>(null);
   // A folder opened from a "shared with you" notification (rev 10).
   const [libraryFolder, setLibraryFolder] = useState<{ id: string; n: number } | null>(null);
+  // An event or gig opened from Studio HQ's Tickets card (n remounts the page).
+  const [eventTarget, setEventTarget] = useState<{ id: string; n: number } | null>(null);
+  const [gigTarget, setGigTarget] = useState<{ gig: Gig; n: number } | null>(null);
+  useEffect(() => {
+    // Leaving the page drops the target, so the menu opens it as usual next time.
+    if (view !== 'events') setEventTarget(null);
+    if (view !== 'gigs') setGigTarget(null);
+  }, [view]);
 
   const load = useCallback(async () => {
     const [roster, queue, help, openTodos] = await Promise.all([
@@ -359,6 +369,14 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
               setView('library');
             }}
             onOpenChat={openChat}
+            onOpenEvent={(id) => {
+              setEventTarget({ id, n: Date.now() });
+              setView('events');
+            }}
+            onOpenGig={(gig) => {
+              setGigTarget({ gig: gig as Gig, n: Date.now() });
+              setView('gigs');
+            }}
           />
         )}
         {view === 'artists' && (
@@ -527,10 +545,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
               sub="Gigs artists share with Blueprint, with help requests first."
             />
             <AllGigs
+              key={gigTarget?.n ?? 0}
               cfg={cfg}
               token={token}
               artists={artists}
               onOpenArtist={(id) => setView(`artist:${id}`)}
+              initialGig={gigTarget?.gig ?? null}
             />
           </>
         )}
@@ -554,7 +574,14 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             <Venues cfg={cfg} token={token} isBmg />
           </>
         )}
-        {view === 'events' && <Events cfg={cfg} token={token} />}
+        {view === 'events' && (
+          <Events
+            key={eventTarget?.n ?? 0}
+            cfg={cfg}
+            token={token}
+            openEventId={eventTarget?.id ?? null}
+          />
+        )}
         {view === 'newsroom' && (
           <>
             <PageHeader
@@ -635,6 +662,8 @@ function StudioHq({
   onNavigate,
   onOpenFile,
   onOpenChat,
+  onOpenEvent,
+  onOpenGig,
 }: {
   cfg: AppConfig;
   token: string;
@@ -648,6 +677,9 @@ function StudioHq({
   onOpenFile: (fileId: string) => void;
   /** Open Chat straight on one conversation. */
   onOpenChat: (conversationId: string) => void;
+  /** Tickets card: open an event, or a gig's page. */
+  onOpenEvent: (eventId: string) => void;
+  onOpenGig: (gig: TicketGig) => void;
 }) {
   const [plans, setPlans] = useState<Record<string, PlanResponse>>({});
   // "My plans" (rev 12): the artists whose plan this person owns.
@@ -854,6 +886,17 @@ function StudioHq({
             ))}
           </ul>
         </Card>
+      </div>
+
+      <div className="flex flex-wrap items-stretch gap-5">
+        <TicketTracker
+          cfg={cfg}
+          token={token}
+          artistNames={names}
+          onOpenEvent={onOpenEvent}
+          onOpenGig={onOpenGig}
+          onNavigate={onNavigate}
+        />
       </div>
 
       <div className="flex flex-wrap items-stretch gap-5">

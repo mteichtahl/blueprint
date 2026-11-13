@@ -717,3 +717,17 @@ Plan: the project's `BMG_Rev14_Staff_Chat.md`. Built in steps; this is step 1 (m
 - Team group settings: only admins can send; only admins can edit group info (which also covers adding people). Anyone can leave; admins remove others; when the last admin leaves, the longest-standing member becomes admin.
 - Team keys are wrapped with encryption context `purpose=staff-conversation`, so one can't be unwrapped as an artist chat's key.
 - Until the inboxes ship (step 2), creating a team chat answers `501`, and artist sessions get `404` for `sd-`/`sg-` ids before any lookup.
+
+## Studio HQ: Tickets card (13 Nov 2026)
+
+A **Tickets** section on Studio HQ (the BMG overview) tracks ticket sales for everything coming up, in one list: Blueprint's **events and workshops**, and the **gigs artists share with Blueprint**.
+
+- **Where it lives:** `components/TicketTracker.tsx` (the card, placed under the first row of Studio HQ cards) and `lib/tickets.ts` (the rules, pure). Tests: `test/tickets.test.ts`, `test/ticket-tracker.test.tsx` (with an axe check).
+- **Workshops:** events gain a `kind` (`event` or `workshop`, default `event`, so older events read as events). The event form has a **Type** select and event cards show a **Workshop** tag. No new API routes: the card reads `GET /events`, `GET /gigs?filter=upcoming` and `GET /venues`.
+- **What shows:** upcoming only (today onwards), soonest first, six rows with "N more coming up". Filter chips: **All · Events & workshops · Artist gigs**. Totals above: tickets sold, ticket takings and how many are **behind**.
+- **Gigs included:** deal Ticketed, Door split or Other, or a ticket link, or tickets already entered. Free, fee and not-set gigs with no tickets are left out, as are Idea and Cancelled gigs. Only shared gigs (as Artist gigs).
+- **Sold against what:** events use the ticket target, else capacity. Gigs use the venue's capacity when the venue was picked from the venues list ("90 / 150 cap."), else just "N sold".
+- **Behind:** within 14 days, with a target or capacity, and under half sold. Shown with a coral row and a **Behind** tag.
+- **Takings:** events use the takings typed in, else tickets sold × ticket price; gigs use their ticket and door takings (merchandise isn't ticket money, so it's left out).
+- **Source:** "Humanitix" when the event is linked to Humanitix or the gig's ticket link is a humanitix.com page (both synced hourly by the connector), else "Typed in".
+- **Opening a row:** an event opens on the Events page; a gig opens its gig page under Artist gigs ("← Artist gigs"). The footer links go to Events & workshops and Artist gigs.
