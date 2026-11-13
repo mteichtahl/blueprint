@@ -2683,13 +2683,11 @@ html.dark {
 
 /* iOS Safari gives date and time inputs a native minimum width wider than half
    a phone screen, so in two-column forms (Edit gig, events, plans) they spilled
-   into the next column. Drop the native sizing so they fit their grid cell. */
+   into the next column. Let them shrink to their grid cell (keeping the native
+   look, so the value stays vertically centred). */
 input[type='date'],
 input[type='time'],
 input[type='datetime-local'] {
-  -webkit-appearance: none;
-  appearance: none;
-  display: block;
   min-width: 0;
   max-width: 100%;
 }
