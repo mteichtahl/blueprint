@@ -7,12 +7,16 @@ conversation key; DynamoDB only holds ids, times and per-member state.
 
 ## Conversation types
 
-| `type`             | Who's in it                                                   | Who can post                                                      |
-| ------------------ | ------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `bmg-artist`       | Blueprint and one artist (`dm-<artistId>`)                    | both                                                              |
-| `group`            | Blueprint and the artists it picked                           | Blueprint; artists unless "only admins can send"                  |
-| `announcement`     | Blueprint to chosen artists, or `broadcast` (= "All artists") | Blueprint only; artists "reply privately" in their Blueprint chat |
-| `artist-to-artist` | two artists                                                   | both; Blueprint can't read it                                     |
+| `type`             | Who's in it                                                                 | Who can post                                                      |
+| ------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `bmg-artist`       | Blueprint and one artist (`dm-<artistId>`)                                  | both                                                              |
+| `group`            | Blueprint and the artists it picked                                         | Blueprint; artists unless "only admins can send"                  |
+| `announcement`     | Blueprint to chosen artists, or `broadcast` (= "All artists")               | Blueprint only; artists "reply privately" in their Blueprint chat |
+| `artist-to-artist` | two artists                                                                 | both; Blueprint can't read it                                     |
+| `staff-direct`     | two Blueprint staff (`sd-<subA>-<subB>`; same sub twice = message yourself) | both; nobody else, admins included (rev 14)                       |
+| `staff-group`      | Blueprint staff only (`sg-…`), never artists                                | members; admins only if "only admins can send" (rev 14)           |
+
+**Team chats (rev 14, in progress).** The model, ids and access rules are in place; `POST /conversations` answers `501` for them until the team inboxes ship. Requests: `{ "kind": "direct", "staffSub": "…" }`, and `{ "kind": "group", "title": "…", "staffSubs": ["…"] }` with no `artistIds` makes a team group. Artist sessions get `404` for any `sd-`/`sg-` id before a lookup.
 
 `broadcast` is kept as the id of the all-artists announcement; its `type` is reported as `announcement`.
 
