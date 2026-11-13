@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { tag } from '../src/accounts.ts';
-import { call, ok, subOf } from '../src/api.ts';
+import { artistIdOf, call, ok, subOf } from '../src/api.ts';
 
 /**
  * UAT script K (rev 14): team chats are for the Blueprint people in them.
@@ -126,4 +126,19 @@ test('K-24: leaving hands over admin, and the last one out closes the group', as
   expect(left?.members?.find((m) => m.sub === adminSub)?.admin).toBe(true);
   await ok('admin', 'DELETE', `/conversations/${groupId}/members/${adminSub}`);
   expect((await listed('admin')).some((c) => c.conversationId === groupId)).toBe(false);
+});
+
+test('K-25: an artist sees which Blueprint person wrote to them', async () => {
+  const dm = (
+    await ok<{ conversationId: string }>('admin', 'POST', '/conversations', {
+      kind: 'direct',
+      artistId: await artistIdOf('artistOn'),
+    })
+  ).conversationId;
+  const text = tag('named hello');
+  await ok('admin', 'POST', `/conversations/${dm}/messages`, { text });
+  const seen = await ok<Thread>('artistOn', 'GET', `/conversations/${dm}/messages`);
+  const got = seen.messages.find((m) => m.text === text);
+  // "<name> · Blueprint" (decided 13 Nov 2026), never just "Blueprint".
+  expect(got?.senderName).toMatch(/ · Blueprint$/);
 });

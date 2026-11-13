@@ -492,19 +492,43 @@ function titleFor(
   return names[c.artistIds.find((id) => id !== viewer.artistId)!] ?? 'Artist';
 }
 
+/** How a Blueprint person is shown in chats with artists (decided 13 Nov 2026): "Kyra · Blueprint". */
+export const staffLabel = (name: string) => `${name} · Blueprint`;
+
 /**
- * The name shown on a message. Artists see Blueprint as one "Blueprint" in
- * their chats; in team chats (rev 14) each person is named.
+ * The name shown on a message. In chats with artists, Blueprint people are
+ * named with "· Blueprint" (decided 13 Nov 2026); in team chats (rev 14) just
+ * by name. Someone the team list doesn't know shows as "Blueprint".
  */
 async function senderNameOf(principal: Principal, c?: Pick<Conversation, 'type'>): Promise<string> {
   if (principal.role === 'artist') {
     return (await artistNames([principal.artistId!]))[principal.artistId!] ?? 'Artist';
   }
-  if (c && isStaffType(c.type)) {
-    const me = (await activeTeam().catch(() => new Map<string, Person>())).get(principal.sub);
-    return me?.displayName ?? 'Blueprint';
-  }
-  return 'Blueprint';
+  const me = (await activeTeam().catch(() => new Map<string, Person>())).get(principal.sub);
+  if (!me) return 'Blueprint';
+  return c && isStaffType(c.type) ? me.displayName : staffLabel(me.displayName);
+}
+
+/** The plain name used in system notes ("Kyra added Chloe Poli"). */
+async function noteNameOf(principal: Principal): Promise<string> {
+  if (principal.role === 'artist') return senderNameOf(principal);
+  const me = (await activeTeam().catch(() => new Map<string, Person>())).get(principal.sub);
+  return me?.displayName ?? 'Blueprint';
+}
+
+/**
+ * The sender name to show for a stored message. Staff messages in chats with
+ * artists are named from the team list at read time, so messages sent before
+ * names were shown (stored as "Blueprint") get the person's name too.
+ */
+export function shownSender(
+  c: Pick<Conversation, 'type'>,
+  m: Pick<StoredMessage, 'senderRole' | 'senderSub' | 'senderName' | 'system'>,
+  team: Map<string, Person>,
+): string {
+  if (m.system || m.senderRole === 'artist' || isStaffType(c.type)) return m.senderName;
+  const who = team.get(m.senderSub);
+  return who ? staffLabel(who.displayName) : m.senderName;
 }
 
 /**
@@ -983,8 +1007,9 @@ export const handler = handle(async (event) => {
         .map((i) => fromItem(i))
         .filter((c) => !c.deletedAt && access(viewer, c) !== 'none');
       const names = await artistNames(convs.flatMap((c) => c.artistIds));
-      const team = convs.some((c) => isStaffType(c.type))
-        ? await activeTeam()
+      // Names for team chats, and for staff in chats with artists.
+      const team = convs.length
+        ? await activeTeam().catch(() => new Map<string, Person>())
         : new Map<string, Person>();
       const list = await Promise.all(
         convs.map(async (c) => {
@@ -1021,7 +1046,7 @@ export const handler = handle(async (event) => {
                 ? 'You'
                 : shown.system || direct
                   ? null
-                  : shown.senderName,
+                  : shownSender(c, shown, team),
             previewTicks: mine
               ? ticks(
                   shown!.createdAt,
@@ -1168,7 +1193,7 @@ export const handler = handle(async (event) => {
             ...(descriptionCipher ? { descriptionCipher } : {}),
           };
         }
-        const who = await senderNameOf(principal);
+        const who = await noteNameOf(principal);
         await postMessage(
           conv,
           principal,
@@ -1193,7 +1218,7 @@ export const handler = handle(async (event) => {
       const sets: string[] = [];
       const values: Record<string, unknown> = {};
       const notes: string[] = [];
-      const who = await senderNameOf(principal);
+      const who = await noteNameOf(principal);
       if (body.title !== undefined && body.title !== conv.title) {
         sets.push('title = :t');
         values[':t'] = body.title;
@@ -1298,7 +1323,7 @@ export const handler = handle(async (event) => {
           }),
         );
       }
-      const who = await senderNameOf(principal);
+      const who = await noteNameOf(principal);
       await postMessage(
         { ...conv, artistIds: next },
         principal,
@@ -1340,7 +1365,7 @@ export const handler = handle(async (event) => {
         }),
       );
       const name = (await artistNames([artistId]))[artistId] ?? 'An artist';
-      const who = await senderNameOf(principal);
+      const who = await noteNameOf(principal);
       // The note is written as Blueprint when an artist leaves (they're no longer a member).
       await postMessage(
         { ...conv, artistIds: next },
@@ -1411,6 +1436,9 @@ export const handler = handle(async (event) => {
         ? (await otherMembers(conv, meHere)).map((o) => o.state)
         : [];
       const starred = new Set(row?.starred ?? []);
+      const names = items.some((m) => m.senderRole !== 'artist' && !m.system)
+        ? await activeTeam().catch(() => new Map<string, Person>())
+        : new Map<string, Person>();
       const messages = items.map((m) => {
         const p = openPayload(key!, m);
         const mine = m.senderSub === principal.sub && !m.system;
@@ -1419,7 +1447,7 @@ export const handler = handle(async (event) => {
           createdAt: m.createdAt,
           kind: m.system || p.system ? 'system' : 'message',
           text: p.text,
-          senderName: m.senderName,
+          senderName: shownSender(conv, m, names),
           senderRole: m.senderRole,
           senderArtistId: m.senderArtistId ?? null,
           mine,
@@ -1478,7 +1506,7 @@ export const handler = handle(async (event) => {
         if (!quoted) throw new HttpError(404, 'That message is gone');
         replyTo = quoteOf(
           quoted.messageId,
-          quoted.senderName,
+          shownSender(source, quoted, await activeTeam().catch(() => new Map<string, Person>())),
           openPayload(await conversationKey(viewer, source), quoted),
         );
       }
