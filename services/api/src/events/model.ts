@@ -260,12 +260,13 @@ export function gigPatchAllowed(
   return undefined;
 }
 
-export type GigFilter = 'upcoming' | 'past' | 'help';
+export type GigFilter = 'all' | 'upcoming' | 'past' | 'help';
 export function gigMatches(
   g: Pick<Gig, 'date' | 'status' | 'help'>,
   filter: GigFilter,
   today: string,
 ) {
+  if (filter === 'all') return true;
   if (filter === 'help') return g.help?.status === 'open';
   const past = g.date < today || g.status === 'played' || g.status === 'cancelled';
   return filter === 'past' ? past : !past;

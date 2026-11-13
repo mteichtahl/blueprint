@@ -57,6 +57,8 @@ describe('gigs', () => {
     expect(gigMatches({ ...gig, date: '2026-10-01' }, 'past', today)).toBe(true);
     expect(gigMatches({ ...gig, status: 'played' }, 'upcoming', today)).toBe(false);
     expect(gigMatches(gig, 'help', today)).toBe(false);
+    expect(gigMatches(gig, 'all', today)).toBe(true);
+    expect(gigMatches({ ...gig, status: 'cancelled' }, 'all', today)).toBe(true);
     expect(
       gigMatches(
         { ...gig, help: { text: 'x', topics: [], askedAt: '', status: 'open' } },
