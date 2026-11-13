@@ -865,7 +865,7 @@ export function AllTodos({
     <Card>
       <details open className="flex flex-col gap-3.5">
         <summary className="card-hd cursor-pointer list-none">
-          <h2 className="t text-[19px]">All artist to-dos</h2>
+          <h2 className="poster text-[20px] leading-none">All artist to-dos</h2>
           {overdue > 0 && <Tag tone="k">{overdue} overdue</Tag>}
           <span className="src ml-auto">Show / hide</span>
         </summary>

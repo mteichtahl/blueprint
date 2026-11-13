@@ -190,7 +190,7 @@ function PromptEditor({
       <Card
         title={
           <span className="flex flex-wrap items-center gap-3">
-            <h2 className="t text-[19px]">{p.label}</h2>
+            <h2 className="poster text-[20px] leading-none">{p.label}</h2>
             <Tag tone={p.liveVersion ? 'n' : 's'}>
               {p.liveVersion ? `Live: v${p.liveVersion}` : 'Live: built-in default'}
             </Tag>

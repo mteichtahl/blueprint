@@ -633,7 +633,7 @@ function EventDetail({
           className="flex-[3_1_480px]"
           title={
             <span className="flex flex-wrap items-baseline gap-3">
-              <h2 className="t text-[19px]">Guest list</h2>
+              <h2 className="poster text-[20px] leading-none">Guest list</h2>
               <span className="src">Industry guests you invite for free</span>
             </span>
           }
@@ -722,7 +722,7 @@ function EventDetail({
 
         <Card className="flex-[2_1_320px]">
           <div className="card-hd">
-            <h2 className="t text-[19px]">Speakers</h2>
+            <h2 className="poster text-[20px] leading-none">Speakers</h2>
             <Button
               size="sm"
               variant="ghost"
@@ -760,7 +760,7 @@ function EventDetail({
           ))}
 
           <div className="card-hd mt-2">
-            <h2 className="t text-[19px]">Crew &amp; volunteers</h2>
+            <h2 className="poster text-[20px] leading-none">Crew &amp; volunteers</h2>
             <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setAdding('crew')}>
               Add
             </Button>
@@ -795,7 +795,7 @@ function EventDetail({
           className="flex-[3_1_480px]"
           title={
             <span className="flex items-center gap-3">
-              <h2 className="t text-[19px]">Run sheet</h2>
+              <h2 className="poster text-[20px] leading-none">Run sheet</h2>
               <Tag tone="c">Draft</Tag>
             </span>
           }
