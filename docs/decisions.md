@@ -706,6 +706,18 @@ The app moves from the corporate canvas look to **Headliner** (project doc `clau
 - **Contrast:** `contrast.test.ts` gains the pop button, its hover, the current sidebar item, the phone tab bar, the selected workspace tab and Ask BMG. The field border on paper is #6F7987 (3.6:1). Deep-coral text written into pages turns pale coral (#F2A3A0) in dark mode.
 - **Not changed:** email templates and the PDFs keep their current branded layout.
 
+## Team chats: chat between Blueprint staff (13 Nov 2026, rev 14)
+
+Plan: the project's `BMG_Rev14_Staff_Chat.md`. Built in steps; this is step 1 (model, access, ids, tests).
+
+- Two new conversation types: `staff-direct` (`sd-<subA>-<subB>`, sorted, so two people share one chat; the same sub twice is "message yourself") and `staff-group` (`sg-…`).
+- **Members only.** `access()` gives `read-write` to staff or admins whose sub is in `staffSubs`, and `none` to everyone else: admins who aren't in a chat, and artists always. Artist assignments don't matter.
+- Each member gets their own inbox (`STAFF#<sub>`) and channel (`/inbox/staff-<sub>`) for team chats. Artist chats keep the shared `BMG` inbox.
+- A request for a group with only staff picked makes a team group, with the creator as group admin. Artists picked too → a normal group, as before. Artists are never added to a team group.
+- Team group settings: only admins can send; only admins can edit group info (which also covers adding people). Anyone can leave; admins remove others; when the last admin leaves, the longest-standing member becomes admin.
+- Team keys are wrapped with encryption context `purpose=staff-conversation`, so one can't be unwrapped as an artist chat's key.
+- Until the inboxes ship (step 2), creating a team chat answers `501`, and artist sessions get `404` for `sd-`/`sg-` ids before any lookup.
+
 ## Chat quick reactions (13 Nov 2026)
 
 Marc asked for quick reactions in Chat on the phone and the web: 👍 👎 😊 😢.

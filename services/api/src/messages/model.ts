@@ -13,13 +13,41 @@
  * - `artist-to-artist`: two artists. Blueprint can't read it: its key is
  *   wrapped only under the two artists' keys with `visibility=private`, which
  *   KMS refuses to every BMG role (design 9.1, 9.3).
+ * - `staff-direct`: two Blueprint staff (id `sd-<subA>-<subB>`, sorted; the
+ *   same sub twice is "message yourself"). Rev 14.
+ * - `staff-group`: Blueprint staff only (id `sg-…`), never artists. Rev 14.
+ *   Team chats are private to their members: admins who aren't in one can't
+ *   read it, and artists never can. Each member has their own inbox
+ *   (`STAFF#<sub>`) and channel (`/inbox/staff-<sub>`) for them.
  */
 import { DEFAULT_RULES, type AccessRules } from '../access/model.ts';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 
 export type ConversationType =
-  'bmg-artist' | 'group' | 'broadcast' | 'announcement' | 'artist-to-artist';
+  | 'bmg-artist'
+  | 'group'
+  | 'broadcast'
+  | 'announcement'
+  | 'artist-to-artist'
+  | 'staff-direct'
+  | 'staff-group';
+
+/** Team chats (rev 14): Blueprint staff only. */
+export const isStaffType = (t: ConversationType): t is 'staff-direct' | 'staff-group' =>
+  t === 'staff-direct' || t === 'staff-group';
+
+/** Team group settings (rev 14). */
+export interface StaffGroupSettings {
+  onlyAdminsSend: boolean;
+  onlyAdminsEditInfo: boolean;
+}
+export const DEFAULT_STAFF_SETTINGS: StaffGroupSettings = {
+  onlyAdminsSend: false,
+  onlyAdminsEditInfo: false,
+};
+/** Most people in one team group. */
+export const MAX_STAFF_GROUP = 50;
 
 /** Group settings (Group info → Group settings). */
 export interface GroupSettings {
@@ -43,6 +71,12 @@ export interface Conversation {
   descriptionCipher?: Uint8Array;
   /** Groups only. */
   settings?: GroupSettings;
+  /** Team groups only (rev 14). */
+  staffSettings?: StaffGroupSettings;
+  /** Team chats (rev 14): the staff in it (Cognito subs). Empty otherwise. */
+  staffSubs?: string[];
+  /** Team groups (rev 14): group admins, always members. */
+  admins?: string[];
   /** Set when Blueprint deletes a group or announcement. */
   deletedAt?: string;
   /** Artists in the conversation (empty for the broadcast, which reaches all artists). */
@@ -59,17 +93,26 @@ export interface Viewer {
   artistId?: string;
   /** Staff only. */
   assignedArtistIds?: readonly string[];
+  /** The person's Cognito sub (needed for team chats, rev 14). */
+  sub?: string;
 }
 
 export const BROADCAST_ID = 'broadcast';
 const ARTIST = 'art_[a-z0-9]{10,32}';
+/** Cognito subs are UUIDs. */
+const SUB = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+export const SUB_PATTERN = new RegExp(`^${SUB}$`);
 export const CONVERSATION_ID_PATTERN = new RegExp(
-  `^(broadcast|dm-${ARTIST}|aa-${ARTIST}-${ARTIST}|grp-[a-z0-9]{10,40}|ann-[a-z0-9]{10,40})$`,
+  `^(broadcast|dm-${ARTIST}|aa-${ARTIST}-${ARTIST}|grp-[a-z0-9]{10,40}|ann-[a-z0-9]{10,40}|sd-${SUB}-${SUB}|sg-[a-z0-9]{10,40})$`,
 );
+/** Team chat ids, refused for artist sessions before any lookup. */
+export const isStaffConversationId = (id: string) => id.startsWith('sd-') || id.startsWith('sg-');
 
 export const directId = (artistId: string) => `dm-${artistId}`;
 /** The same two artists always share one chat, whoever starts it. */
 export const artistPairId = (a: string, b: string) => `aa-${[a, b].sort().join('-')}`;
+/** The same two staff always share one chat; the same sub twice is "message yourself". */
+export const staffPairId = (a: string, b: string) => `sd-${[a, b].sort().join('-')}`;
 
 // ── Keys in the main table ────────────────────────────────────────────────
 export const convPk = (id: string) => `CONV#${id}`;
@@ -78,6 +121,9 @@ export const messageSk = (at: string, messageId: string) => `MSG#${at}#${message
 /** Inbox members: Blueprint shares one inbox; each artist has their own. */
 export const BMG_MEMBER = 'BMG';
 export const artistMember = (artistId: string) => `ARTIST#${artistId}`;
+/** Each staff member's own inbox, for team chats only (rev 14). */
+export const staffMember = (sub: string) => `STAFF#${sub}`;
+export const staffChannel = (sub: string) => `/inbox/staff-${sub}`;
 export const inboxPk = (member: string) => `INBOX#${member}`;
 export const inboxSk = (conversationId: string) => `CONV#${conversationId}`;
 /** When a member last opened the app (for "delivered" ticks and "last seen"). */
@@ -89,13 +135,15 @@ const isAnnouncement = (t: ConversationType) => t === 'broadcast' || t === 'anno
 
 /** Inbox members of a conversation (the broadcast reaches artists without inbox rows). */
 export const isAnnouncementType = isAnnouncement;
-export function members(c: Pick<Conversation, 'type' | 'artistIds'>): string[] {
+export function members(c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs'>): string[] {
+  if (isStaffType(c.type)) return [...new Set(c.staffSubs ?? [])].map(staffMember);
   const artists = c.artistIds.map(artistMember);
   return c.type === 'artist-to-artist' ? artists : [BMG_MEMBER, ...artists];
 }
 
 /** Realtime channels to nudge when a conversation changes (payload: ids only). */
-export function channelsFor(c: Pick<Conversation, 'type' | 'artistIds'>): string[] {
+export function channelsFor(c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs'>): string[] {
+  if (isStaffType(c.type)) return [...new Set(c.staffSubs ?? [])].map(staffChannel);
   if (c.type === 'broadcast') return ['/inbox/bmg', '/inbox/all-artists'];
   if (c.type === 'announcement')
     return ['/inbox/bmg', ...c.artistIds.map((id) => `/inbox/artist-${id}`)];
@@ -106,7 +154,15 @@ export function channelsFor(c: Pick<Conversation, 'type' | 'artistIds'>): string
 // ── Access (design 6.3) ───────────────────────────────────────────────────
 export type Access = 'read-write' | 'read' | 'none';
 
-export function access(viewer: Viewer, c: Pick<Conversation, 'type' | 'artistIds'>): Access {
+export function access(
+  viewer: Viewer,
+  c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs'>,
+): Access {
+  // Team chats: members only, whatever their role. Artists never; admins only if in it.
+  if (isStaffType(c.type)) {
+    if (viewer.role === 'artist' || !viewer.sub) return 'none';
+    return (c.staffSubs ?? []).includes(viewer.sub) ? 'read-write' : 'none';
+  }
   if (viewer.role === 'artist') {
     if (c.type === 'broadcast') return 'read';
     const member = !!viewer.artistId && c.artistIds.includes(viewer.artistId);
@@ -127,11 +183,53 @@ export function access(viewer: Viewer, c: Pick<Conversation, 'type' | 'artistIds
 /** Whether this viewer may post: access, plus "only admins can send" in groups. */
 export function canSend(
   viewer: Viewer,
-  c: Pick<Conversation, 'type' | 'artistIds' | 'settings'>,
+  c: Pick<
+    Conversation,
+    'type' | 'artistIds' | 'settings' | 'staffSubs' | 'admins' | 'staffSettings'
+  >,
 ): boolean {
   if (access(viewer, c) !== 'read-write') return false;
+  if (c.type === 'staff-group' && c.staffSettings?.onlyAdminsSend) return isGroupAdmin(viewer, c);
   if (viewer.role === 'artist' && c.type === 'group' && c.settings?.onlyAdminsSend) return false;
   return true;
+}
+
+/** A team group admin (rev 14). */
+export function isGroupAdmin(viewer: Viewer, c: Pick<Conversation, 'admins'>): boolean {
+  return !!viewer.sub && (c.admins ?? []).includes(viewer.sub);
+}
+
+/**
+ * Team groups (rev 14): any member can add staff unless "only admins can edit
+ * group info" is on. Never artists: that would expose the history.
+ */
+export function canAddStaff(
+  viewer: Viewer,
+  c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs' | 'admins' | 'staffSettings'>,
+): boolean {
+  if (c.type !== 'staff-group' || access(viewer, c) !== 'read-write') return false;
+  return !c.staffSettings?.onlyAdminsEditInfo || isGroupAdmin(viewer, c);
+}
+
+/** Team groups: admins remove others; anyone can remove themselves (leave). */
+export function canRemoveStaff(
+  viewer: Viewer,
+  c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs' | 'admins'>,
+  sub: string,
+): boolean {
+  if (c.type !== 'staff-group' || access(viewer, c) !== 'read-write') return false;
+  return sub === viewer.sub || isGroupAdmin(viewer, c);
+}
+
+/** When someone leaves: if no admin is left, the longest-standing member becomes admin. */
+export function adminsAfterLeaving(
+  c: Pick<Conversation, 'staffSubs' | 'admins'>,
+  leaving: string,
+): { staffSubs: string[]; admins: string[] } {
+  const staffSubs = (c.staffSubs ?? []).filter((s) => s !== leaving);
+  let admins = (c.admins ?? []).filter((s) => s !== leaving && staffSubs.includes(s));
+  if (admins.length === 0 && staffSubs.length > 0) admins = [staffSubs[0]!];
+  return { staffSubs, admins };
 }
 
 /** Can this viewer add artists? Blueprint can; artists only in groups that allow it. */
@@ -247,6 +345,7 @@ export const quoteOf = (messageId: string, senderName: string, p: Payload): Quot
 
 // ── Requests ──────────────────────────────────────────────────────────────
 const ArtistId = z.string().regex(new RegExp(`^${ARTIST}$`));
+const StaffSub = z.string().regex(SUB_PATTERN);
 
 const Settings = z
   .object({
@@ -256,17 +355,38 @@ const Settings = z
   })
   .strict();
 const Description = z.string().trim().max(500);
+const StaffSettings = z
+  .object({ onlyAdminsSend: z.boolean(), onlyAdminsEditInfo: z.boolean() })
+  .strict();
 
 export const NewConversation = z.discriminatedUnion('kind', [
-  /** A direct chat: BMG ↔ artist, or artist ↔ artist. */
-  z.object({ kind: z.literal('direct'), artistId: ArtistId.optional() }),
-  z.object({
-    kind: z.literal('group'),
-    title: z.string().trim().min(1, 'Name the group').max(80),
-    description: Description.optional(),
-    artistIds: z.array(ArtistId).min(1, 'Pick at least one artist').max(100),
-    settings: Settings.optional(),
-  }),
+  /** A direct chat: BMG ↔ artist, artist ↔ artist, or staff ↔ staff (rev 14). */
+  z
+    .object({
+      kind: z.literal('direct'),
+      artistId: ArtistId.optional(),
+      staffSub: StaffSub.optional(),
+    })
+    .refine((v) => !(v.artistId && v.staffSub), 'Pick an artist or a team member, not both'),
+  /**
+   * A group: artists picked → a normal group (Blueprint is in it). Only staff
+   * picked → a team group (rev 14). Both → a normal group; the staff picks
+   * are ignored there, as Blueprint is one member of artist chats.
+   */
+  z
+    .object({
+      kind: z.literal('group'),
+      title: z.string().trim().min(1, 'Name the group').max(80),
+      description: Description.optional(),
+      artistIds: z.array(ArtistId).max(100).default([]),
+      staffSubs: z.array(StaffSub).max(MAX_STAFF_GROUP).default([]),
+      settings: Settings.optional(),
+      staffSettings: StaffSettings.optional(),
+    })
+    .refine(
+      (v) => v.artistIds.length > 0 || v.staffSubs.length > 0,
+      'Pick at least one artist or team member',
+    ),
   z.object({
     kind: z.literal('announcement'),
     title: z.string().trim().min(1, 'Name the announcement list').max(80),
@@ -294,6 +414,7 @@ export const UpdateConversation = z
     title: z.string().trim().min(1).max(80).optional(),
     description: Description.optional(),
     settings: Settings.optional(),
+    staffSettings: StaffSettings.optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, 'Nothing to change');
@@ -339,6 +460,14 @@ export function reactionSummary(
   return out;
 }
 
+/** Team groups (rev 14): add staff. */
+export const AddStaff = z
+  .object({ staffSubs: z.array(StaffSub).min(1, 'Pick a team member').max(MAX_STAFF_GROUP) })
+  .strict();
+
+/** Team groups (rev 14): make someone admin, or not. */
+export const UpdateAdmin = z.object({ sub: StaffSub, admin: z.boolean() }).strict();
+
 export const UpdateMine = z
   .object({
     pinned: z.boolean().optional(),
@@ -371,7 +500,7 @@ export const UpdateMine = z
  */
 export function planConversation(
   viewer: Viewer,
-  req: z.infer<typeof NewConversation>,
+  input: z.input<typeof NewConversation>,
   rules: Pick<AccessRules, 'artistDirectChats' | 'artistGroups'> = DEFAULT_RULES,
 ):
   | {
@@ -380,9 +509,46 @@ export function planConversation(
       type: ConversationType;
       artistIds: string[];
       title?: string;
+      /** Team chats (rev 14). */
+      staffSubs?: string[];
+      admins?: string[];
     }
   | { ok: false; reason: string } {
+  const req =
+    input.kind === 'group'
+      ? { ...input, artistIds: input.artistIds ?? [], staffSubs: input.staffSubs ?? [] }
+      : input;
+  if (req.kind === 'direct' && req.staffSub) {
+    if (viewer.role === 'artist') return { ok: false, reason: 'Pick an artist' };
+    if (!viewer.sub) return { ok: false, reason: 'No team member on this account' };
+    return {
+      ok: true,
+      conversationId: staffPairId(viewer.sub, req.staffSub),
+      type: 'staff-direct',
+      artistIds: [],
+      staffSubs: [...new Set([viewer.sub, req.staffSub])].sort(),
+    };
+  }
+  if (req.kind === 'group' && req.artistIds.length === 0 && viewer.role !== 'artist') {
+    const me = viewer.sub;
+    if (!me) return { ok: false, reason: 'No team member on this account' };
+    const staffSubs = [...new Set([me, ...req.staffSubs])];
+    if (staffSubs.length < 2) return { ok: false, reason: 'Add at least one other team member' };
+    if (staffSubs.length > MAX_STAFF_GROUP)
+      return { ok: false, reason: `A team group can have up to ${MAX_STAFF_GROUP} people` };
+    return {
+      ok: true,
+      conversationId: '',
+      type: 'staff-group',
+      artistIds: [],
+      title: req.title,
+      // The creator first: they are the longest-standing member.
+      staffSubs,
+      admins: [me],
+    };
+  }
   if (req.kind === 'group' || req.kind === 'announcement') {
+    if (req.artistIds.length === 0) return { ok: false, reason: 'Pick at least one artist' };
     if (viewer.role === 'artist') {
       if (req.kind === 'announcement')
         return { ok: false, reason: 'Announcements are sent by Blueprint' };
@@ -479,7 +645,13 @@ export function open(
 }
 
 /** KMS encryption context for a wrapped conversation key. */
-export function wrapContext(conversationId: string, artistId?: string): Record<string, string> {
+export function wrapContext(
+  conversationId: string,
+  artistId?: string,
+  type?: ConversationType,
+): Record<string, string> {
+  // Team chats (rev 14): their own purpose, so a team key can't be unwrapped as an artist chat's.
+  if (type && isStaffType(type)) return { purpose: 'staff-conversation', conversationId };
   return artistId
     ? { artistId, visibility: 'private', conversationId }
     : { purpose: 'conversation-key', conversationId };
