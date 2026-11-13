@@ -142,3 +142,21 @@ test('K-25: an artist sees which Blueprint person wrote to them', async () => {
   // "<name> · Blueprint" (decided 13 Nov 2026), never just "Blueprint".
   expect(got?.senderName).toMatch(/ · Blueprint$/);
 });
+
+test('K-26: a card about an artist you’re not assigned to says so', async () => {
+  test.skip(!directId, 'No team chat was made');
+  // E2E Staff is assigned only to E2E Artist (AI on); E2E Admin sees everyone.
+  const other = await artistIdOf('artistOff');
+  const title = tag('card for another artist');
+  await ok('admin', 'POST', `/conversations/${directId}/messages`, {
+    text: '',
+    attachment: { kind: 'todo', id: 'e2ecard000001', artistId: other, title },
+  });
+  type Card = { attachment: { title: string; canOpen?: boolean } | null };
+  const find = async (as: 'admin' | 'staff') =>
+    (
+      await ok<{ messages: Card[] }>(as, 'GET', `/conversations/${directId}/messages`)
+    ).messages.find((m) => m.attachment?.title === title)?.attachment;
+  expect((await find('staff'))?.canOpen).toBe(false);
+  expect((await find('admin'))?.canOpen).toBe(true);
+});

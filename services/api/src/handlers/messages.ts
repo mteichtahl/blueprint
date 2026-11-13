@@ -31,6 +31,7 @@ import {
   BROADCAST_ID,
   canAddMembers,
   canAddStaff,
+  canOpenAttachment,
   canRemoveStaff,
   canSend,
   canShareFiles,
@@ -983,6 +984,64 @@ export const handler = handle(async (event) => {
   const route = `${event.httpMethod} ${event.resource}`;
 
   // ── Team groups (rev 14) ──
+  /**
+   * Takes people whose Blueprint login was turned off out of a team group, the
+   * next time a member opens it: a "left Blueprint" note, admin handed on if
+   * needed, and their copy of the chat key deleted. It happens here because
+   * only a member can seal the note (per-person keys). Nothing happens if the
+   * team list can't be read, so a hiccup never empties a group.
+   */
+  async function removeDeparted(conv: Conversation): Promise<Conversation> {
+    const team = await activeTeam().catch(() => new Map<string, Person>());
+    if (!viewer.sub || !team.has(viewer.sub)) return conv;
+    let current = conv;
+    for (const gone of (conv.staffSubs ?? []).filter((s) => !team.has(s))) {
+      const { staffSubs, admins } = adminsAfterLeaving(current, gone);
+      try {
+        await db.send(
+          new UpdateCommand({
+            TableName: table(),
+            Key: { PK: convPk(conv.conversationId), SK: CONV_META },
+            UpdateExpression: 'SET staffSubs = :s, admins = :a REMOVE #kw.#gone',
+            // Once only, if two members open it at the same time.
+            ConditionExpression: 'contains(staffSubs, :gone)',
+            ExpressionAttributeNames: { '#kw': 'keyWraps', '#gone': staffWrapName(gone) },
+            ExpressionAttributeValues: { ':s': staffSubs, ':a': admins, ':gone': gone },
+          }),
+        );
+      } catch (err) {
+        if ((err as Error).name !== 'ConditionalCheckFailedException') throw err;
+        continue;
+      }
+      await db.send(
+        new DeleteCommand({
+          TableName: table(),
+          Key: { PK: inboxPk(staffMember(gone)), SK: inboxSk(conv.conversationId) },
+        }),
+      );
+      const profile = (
+        await db.send(
+          new GetCommand({ TableName: table(), Key: { PK: `USER#${gone}`, SK: 'PROFILE' } }),
+        )
+      ).Item as { displayName?: string } | undefined;
+      const keyWraps = { ...current.keyWraps };
+      delete keyWraps[staffWrapName(gone)];
+      current = { ...current, staffSubs, admins, keyWraps };
+      const who = teamName(team, viewer.sub);
+      await postMessage(
+        current,
+        principal,
+        viewer,
+        systemNote(`${profile?.displayName ?? 'A former team member'} left Blueprint`),
+        who,
+      );
+      await audit(event, 'chat.removeDeparted', 'success', {
+        conversationId: conv.conversationId,
+      });
+    }
+    return current;
+  }
+
   async function updateTeamGroup(conv: Conversation) {
     const body = parseBody(event, UpdateConversation);
     const admin = isGroupAdmin(viewer, conv);
@@ -1589,7 +1648,8 @@ export const handler = handle(async (event) => {
     }
 
     case 'GET /conversations/{conversationId}/messages': {
-      const conv = await loadReadable(viewer, conversationIdParam(event));
+      let conv = await loadReadable(viewer, conversationIdParam(event));
+      if (conv.type === 'staff-group') conv = await removeDeparted(conv);
       const before = event.queryStringParameters?.before;
       if (before && !/^[\dT:.\-Z]+#?[a-z0-9-]*$/i.test(before))
         throw new HttpError(400, 'Bad cursor');
@@ -1622,7 +1682,10 @@ export const handler = handle(async (event) => {
           starred: starred.has(m.messageId),
           reactions: m.system ? [] : reactionSummary(m.reactions, principal.sub),
           replyTo: p.replyTo ?? null,
-          attachment: p.attachment ?? null,
+          // Cards about an artist this viewer can't open say so (team chats share across artists).
+          attachment: p.attachment
+            ? { ...p.attachment, canOpen: canOpenAttachment(viewer, p.attachment) }
+            : null,
         };
       });
       const firstUnread = messages.find(

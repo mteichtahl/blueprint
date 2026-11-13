@@ -103,6 +103,8 @@ const team = [
 ];
 
 const posts: { path: string; body: unknown }[] = [];
+/** Messages the open team chat returns (most tests: none). */
+let threadMessages: unknown[] = [];
 
 beforeAll(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -124,7 +126,7 @@ beforeAll(() => {
         canSend: true,
         firstUnreadMessageId: null,
         nextBefore: null,
-        messages: [],
+        messages: threadMessages,
       };
     else status = 404;
     return new Response(JSON.stringify(body), { status });
@@ -243,6 +245,39 @@ describe('team chats on the Chat screen (rev 14)', () => {
       expect(within(info).getByRole('button', { name: 'Make group admin' })).toBeTruthy();
     } finally {
       window.matchMedia = wide;
+    }
+  });
+
+  it('shows a card about an artist you can’t open as locked', async () => {
+    threadMessages = [
+      {
+        messageId: 'm1',
+        createdAt: now,
+        kind: 'message',
+        text: '',
+        senderName: 'Sam Lee',
+        senderRole: 'bmg-staff',
+        senderArtistId: null,
+        mine: false,
+        starred: false,
+        reactions: [],
+        replyTo: null,
+        attachment: {
+          kind: 'gig',
+          id: 'gig000000001',
+          artistId: 'art_sarun0000000',
+          title: 'SARUN · Corner Hotel',
+          subtitle: 'Fri 20 Nov',
+          canOpen: false,
+        },
+      },
+    ];
+    try {
+      await show();
+      expect(screen.getByText(/You don’t have access to this/)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /Open SARUN · Corner Hotel/ })).toBeNull();
+    } finally {
+      threadMessages = [];
     }
   });
 

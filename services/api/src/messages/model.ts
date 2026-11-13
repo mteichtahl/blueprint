@@ -689,3 +689,15 @@ export function wrapsUpdate(wraps: Record<string, Uint8Array>): {
   });
   return { sets, names, values };
 }
+
+/**
+ * Whether this viewer can open an item shared as a card (team chats share
+ * cards between Blueprint people with different artists). Blueprint staff
+ * open an artist's items only for artists assigned to them; admins open all.
+ * Artists' cards keep their own rules (shared files and gigs), so they're
+ * never marked here.
+ */
+export function canOpenAttachment(viewer: Viewer, a: Pick<Attachment, 'artistId'>): boolean {
+  if (!a.artistId || viewer.role !== 'bmg-staff') return true;
+  return (viewer.assignedArtistIds ?? []).includes(a.artistId);
+}

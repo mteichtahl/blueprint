@@ -1267,6 +1267,10 @@ html {
     background: var(--color-lilac);
     color: #011935;
   }
+  .wa-att-locked {
+    cursor: default;
+    opacity: 0.85;
+  }
   .wa-teamtag {
     display: inline-block;
     margin-left: 6px;
