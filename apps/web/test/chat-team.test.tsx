@@ -5,7 +5,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Me } from '../src/lib/api.ts';
 import type { AppConfig } from '../src/lib/config.ts';
 import { inboxChannels } from '../src/lib/realtime.ts';
-import { BmgChat } from '../src/pages/Messages.tsx';
+import { BmgChat, directUnread, type ConversationSummary } from '../src/pages/Messages.tsx';
 
 /** Chat between Blueprint staff (rev 14): team chats on the Chat screen. */
 
@@ -215,6 +215,35 @@ describe('team chats on the Chat screen (rev 14)', () => {
         staffSettings: { onlyAdminsSend: false, onlyAdminsEditInfo: false },
       },
     });
+  });
+
+  it('keeps team chats out of an artist workspace’s chat count', () => {
+    const list = [direct, group, { ...artistChat, unreadCount: 3 }] as ConversationSummary[];
+    expect(directUnread(list, 'art_chloepoli000')).toBe(3);
+  });
+
+  it('works on a phone: Team filter, open a team group, its Group info', async () => {
+    const wide = window.matchMedia;
+    window.matchMedia = ((q: string) => ({
+      ...wide(q),
+      matches: q.includes('max-width'),
+    })) as typeof window.matchMedia;
+    try {
+      await show();
+      fireEvent.click(screen.getByRole('button', { name: 'Team' }));
+      fireEvent.click(screen.getByRole('button', { name: /Mixer crew/ }));
+      await settle();
+      expect(screen.getByText(/Team chat\. Only the Blueprint people in it/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /Mixer crew.*chat info/ }));
+      await settle();
+      const info = screen.getByRole('complementary', { name: 'Group info' });
+      expect(within(info).getByText('Group admin')).toBeTruthy();
+      expect(within(info).getByText('Exit group')).toBeTruthy();
+      expect(within(info).getByText('Delete group')).toBeTruthy();
+      expect(within(info).getByRole('button', { name: 'Make group admin' })).toBeTruthy();
+    } finally {
+      window.matchMedia = wide;
+    }
   });
 
   it('passes the accessibility checks', async () => {

@@ -46,11 +46,16 @@ export function stepsFor(action: Action, role: string): Step[] {
         {
           method: 'POST',
           path: '/conversations',
-          body: {
-            kind: 'direct',
-            // An artist's assistant messages Blueprint; Blueprint's messages the named artist.
-            ...(role !== 'artist' || action.artistId ? { artistId: action.artistId } : {}),
-          },
+          // An artist's assistant messages Blueprint; Blueprint's messages the named
+          // artist, or a team member in their direct team chat (rev 14). The API
+          // refuses team chats for artists and anyone not on the team.
+          body:
+            action.staffSub && role !== 'artist'
+              ? { kind: 'direct', staffSub: action.staffSub }
+              : {
+                  kind: 'direct',
+                  ...(role !== 'artist' || action.artistId ? { artistId: action.artistId } : {}),
+                },
         },
         {
           method: 'POST',

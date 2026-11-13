@@ -44,6 +44,11 @@ export const Action = z.discriminatedUnion('type', [
       summary: Summary,
       /** BMG: the artist to message. Artists: leave out to message Blueprint. */
       artistId: ArtistId.optional(),
+      /**
+       * Rev 14, Blueprint only: a team member to message in your direct team
+       * chat (their `sub` from list_artists' `team`). Use instead of artistId.
+       */
+      staffSub: z.uuid().optional(),
       text: z.string().trim().min(1).max(4000),
     })
     .strict(),

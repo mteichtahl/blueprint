@@ -33,3 +33,15 @@ describe('artist ids in actions', () => {
     expect(ok('art_short')).toBe(false);
   });
 });
+
+describe('messaging a teammate (rev 14)', () => {
+  it('takes a team member sub, and nothing that isn’t one', async () => {
+    const { Action } = await import('../src/actions.ts');
+    const ok = (staffSub: string) =>
+      Action.safeParse({ type: 'sendMessage', summary: 'Message Sam', text: 'Hi', staffSub })
+        .success;
+    expect(ok('22222222-2222-4222-8222-222222222222')).toBe(true);
+    expect(ok('art_aaaaaaaaaaaa')).toBe(false);
+    expect(ok('sam')).toBe(false);
+  });
+});

@@ -144,6 +144,17 @@ describe('carrying out actions', () => {
     expect(msg[0]).toEqual({ method: 'POST', path: '/conversations', body: { kind: 'direct' } });
     expect(msg[1]!.path).toBe('/conversations/{conversationId}/messages');
   });
+  it('messages a teammate in the direct team chat, for Blueprint only (rev 14)', () => {
+    const SAM = '22222222-2222-4222-8222-222222222222';
+    const action = { type: 'sendMessage' as const, summary: 's', text: 'Hi', staffSub: SAM };
+    expect(stepsFor(action, 'bmg-staff')[0]).toEqual({
+      method: 'POST',
+      path: '/conversations',
+      body: { kind: 'direct', staffSub: SAM },
+    });
+    // An artist's assistant can't reach a team chat: it still messages Blueprint.
+    expect(stepsFor(action, 'artist')[0]!.body).toEqual({ kind: 'direct' });
+  });
 });
 
 describe('folder actions (rev 10)', () => {
