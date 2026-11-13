@@ -39,6 +39,8 @@ import {
   NewConversation,
   NewMessage,
   open,
+  isStaffConversationId,
+  isStaffType,
   planConversation,
   sendRefused,
   presenceKey,
@@ -101,6 +103,7 @@ interface InboxRow {
 
 const viewerOf = (p: Principal): Viewer => ({
   role: p.role,
+  sub: p.sub,
   ...(p.artistId ? { artistId: p.artistId } : {}),
   ...(p.assignedArtistIds ? { assignedArtistIds: p.assignedArtistIds } : {}),
 });
@@ -560,6 +563,9 @@ async function describe(viewer: Viewer, c: Conversation): Promise<string | null>
 }
 
 async function loadReadable(viewer: Viewer, id: string): Promise<Conversation> {
+  // Team chats (rev 14) are never an artist's: refuse before any lookup.
+  if (viewer.role === 'artist' && isStaffConversationId(id))
+    throw new HttpError(404, 'No such conversation');
   const conv = await getConversation(id);
   if (!conv || conv.deletedAt || access(viewer, conv) === 'none')
     throw new HttpError(404, 'No such conversation');
@@ -697,6 +703,8 @@ export const handler = handle(async (event) => {
       const body = parseBody(event, NewConversation);
       const plan = planConversation(viewer, body, await accessRules(viewer));
       if (!plan.ok) throw new HttpError(403, plan.reason);
+      // Team chats (rev 14) are planned here; creating them arrives with the team inboxes.
+      if (isStaffType(plan.type)) throw new HttpError(501, 'Team chats are coming soon');
       // Every artist must exist (and, for staff, be theirs to message).
       const names = await artistNames(plan.artistIds);
       if (plan.artistIds.some((id) => !names[id])) throw new HttpError(404, 'No such artist');
