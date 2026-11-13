@@ -12,7 +12,14 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import type { Principal } from '@bmg/authz';
-import { artistKeyAlias, DataAccessSessions } from '@bmg/crypto';
+import {
+  artistKeyAlias,
+  DataAccessSessions,
+  staffKeyAlias,
+  staffWrapContext,
+  type StaffSessionRole,
+} from '@bmg/crypto';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   access,
@@ -57,6 +64,9 @@ import {
   reactionSummary,
   seal,
   staffChannel,
+  staffWrapName,
+  teamKeySource,
+  wrapsUpdate,
   staffMember,
   SUB_PATTERN,
   ticks,
@@ -138,11 +148,87 @@ async function artistKms(artistId: string) {
   return new KMSClient({ credentials });
 }
 
-async function wrapKeys(
-  c: Pick<Conversation, 'conversationId' | 'type' | 'artistIds'>,
+// ── Team chat keys: one copy per member, under their own key (decided 13 Nov 2026) ──
+const lambda = new LambdaClient({});
+const staffKeyArn = (sub: string) =>
+  `arn:aws:kms:${env('AWS_REGION')}:${env('ACCOUNT_ID')}:${staffKeyAlias(env('PROJECT'), env('BMG_ENV'), sub)}`;
+
+/** KMS in the signed-in Blueprint person's own session: it opens only their copies. */
+async function staffKms(viewer: Viewer) {
+  if (viewer.role === 'artist' || !viewer.sub) throw new HttpError(403, 'Not in this chat');
+  const credentials = await sessions.staffCredentials({
+    roleArn: env('STAFF_DATA_ACCESS_ROLE_ARN'),
+    staffSub: viewer.sub,
+    role: viewer.role as StaffSessionRole,
+  });
+  return new KMSClient({ credentials });
+}
+
+/** Creates a Blueprint person's own key the first time they're in a team chat (keys stack). */
+async function ensureStaffKey(sub: string) {
+  const res = await lambda.send(
+    new InvokeCommand({
+      FunctionName: env('ONBOARD_FUNCTION_ARN'),
+      Payload: Buffer.from(JSON.stringify({ staffSub: sub })),
+    }),
+  );
+  if (res.FunctionError) throw new Error(`Could not prepare a team chat key: ${res.FunctionError}`);
+}
+
+/**
+ * Makes each member's copy of a team chat key, under that member's own key,
+ * from the signed-in person's session. KMS lets any Blueprint session make a
+ * copy for someone (with their sub in the context) but only the owner open it.
+ */
+async function wrapForStaff(
+  viewer: Viewer,
+  conversationId: string,
+  subs: readonly string[],
   key: Uint8Array,
+): Promise<Record<string, Uint8Array>> {
+  const client = await staffKms(viewer);
+  const out: Record<string, Uint8Array> = {};
+  for (const sub of new Set(subs)) {
+    const encrypt = () =>
+      client.send(
+        new EncryptCommand({
+          KeyId: staffKeyArn(sub),
+          Plaintext: key,
+          EncryptionContext: staffWrapContext(sub, conversationId),
+        }),
+      );
+    let res;
+    try {
+      res = await encrypt();
+    } catch (err) {
+      if ((err as Error).name !== 'NotFoundException') throw err;
+      await ensureStaffKey(sub);
+      // A new alias can take a moment to resolve.
+      for (let i = 0; ; i++) {
+        try {
+          res = await encrypt();
+          break;
+        } catch (e) {
+          if ((e as Error).name !== 'NotFoundException' || i >= 4) throw e;
+          await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+        }
+      }
+    }
+    out[staffWrapName(sub)] = res.CiphertextBlob!;
+  }
+  return out;
+}
+
+async function wrapKeys(
+  c: Pick<Conversation, 'conversationId' | 'type' | 'artistIds' | 'staffSubs'>,
+  key: Uint8Array,
+  viewer?: Viewer,
 ) {
   const wraps: Record<string, Uint8Array> = {};
+  if (isStaffType(c.type)) {
+    if (!viewer) throw new Error('A team chat key needs the creator’s session');
+    return wrapForStaff(viewer, c.conversationId, c.staffSubs ?? [], key);
+  }
   if (c.type === 'artist-to-artist') {
     for (const artistId of c.artistIds) {
       const res = await (
@@ -169,13 +255,81 @@ async function wrapKeys(
   return wraps;
 }
 
-/** Unwraps the conversation key for this viewer: the platform wrap, or their own artist wrap. */
+/**
+ * Team chats made before per-person keys were wrapped under the platform key.
+ * The first member to open one moves it over: a copy for every member under
+ * their own key, and the platform copy removed, so the platform key can't
+ * open it again.
+ */
+async function moveTeamChatToPersonalKeys(viewer: Viewer, c: Conversation): Promise<Uint8Array> {
+  const res = await kms.send(
+    new DecryptCommand({
+      CiphertextBlob: c.keyWraps.platform,
+      EncryptionContext: wrapContext(c.conversationId, undefined, c.type),
+    }),
+  );
+  const key = res.Plaintext!;
+  const wraps = await wrapForStaff(viewer, c.conversationId, c.staffSubs ?? [], key);
+  const { sets, names: wrapNames, values } = wrapsUpdate(wraps);
+  const names = { ...wrapNames, '#p': 'platform' };
+  try {
+    await db.send(
+      new UpdateCommand({
+        TableName: table(),
+        Key: { PK: convPk(c.conversationId), SK: CONV_META },
+        UpdateExpression: `SET ${sets.join(', ')} REMOVE #kw.#p`,
+        ConditionExpression: 'attribute_exists(#kw.#p)',
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+      }),
+    );
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        event: 'chat.teamKeysMoved',
+        conversationId: c.conversationId,
+      }),
+    );
+  } catch (err) {
+    // Another member moved it first; their copies are the same key.
+    if ((err as Error).name !== 'ConditionalCheckFailedException') throw err;
+  }
+  return key;
+}
+
+/**
+ * Unwraps the conversation key for this viewer: their own copy (team chats,
+ * in their own session), their own artist wrap, or the platform wrap.
+ */
 async function conversationKey(viewer: Viewer, c: Conversation): Promise<Uint8Array> {
-  const cacheKey = `${c.conversationId}|${c.type === 'artist-to-artist' ? viewer.artistId : 'platform'}`;
+  const cacheKey = `${c.conversationId}|${
+    isStaffType(c.type)
+      ? staffWrapName(viewer.sub ?? '')
+      : c.type === 'artist-to-artist'
+        ? viewer.artistId
+        : 'platform'
+  }`;
   const hit = keyCache.get(cacheKey);
   if (hit && hit.until > Date.now()) return hit.key;
   let key: Uint8Array;
-  if (c.type === 'artist-to-artist') {
+  if (isStaffType(c.type)) {
+    const source = teamKeySource(viewer, c);
+    if (source === 'own') {
+      const res = await (
+        await staffKms(viewer)
+      ).send(
+        new DecryptCommand({
+          CiphertextBlob: c.keyWraps[staffWrapName(viewer.sub!)],
+          EncryptionContext: staffWrapContext(viewer.sub!, c.conversationId),
+        }),
+      );
+      key = res.Plaintext!;
+    } else if (source === 'move') {
+      key = await moveTeamChatToPersonalKeys(viewer, c);
+    } else {
+      throw new HttpError(403, 'Not in this chat');
+    }
+  } else if (c.type === 'artist-to-artist') {
     const me = viewer.artistId;
     if (viewer.role !== 'artist' || !me || !c.keyWraps[me])
       throw new HttpError(403, 'Not in this chat');
@@ -214,11 +368,12 @@ async function createConversation(
   c: Pick<Conversation, 'conversationId' | 'type' | 'artistIds' | 'title'> &
     Partial<Pick<Conversation, 'staffSubs' | 'admins' | 'staffSettings'>>,
   createdBy: string,
+  viewer?: Viewer,
 ): Promise<Conversation> {
   const key = newConversationKey();
   const conv: Conversation = {
     ...c,
-    keyWraps: await wrapKeys(c, key),
+    keyWraps: await wrapKeys(c, key, viewer),
     createdBy,
     createdAt: new Date().toISOString(),
   };
@@ -899,12 +1054,22 @@ export const handler = handle(async (event) => {
     const next = [...current, ...adding];
     if (next.length > MAX_STAFF_GROUP)
       throw new HttpError(409, `A team group can have up to ${MAX_STAFF_GROUP} people`);
+    // Each new member gets their own copy of the chat key, made in the adder's session.
+    const wraps = await wrapForStaff(
+      viewer,
+      conv.conversationId,
+      adding,
+      await conversationKey(viewer, conv),
+    );
+    const { sets, names, values: wrapValues } = wrapsUpdate(wraps);
+    const values = { ...wrapValues, ':s': next };
     await db.send(
       new UpdateCommand({
         TableName: table(),
         Key: { PK: convPk(conv.conversationId), SK: CONV_META },
-        UpdateExpression: 'SET staffSubs = :s',
-        ExpressionAttributeValues: { ':s': next },
+        UpdateExpression: `SET staffSubs = :s, ${sets.join(', ')}`,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
       }),
     );
     for (const s of adding)
@@ -944,10 +1109,11 @@ export const handler = handle(async (event) => {
       new UpdateCommand({
         TableName: table(),
         Key: { PK: convPk(conv.conversationId), SK: CONV_META },
-        // The last person out closes the group.
+        // The last person out closes the group. Their copy of the key goes with them.
         UpdateExpression: staffSubs.length
-          ? 'SET staffSubs = :s, admins = :a'
-          : 'SET staffSubs = :s, admins = :a, deletedAt = :at',
+          ? 'SET staffSubs = :s, admins = :a REMOVE #kw.#gone'
+          : 'SET staffSubs = :s, admins = :a, deletedAt = :at REMOVE #kw.#gone',
+        ExpressionAttributeNames: { '#kw': 'keyWraps', '#gone': staffWrapName(sub) },
         ExpressionAttributeValues: {
           ':s': staffSubs,
           ':a': admins,
@@ -1103,6 +1269,7 @@ export const handler = handle(async (event) => {
             ...(plan.title ? { title: plan.title } : {}),
           },
           principal.sub,
+          viewer,
         );
         if (plan.type === 'staff-group') {
           const description = body.kind === 'group' ? body.description : undefined;

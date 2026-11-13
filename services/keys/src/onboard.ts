@@ -11,9 +11,9 @@ import {
   PutKeyPolicyCommand,
 } from '@aws-sdk/client-kms';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { artistKeyAlias, assertArtistId } from '@bmg/crypto';
+import { artistKeyAlias, assertArtistId, assertStaffSub, staffKeyAlias } from '@bmg/crypto';
 import { respond, type CfnEvent } from './gate.ts';
-import { artistKeyPolicy, needsRefresh } from './policy.ts';
+import { artistKeyPolicy, needsRefresh, staffKeyPolicy } from './policy.ts';
 
 const kms = new KMSClient({});
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -88,6 +88,70 @@ export async function ensureArtistKey(rawArtistId: string): Promise<OnboardResul
   return { artistId, keyArn, created: true };
 }
 
+export interface StaffKeyResult {
+  staffSub: string;
+  keyArn: string;
+  created: boolean;
+}
+
+/**
+ * Creates a Blueprint person's own KMS key for their copies of team chat keys
+ * (decided 13 Nov 2026). Idempotent, like artist keys: an existing alias
+ * returns the existing key. Invoked by the chat function when someone is first
+ * in a team chat; this role can create keys but never use them.
+ */
+export async function ensureStaffKey(rawSub: string): Promise<StaffKeyResult> {
+  const staffSub = assertStaffSub(rawSub);
+  const project = env('PROJECT');
+  const bmgEnv = env('BMG_ENV');
+  const alias = staffKeyAlias(project, bmgEnv, staffSub);
+  try {
+    const existing = await kms.send(new DescribeKeyCommand({ KeyId: alias }));
+    if (existing.KeyMetadata?.Arn) {
+      return { staffSub, keyArn: existing.KeyMetadata.Arn, created: false };
+    }
+  } catch (err) {
+    if (!(err instanceof NotFoundException)) throw err;
+  }
+  const policy = staffKeyPolicy({
+    accountId: env('ACCOUNT_ID'),
+    staffSub,
+    keyAdminRoleArn: env('KEY_ADMIN_ROLE_ARN'),
+    staffDataAccessRoleArn: env('STAFF_DATA_ACCESS_ROLE_ARN'),
+  });
+  const created = await kms.send(
+    new CreateKeyCommand({
+      Description: `BMG ${bmgEnv}: team chat key for Blueprint person ${staffSub}`,
+      KeyUsage: 'ENCRYPT_DECRYPT',
+      KeySpec: 'SYMMETRIC_DEFAULT',
+      Policy: JSON.stringify(policy),
+      // As for artist keys: this role gives up PutKeyPolicy; the root keeps it.
+      BypassPolicyLockoutSafetyCheck: true,
+      Tags: [
+        { TagKey: 'staffSub', TagValue: staffSub },
+        { TagKey: 'bmg:key-kind', TagValue: 'staff' },
+        { TagKey: 'bmg:env', TagValue: bmgEnv },
+        { TagKey: 'bmg:project', TagValue: project },
+        { TagKey: 'bmg:managed-by', TagValue: 'onboarding' },
+      ],
+    }),
+  );
+  const keyArn = created.KeyMetadata?.Arn;
+  const keyId = created.KeyMetadata?.KeyId;
+  if (!keyArn || !keyId) throw new Error('CreateKey returned no key');
+  await kms.send(new EnableKeyRotationCommand({ KeyId: keyId, RotationPeriodInDays: 365 }));
+  try {
+    await kms.send(new CreateAliasCommand({ AliasName: alias, TargetKeyId: keyId }));
+  } catch (err) {
+    // Two first chats at once: the other call made the alias; use its key.
+    if ((err as Error).name !== 'AlreadyExistsException') throw err;
+    const won = await kms.send(new DescribeKeyCommand({ KeyId: alias }));
+    return { staffSub, keyArn: won.KeyMetadata!.Arn!, created: false };
+  }
+  console.log(JSON.stringify({ level: 'info', event: 'keys.staffKeyCreated', staffSub }));
+  return { staffSub, keyArn, created: true };
+}
+
 /** Records the artist and their key in the main table (first workspace record). */
 async function recordArtist(result: OnboardResult): Promise<void> {
   try {
@@ -158,10 +222,14 @@ export async function refreshKeyPolicies(): Promise<{ checked: number; refreshed
   return { checked, refreshed };
 }
 
-/** Step Functions task: `{ artistId }` → `{ artistId, keyArn, created }`. */
+/**
+ * Step Functions task: `{ artistId }` → `{ artistId, keyArn, created }`.
+ * Chat function (team chats): `{ staffSub }` → `{ staffSub, keyArn, created }`.
+ */
 export const handler = async (
-  event: OnboardInput | Partial<CfnEvent>,
-): Promise<OnboardResult | void> => {
+  event: OnboardInput | { staffSub: string } | Partial<CfnEvent>,
+): Promise<OnboardResult | StaffKeyResult | void> => {
+  if ('staffSub' in event && event.staffSub) return ensureStaffKey(event.staffSub);
   // CloudFormation custom resource: refresh existing key policies on deploy.
   if ('RequestType' in event && event.RequestType && event.ResponseURL) {
     const cfn = event as CfnEvent;

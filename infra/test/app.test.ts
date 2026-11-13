@@ -882,6 +882,75 @@ describe('Phase 6 policy review', () => {
     },
   );
 
+  it.each(['staging', 'prod'] as const)(
+    'lets only the chat function (and the staging gate) use team chat keys (%s)',
+    (envName) => {
+      const env = stacks.environments[envName === 'staging' ? 0 : 1]!;
+      const p = `bmg-${envName}`;
+      const callers = new Set<string>();
+      for (const stack of Object.values(env)) {
+        const t = Template.fromStack(stack);
+        const names = roleNames(t);
+        for (const pol of policiesOf(t)) {
+          const assumes = pol.Properties.PolicyDocument.Statement.some(
+            (st) =>
+              JSON.stringify(st.Action).includes('sts:AssumeRole') &&
+              /role\/bmg-\w+-staff-data-access|"StaffDataAccess[0-9A-F]+"/.test(
+                JSON.stringify(st.Resource),
+              ),
+          );
+          if (!assumes) continue;
+          for (const r of pol.Properties.Roles) {
+            callers.add(String(names[(r as { Ref: string }).Ref]));
+          }
+        }
+      }
+      const role = Object.values(
+        Template.fromStack(env.keys).findResources('AWS::IAM::Role', {
+          Properties: { RoleName: `${p}-staff-data-access` },
+        }),
+      )[0]!;
+      const trust = role.Properties.AssumeRolePolicyDocument.Statement[0].Condition;
+      const trusted = trust.ArnEquals['aws:PrincipalArn'].map((a: string) => a.split(':role/')[1]);
+      expect(new Set(trusted)).toEqual(callers);
+      expect(trusted).toContain(`${p}-api-messages`);
+      expect(trusted.length).toBe(envName === 'prod' ? 1 : 2);
+      // Blueprint people only, tagged with their sub; no artist sessions, no extra tags.
+      expect(trust.StringEquals).toEqual({ 'aws:RequestTag/role': ['bmg-admin', 'bmg-staff'] });
+      expect(trust['ForAllValues:StringEquals']).toEqual({ 'aws:TagKeys': ['staffSub', 'role'] });
+    },
+  );
+
+  it('opens a team chat copy only for the tagged person, and copies only to staff keys', () => {
+    Template.fromStack(stacks.environments[1]!.keys).hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'OpenOnlyYourOwnTeamChatCopies',
+            Action: 'kms:Decrypt',
+            Condition: {
+              StringEquals: {
+                'aws:ResourceTag/bmg:key-kind': 'staff',
+                'aws:ResourceTag/staffSub': '${aws:PrincipalTag/staffSub}',
+                'kms:EncryptionContext:staffSub': '${aws:PrincipalTag/staffSub}',
+              },
+            },
+          }),
+          Match.objectLike({
+            Sid: 'MakeCopiesForOtherBlueprintPeople',
+            Action: 'kms:Encrypt',
+            Condition: {
+              StringEquals: {
+                'aws:ResourceTag/bmg:key-kind': 'staff',
+                'aws:ResourceTag/bmg:env': 'prod',
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
   it('refreshes existing artist key policies on every environment (finding K1)', () => {
     for (const env of stacks.environments) {
       Template.fromStack(env.keys).resourceCountIs('Custom::BmgKeyPolicyRefresh', 1);

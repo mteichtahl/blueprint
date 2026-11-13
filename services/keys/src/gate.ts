@@ -1,7 +1,12 @@
-import { DecryptCommand, GenerateDataKeyCommand, KMSClient } from '@aws-sdk/client-kms';
+import {
+  DecryptCommand,
+  EncryptCommand,
+  GenerateDataKeyCommand,
+  KMSClient,
+} from '@aws-sdk/client-kms';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
-import { DataAccessSessions, type SessionRole } from '@bmg/crypto';
+import { DataAccessSessions, staffWrapContext, type SessionRole } from '@bmg/crypto';
 
 /**
  * Phase 2 gate (design §19): "a cross-tenant decrypt attempt is denied by KMS".
@@ -12,6 +17,11 @@ import { DataAccessSessions, type SessionRole } from '@bmg/crypto';
  */
 
 export const GATE_ARTISTS = { a: 'art_isolationgatea', b: 'art_isolationgateb' } as const;
+/** Two permanent test Blueprint people for the team chat key checks (staging). */
+export const GATE_STAFF = {
+  a: 'eeeeeeee-0000-4000-8000-00000000000a',
+  b: 'eeeeeeee-0000-4000-8000-00000000000b',
+} as const;
 
 export type Outcome = 'allowed' | 'denied';
 
@@ -68,6 +78,7 @@ export function failed(results: CheckResult[]): CheckResult[] {
 
 interface GateDeps {
   dataAccessRoleArn: string;
+  staffDataAccessRoleArn: string;
   onboardFunctionName: string;
   region: string;
 }
@@ -93,6 +104,118 @@ async function ensureGateKeys(deps: GateDeps): Promise<Record<'a' | 'b', string>
     });
   }
   return keys;
+}
+
+async function ensureGateStaffKeys(deps: GateDeps): Promise<Record<'a' | 'b', string>> {
+  const lambda = new LambdaClient({ region: deps.region });
+  const keys = {} as Record<'a' | 'b', string>;
+  for (const [slot, staffSub] of Object.entries(GATE_STAFF) as Array<['a' | 'b', string]>) {
+    keys[slot] = await withRetry(async () => {
+      const res = await lambda.send(
+        new InvokeCommand({
+          FunctionName: deps.onboardFunctionName,
+          Payload: Buffer.from(JSON.stringify({ staffSub })),
+        }),
+      );
+      const body = JSON.parse(Buffer.from(res.Payload ?? []).toString() || '{}');
+      if (res.FunctionError || !body.keyArn)
+        throw new Error(`Could not prepare the gate key for ${staffSub}: ${res.FunctionError}`);
+      return body.keyArn as string;
+    });
+  }
+  return keys;
+}
+
+/**
+ * Team chats (decided 13 Nov 2026): a copy of a chat key made for one
+ * Blueprint person opens only in that person's own session. Any Blueprint
+ * session may make a copy for someone; nobody else can open it, artists'
+ * sessions included.
+ */
+export async function runStaffKeyGate(deps: GateDeps): Promise<CheckResult[]> {
+  const keys = await ensureGateStaffKeys(deps);
+  const sessions = new DataAccessSessions(new STSClient({ region: deps.region }));
+  const kmsAsStaff = async (staffSub: string) =>
+    new KMSClient({
+      region: deps.region,
+      credentials: await withRetry(() =>
+        sessions.staffCredentials({
+          roleArn: deps.staffDataAccessRoleArn,
+          staffSub,
+          role: 'bmg-staff',
+        }),
+      ),
+    });
+  const A = GATE_STAFF.a;
+  const B = GATE_STAFF.b;
+  const ctxA = staffWrapContext(A, 'sg-isolationgate00');
+  const ctxB = staffWrapContext(B, 'sg-isolationgate00');
+  const staffA = await kmsAsStaff(A);
+  const staffB = await kmsAsStaff(B);
+  const artistA = new KMSClient({
+    region: deps.region,
+    credentials: await withRetry(() =>
+      sessions.credentials({
+        roleArn: deps.dataAccessRoleArn,
+        artistId: GATE_ARTISTS.a,
+        role: 'bmg-admin',
+      }),
+    ),
+  });
+  const chatKey = new Uint8Array(32).fill(7);
+
+  const results: CheckResult[] = [];
+  const check = async (name: string, expected: Outcome, call: () => Promise<unknown>) => {
+    const { outcome, detail } = await attempt(
+      expected === 'allowed' ? () => withRetry(call) : call,
+    );
+    results.push({ name, expected, actual: outcome, ...(detail ? { detail } : {}) });
+  };
+
+  const copyForA = await withRetry(() =>
+    staffB.send(new EncryptCommand({ KeyId: keys.a, Plaintext: chatKey, EncryptionContext: ctxA })),
+  );
+  const blobA = copyForA.CiphertextBlob!;
+
+  await check('Blueprint person B makes a team chat copy for A', 'allowed', () =>
+    staffB.send(new EncryptCommand({ KeyId: keys.a, Plaintext: chatKey, EncryptionContext: ctxA })),
+  );
+  await check('Blueprint person A opens their own copy', 'allowed', () =>
+    staffA.send(new DecryptCommand({ CiphertextBlob: blobA, EncryptionContext: ctxA })),
+  );
+  await check('Blueprint person B opens A’s copy', 'denied', () =>
+    staffB.send(new DecryptCommand({ CiphertextBlob: blobA, EncryptionContext: ctxA })),
+  );
+  await check('Blueprint person B opens A’s copy with a forged context', 'denied', () =>
+    staffB.send(new DecryptCommand({ CiphertextBlob: blobA, EncryptionContext: ctxB })),
+  );
+  await check('a copy under A’s key with B in the context', 'denied', () =>
+    staffA.send(new EncryptCommand({ KeyId: keys.a, Plaintext: chatKey, EncryptionContext: ctxB })),
+  );
+  await check('an artist-data session opens A’s copy', 'denied', () =>
+    artistA.send(new DecryptCommand({ CiphertextBlob: blobA, EncryptionContext: ctxA })),
+  );
+  await check('untagged session on the staff data-access role', 'denied', () =>
+    new STSClient({ region: deps.region }).send(
+      new AssumeRoleCommand({
+        RoleArn: deps.staffDataAccessRoleArn,
+        RoleSessionName: 'gate-untagged',
+      }),
+    ),
+  );
+  await check('an artist-tagged session on the staff data-access role', 'denied', () =>
+    new STSClient({ region: deps.region }).send(
+      new AssumeRoleCommand({
+        RoleArn: deps.staffDataAccessRoleArn,
+        RoleSessionName: 'gate-artist',
+        Tags: [
+          { Key: 'staffSub', Value: A },
+          { Key: 'role', Value: 'artist' },
+        ],
+      }),
+    ),
+  );
+  return results;
 }
 
 export async function runIsolationGate(deps: GateDeps): Promise<CheckResult[]> {
@@ -195,6 +318,7 @@ export async function runIsolationGate(deps: GateDeps): Promise<CheckResult[]> {
       new AssumeRoleCommand({ RoleArn: deps.dataAccessRoleArn, RoleSessionName: 'gate-untagged' }),
     ),
   );
+  results.push(...(await runStaffKeyGate(deps)));
   return results;
 }
 
@@ -206,6 +330,7 @@ function depsFromEnv(): GateDeps {
   };
   return {
     dataAccessRoleArn: need('DATA_ACCESS_ROLE_ARN'),
+    staffDataAccessRoleArn: need('STAFF_DATA_ACCESS_ROLE_ARN'),
     onboardFunctionName: need('ONBOARD_FUNCTION_NAME'),
     region: need('AWS_REGION'),
   };

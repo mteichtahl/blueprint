@@ -655,3 +655,37 @@ export function wrapContext(
     ? { artistId, visibility: 'private', conversationId }
     : { purpose: 'conversation-key', conversationId };
 }
+
+// ── Team chat keys: one copy per member (decided 13 Nov 2026) ─────────────
+/** Where a member's copy of a team chat key is kept in `keyWraps`. */
+export const staffWrapName = (sub: string) => `staff:${sub}`;
+
+/**
+ * Which copy of a team chat key this viewer opens: their own (in their own
+ * session), or, for a chat made before per-person keys, the platform copy,
+ * which is then moved over. Anyone else gets nothing.
+ */
+export function teamKeySource(
+  viewer: Viewer,
+  c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs' | 'keyWraps'>,
+): 'own' | 'move' | 'none' {
+  if (!isStaffType(c.type) || access(viewer, c) !== 'read-write' || !viewer.sub) return 'none';
+  if (c.keyWraps[staffWrapName(viewer.sub)]) return 'own';
+  return c.keyWraps.platform ? 'move' : 'none';
+}
+
+/** `SET` clauses that store members' copies in `keyWraps`, with their names and values. */
+export function wrapsUpdate(wraps: Record<string, Uint8Array>): {
+  sets: string[];
+  names: Record<string, string>;
+  values: Record<string, Uint8Array>;
+} {
+  const names: Record<string, string> = { '#kw': 'keyWraps' };
+  const values: Record<string, Uint8Array> = {};
+  const sets = Object.entries(wraps).map(([name, blob], i) => {
+    names[`#w${i}`] = name;
+    values[`:w${i}`] = blob;
+    return `#kw.#w${i} = :w${i}`;
+  });
+  return { sets, names, values };
+}

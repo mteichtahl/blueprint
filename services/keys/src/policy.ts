@@ -130,3 +130,80 @@ export function needsRefresh(currentPolicy: string, keyAdminRoleArn: string): bo
     return actions.some((a) => KEY_ADMIN_ACTIONS.indexOf(a as string) === -1);
   });
 }
+
+// ── Team chats: each Blueprint person's own key (decided 13 Nov 2026) ─────
+
+export interface StaffKeyPolicyInput {
+  accountId: string;
+  /** The person's Cognito sub. */
+  staffSub: string;
+  keyAdminRoleArn: string;
+  /** `bmg-<env>-staff-data-access`: the only role that can use the key, per tagged session. */
+  staffDataAccessRoleArn: string;
+}
+
+/**
+ * The key policy put on a Blueprint person's own key. Each team chat key is
+ * wrapped once per member under that member's key:
+ * - **Encrypt** (making a member's copy) is allowed from any Blueprint
+ *   person's session, so adding someone to a group works, but only with the
+ *   key owner's sub in the encryption context.
+ * - **Decrypt** (opening a copy) is allowed only in the owner's own session.
+ * Nothing else in the account, the platform key included, can open them.
+ */
+export function staffKeyPolicy(input: StaffKeyPolicyInput) {
+  const root = `arn:aws:iam::${input.accountId}:root`;
+  return {
+    Version: '2012-10-17',
+    Statement: [
+      {
+        Sid: 'AccountAdministrationOnly',
+        Effect: 'Allow',
+        Principal: { AWS: root },
+        Action: ADMIN_ACTIONS,
+        Resource: '*',
+      },
+      {
+        Sid: 'KeyAdminRole',
+        Effect: 'Allow',
+        Principal: { AWS: input.keyAdminRoleArn },
+        Action: KEY_ADMIN_ACTIONS,
+        Resource: '*',
+      },
+      {
+        Sid: 'WrapForThisPersonFromAnyBlueprintSession',
+        Effect: 'Allow',
+        Principal: { AWS: input.staffDataAccessRoleArn },
+        Action: 'kms:Encrypt',
+        Resource: '*',
+        Condition: {
+          StringEquals: {
+            'kms:EncryptionContext:staffSub': input.staffSub,
+            'aws:PrincipalTag/role': ['bmg-admin', 'bmg-staff'],
+          },
+        },
+      },
+      {
+        Sid: 'OpenOnlyInThisPersonsSession',
+        Effect: 'Allow',
+        Principal: { AWS: input.staffDataAccessRoleArn },
+        Action: 'kms:Decrypt',
+        Resource: '*',
+        Condition: {
+          StringEquals: {
+            'aws:PrincipalTag/staffSub': input.staffSub,
+            'kms:EncryptionContext:staffSub': input.staffSub,
+          },
+        },
+      },
+      {
+        Sid: 'DeletionOnlyByOffboarding',
+        Effect: 'Deny',
+        Principal: { AWS: '*' },
+        Action: ['kms:ScheduleKeyDeletion', 'kms:DisableKey'],
+        Resource: '*',
+        Condition: { StringNotEquals: { 'aws:PrincipalTag/bmg:role': 'offboarding' } },
+      },
+    ],
+  };
+}
