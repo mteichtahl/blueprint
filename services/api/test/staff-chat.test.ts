@@ -193,3 +193,16 @@ describe('team groups: members and admins', () => {
     });
   });
 });
+
+describe('cards shared in chats', () => {
+  it('are marked unopenable for staff not assigned to that artist', async () => {
+    const { canOpenAttachment } = await import('../src/messages/model.ts');
+    expect(canOpenAttachment(sam, { artistId: A })).toBe(true);
+    expect(canOpenAttachment(sam, { artistId: 'art_bbbbbbbbbbbb' })).toBe(false);
+    expect(canOpenAttachment(jo, { artistId: A })).toBe(false);
+    expect(canOpenAttachment(kyra, { artistId: 'art_bbbbbbbbbbbb' })).toBe(true);
+    expect(canOpenAttachment(sam, {})).toBe(true);
+    // Artists' own rules apply to them (shared files, shared gigs).
+    expect(canOpenAttachment(artist, { artistId: 'art_bbbbbbbbbbbb' })).toBe(true);
+  });
+});

@@ -81,6 +81,8 @@ export interface ChatAttachment {
   scope?: 'library' | 'artist';
   title: string;
   subtitle: string;
+  /** False when the viewer can't open this item (e.g. an artist not assigned to them). */
+  canOpen?: boolean;
 }
 
 interface ChatMessage {
@@ -1759,6 +1761,19 @@ function AttachmentCard({
       setState(/no such file/i.test(msg) ? 'This file was deleted' : msg);
     }
   }
+  // Shared in a team chat by someone with access to an artist this viewer doesn't have.
+  if (a.canOpen === false)
+    return (
+      <span className="wa-att wa-att-locked">
+        <span className={`wa-tag wa-tag-${a.kind}`}>{tag}</span>
+        <span className="min-w-0 flex-1">
+          <b className="block truncate">{a.title}</b>
+          <span className="wa-sub block">
+            <Icon name="lock" size={12} /> You don’t have access to this
+          </span>
+        </span>
+      </span>
+    );
   return (
     <span className="flex flex-col">
       <button
@@ -2562,7 +2577,8 @@ function MediaGrid({ ctx, items }: { ctx: ChatCtx; items: ChatAttachment[] }) {
             key={`${a.id}-${i}`}
             type="button"
             className="wa-tile"
-            title={a.title}
+            title={a.canOpen === false ? `${a.title}: you don’t have access to this` : a.title}
+            disabled={a.canOpen === false}
             onClick={() => ctx.onNavigate(attachmentView(a, ctx.isBmg))}
           >
             <span className={`wa-tag wa-tag-${a.kind}`}>{attachmentTag(a)}</span>
