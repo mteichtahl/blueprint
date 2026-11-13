@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addressPages,
   embeddable,
+  escapeRegExp,
   findAddress,
   findSiteName,
   fromText,
@@ -80,5 +81,13 @@ describe('embeddable (can it sit beside the map?)', () => {
       }),
     ).toBe(false);
     expect(embeddable('http://a.com/', {})).toBe(false);
+  });
+});
+
+describe('escapeRegExp', () => {
+  it('escapes every special character, backslash included', () => {
+    const raw = 'a.b:c\\d*e(f)[g]{h}|i^j$k+l?m/n-o';
+    expect(new RegExp(`^${escapeRegExp(raw)}$`).test(raw)).toBe(true);
+    expect(escapeRegExp('\\')).toBe('\\\\');
   });
 });
