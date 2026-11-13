@@ -705,3 +705,26 @@ The app moves from the corporate canvas look to **Headliner** (project doc `clau
 - **Logo:** the official white-on-navy file, cropped to its artwork and blended into the navy (`mix-blend-mode: lighten`). It replaces the waveform stand-in in the sidebar and on sign-in. On a light surface it shows as a navy tile until the navy-on-white file is added.
 - **Contrast:** `contrast.test.ts` gains the pop button, its hover, the current sidebar item, the phone tab bar, the selected workspace tab and Ask BMG. The field border on paper is #6F7987 (3.6:1). Deep-coral text written into pages turns pale coral (#F2A3A0) in dark mode.
 - **Not changed:** email templates and the PDFs keep their current branded layout.
+
+## Chat quick reactions (13 Nov 2026)
+
+Marc asked for quick reactions in Chat on the phone and the web: 👍 👎 😊 😢.
+This reverses the rev 7 call ("no reactions").
+
+- **Where:** the four emoji lead the hover bar on a message (desktop) and the
+  bar that opens when a message is tapped (phone), before Reply and Star.
+  Reactions show as chips under the bubble with a count; hovering (or a screen
+  reader) names who reacted. Tapping a chip toggles yours.
+- **One reaction per person per message**, like WhatsApp: tapping the same one
+  again takes it off, a different one swaps it. Each Blueprint person counts
+  separately (keyed by Cognito sub, not the shared Blueprint member).
+- **Who can react:** anyone who can read the chat, including announcements and
+  "only admins can send" groups. System notes can't be reacted to.
+- **Storage:** a `reactions` map on the message item (`sub → { e, n, at }`), so
+  reading a page needs no extra query. Reactions are not sealed: they are one of
+  four fixed emoji plus a name, like `senderName` already is. Access is the same
+  as the chat's, so artist-to-artist reactions stay private from Blueprint.
+- **No new route:** the API stack is at its resource limit, so reactions ride on
+  `PATCH /conversations/{id}/me` as `react: { messageId, createdAt, emoji | null }`.
+  The response is the message's updated reaction list; members get a realtime
+  refresh. No push or email notification for reactions.
