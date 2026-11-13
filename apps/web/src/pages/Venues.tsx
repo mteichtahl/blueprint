@@ -24,6 +24,7 @@ import {
   WaveLoader,
 } from '../components/ui.tsx';
 import { archiveActions, ContactPicker, type Contact } from './Contacts.tsx';
+import { Dialog } from '../components/Folders.tsx';
 import {
   LogoTile,
   lookupableUrl,
@@ -81,17 +82,56 @@ export function mapsQuery(v: Pick<Venue, 'name' | 'address' | 'suburb'>): string
   return where ? `${v.name}, ${where}` : '';
 }
 
+/** What the API learnt from a venue's website (POST /venues/site-lookup). */
+export interface SiteInfo {
+  found: boolean;
+  embeddable: boolean;
+  url?: string;
+  name?: string;
+  address?: string;
+  suburb?: string;
+}
+
+const siteInfoCache = new Map<string, Promise<SiteInfo>>();
+
+/** Looks at a venue's website once per page load (shared by the form and the viewer). */
+export function lookupSite(cfg: AppConfig, token: string, url: string): Promise<SiteInfo> {
+  let p = siteInfoCache.get(url);
+  if (!p) {
+    p = api<SiteInfo>(cfg, token, 'POST', '/venues/site-lookup', { url });
+    p.catch(() => siteInfoCache.delete(url));
+    siteInfoCache.set(url, p);
+  }
+  return p;
+}
+
+/** Text that is plainly a web address ("https://…" or "www.…"), not a name or street. */
+export const looksLikeUrl = (s: string) => /^(?:https?:\/\/|www\.)\S+\.\S+$/i.test(s.trim());
+
+/** Map and website tiles share one size, side by side (stacked on a phone). */
+const PANE = 'h-80 w-full rounded-xl border border-input';
+
+function EmptyPane({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className={`${PANE} flex flex-col items-center justify-center gap-2 bg-muted/40 p-4 text-center`}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** The venue's address on an embedded Google map, with a link to open it in Maps. */
 export function VenueMap({ venue }: { venue: Pick<Venue, 'name' | 'address' | 'suburb'> }) {
   const q = mapsQuery(venue);
   if (!q) return null;
   const query = encodeURIComponent(q);
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       <iframe
         title={`Map of ${venue.name}`}
         src={`https://www.google.com/maps?q=${query}&output=embed`}
-        className="h-64 w-full rounded-xl border border-input"
+        className={PANE}
         loading="lazy"
         referrerPolicy="no-referrer-when-downgrade"
         sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
@@ -104,6 +144,116 @@ export function VenueMap({ venue }: { venue: Pick<Venue, 'name' | 'address' | 's
       >
         Open in Google Maps
       </a>
+    </div>
+  );
+}
+
+/**
+ * The venue's own website in a sandboxed frame. Many sites refuse to be shown
+ * inside another app; the API checks first, and if so we say so and link out.
+ */
+export function VenueWebsite({
+  cfg,
+  token,
+  venue,
+}: {
+  cfg: AppConfig;
+  token: string;
+  venue: Pick<Venue, 'name' | 'website'>;
+}) {
+  const url = lookupableUrl(venue.website);
+  const [info, setInfo] = useState<SiteInfo | null>(null);
+  useEffect(() => {
+    setInfo(null);
+    if (!url) return;
+    let live = true;
+    lookupSite(cfg, token, url)
+      .then((r) => live && setInfo(r))
+      .catch(() => live && setInfo({ found: false, embeddable: false }));
+    return () => {
+      live = false;
+    };
+  }, [cfg, token, url]);
+  if (!url) return null;
+  const host = new URL(url).hostname.replace(/^www\./, '');
+  const open = (
+    <a
+      className="self-start text-sm font-bold underline"
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+    >
+      Open {host}
+    </a>
+  );
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {info === null ? (
+        <EmptyPane>
+          <WaveLoader />
+          <span className="src">Loading {host}…</span>
+        </EmptyPane>
+      ) : info.embeddable ? (
+        <iframe
+          title={`Website of ${venue.name}`}
+          src={info.url ?? url}
+          className={`${PANE} bg-white`}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
+        />
+      ) : (
+        <EmptyPane>
+          <b>{host}</b>
+          <span className="src">
+            {info.found
+              ? "This website doesn't allow itself to be shown inside other apps."
+              : "We couldn't reach this website just now."}
+          </span>
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-[38px] items-center rounded-full border-2 border-primary bg-primary px-3.5 font-title text-sm font-extrabold text-primary-foreground no-underline hover:opacity-90"
+          >
+            Open website
+          </a>
+        </EmptyPane>
+      )}
+      {open}
+    </div>
+  );
+}
+
+/** Map and website, side by side and the same size; a placeholder fills a missing one. */
+export function VenueMapAndSite({
+  cfg,
+  token,
+  venue,
+}: {
+  cfg: AppConfig;
+  token: string;
+  venue: Pick<Venue, 'name' | 'address' | 'suburb' | 'website'>;
+}) {
+  const hasMap = !!mapsQuery(venue);
+  const hasSite = !!lookupableUrl(venue.website);
+  if (!hasMap && !hasSite) return null;
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="venue-map-and-site">
+      {hasMap ? (
+        <VenueMap venue={venue} />
+      ) : (
+        <EmptyPane>
+          <span className="src">No address yet, so no map.</span>
+        </EmptyPane>
+      )}
+      {hasSite ? (
+        <VenueWebsite cfg={cfg} token={token} venue={venue} />
+      ) : (
+        <EmptyPane>
+          <span className="src">No website yet.</span>
+        </EmptyPane>
+      )}
     </div>
   );
 }
@@ -176,10 +326,11 @@ export function VenueForm({
   onUseExisting?: (v: Venue) => void;
 }) {
   const [f, setF] = useState({
-    name: venue?.name ?? initialName,
+    // Typed a web address into the venue picker? That's the website, not the name.
+    name: venue?.name ?? (looksLikeUrl(initialName) ? '' : initialName),
     capacity: venue ? String(venue.capacity || '') : '',
     backline: venue?.backline ?? false,
-    website: venue?.website ?? '',
+    website: venue?.website ?? (looksLikeUrl(initialName) ? initialName.trim() : ''),
     address: venue?.address ?? '',
     suburb: venue?.suburb ?? '',
     bmgNotes: venue?.bmgNotes ?? '',
@@ -191,6 +342,68 @@ export function VenueForm({
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
+
+  // ── Address from the website ──
+  // Paste the venue's website (or a web address into the name or address box)
+  // and we look there for the street address and suburb. We only fill empty
+  // boxes, or ones we filled ourselves; anything they typed is left alone.
+  const [addrLooking, setAddrLooking] = useState(false);
+  const [addrNote, setAddrNote] = useState<string | null>(null);
+  const addrFilled = useRef<{ address: string; suburb: string; name: string } | null>(null);
+  const addrFor = useRef<string | null>(lookupableUrl(venue?.website ?? ''));
+  const addrRun = useRef(0);
+
+  /** Typing into the name, address or suburb box; a web address goes to Website. */
+  const typed = (k: 'name' | 'address' | 'suburb') => (e: { target: { value: string } }) => {
+    const value = e.target.value;
+    if (k !== 'suburb' && looksLikeUrl(value) && !f.website.trim()) {
+      setF((cur) => ({ ...cur, [k]: '', website: value.trim() }));
+      return;
+    }
+    setF((cur) => ({ ...cur, [k]: value }));
+  };
+
+  async function lookupAddress(url: string) {
+    const run = ++addrRun.current;
+    addrFor.current = url;
+    setAddrLooking(true);
+    setAddrNote(null);
+    try {
+      const res = await lookupSite(cfg, token, url);
+      if (run !== addrRun.current) return;
+      const found = res.found && !!res.address;
+      setF((cur) => {
+        const ours = addrFilled.current;
+        const free = (k: 'address' | 'suburb' | 'name') =>
+          !cur[k].trim() || (ours !== null && cur[k] === ours[k]);
+        const next = { ...cur };
+        if (found && free('address') && free('suburb')) {
+          next.address = res.address ?? '';
+          next.suburb = res.suburb ?? '';
+        }
+        if (res.name && free('name')) next.name = res.name;
+        addrFilled.current = { address: next.address, suburb: next.suburb, name: next.name };
+        return next;
+      });
+      setAddrNote(
+        found
+          ? "Address found on the venue's website. Check it's right."
+          : "We couldn't find an address on that website. Type it in.",
+      );
+    } catch {
+      if (run === addrRun.current) setAddrNote(null);
+    } finally {
+      if (run === addrRun.current) setAddrLooking(false);
+    }
+  }
+
+  // Look a moment after they stop typing the website.
+  useEffect(() => {
+    const url = lookupableUrl(f.website);
+    if (!url || url === addrFor.current) return;
+    const t = setTimeout(() => void lookupAddress(url), 900);
+    return () => clearTimeout(t);
+  }, [f.website]);
 
   // ── Logo ──
   // 'saved': the venue's current logo, unchanged. 'new': a logo to save (uploaded
@@ -444,7 +657,12 @@ export function VenueForm({
         </label>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Venue name" value={f.name} onChange={set('name')} />
+        <Field
+          label="Venue name"
+          value={f.name}
+          onChange={typed('name')}
+          placeholder="Name, or paste the venue's website"
+        />
         <Field
           label="Capacity"
           inputMode="numeric"
@@ -453,15 +671,37 @@ export function VenueForm({
           placeholder="e.g. 350"
           {...(capOk ? {} : { hint: 'Numbers only' })}
         />
-        <Field label="Address" value={f.address} onChange={set('address')} />
-        <Field label="Suburb or city" value={f.suburb} onChange={set('suburb')} />
+        <Field
+          label="Address"
+          value={f.address}
+          onChange={typed('address')}
+          disabled={addrLooking}
+          placeholder={
+            addrLooking ? "Looking on the venue's website…" : 'Street, or paste a website'
+          }
+        />
+        <Field
+          label="Suburb or city"
+          value={f.suburb}
+          onChange={typed('suburb')}
+          disabled={addrLooking}
+        />
         <Field
           label="Website"
           type="url"
           value={f.website}
           onChange={set('website')}
-          onBlur={lookNow}
+          onBlur={() => {
+            lookNow();
+            const url = lookupableUrl(f.website);
+            if (url && url !== addrFor.current) void lookupAddress(url);
+          }}
           placeholder="https://"
+          {...(addrLooking
+            ? { hint: "Looking for the address on the venue's website…" }
+            : addrNote
+              ? { hint: addrNote }
+              : {})}
         />
         <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
           <legend className="mb-1.5 text-[15px] font-bold">Backline</legend>
@@ -513,7 +753,7 @@ export function VenueForm({
       <div className="flex gap-2">
         <Button
           variant="cta"
-          disabled={busy || !f.name.trim() || !capOk}
+          disabled={busy || addrLooking || !f.name.trim() || !capOk}
           onClick={() => void save()}
         >
           {busy ? 'Saving…' : venue ? 'Save' : 'Add venue'}
@@ -541,6 +781,138 @@ function Person({ role, p }: { role: string; p: VenuePerson | null }) {
         </a>
       )}
     </div>
+  );
+}
+
+/** Who at a venue can be reached: manager and booker, once each, with how. */
+export function venueContacts(v: Pick<Venue, 'manager' | 'booker'>) {
+  const out: { role: string; p: VenuePerson }[] = [];
+  for (const [role, p] of [
+    ['Venue booker', v.booker],
+    ['Venue manager', v.manager],
+  ] as const) {
+    if (!p || (!p.email && !p.phone)) continue;
+    const same = out.find((o) => o.p.contactId === p.contactId);
+    if (same) same.role = 'Venue manager and booker';
+    else out.push({ role, p });
+  }
+  return out;
+}
+
+const linkBtn =
+  'inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full border-2 px-5 font-title text-[15px] font-extrabold no-underline transition';
+
+/**
+ * "Contact venue": pick who (booker or manager), then email or phone them.
+ * With only one person, it goes straight to how.
+ */
+export function ContactVenue({ venue, onEdit }: { venue: Venue; onEdit?: () => void }) {
+  const people = venueContacts(venue);
+  const [open, setOpen] = useState(false);
+  const [who, setWho] = useState<string | null>(null);
+  const close = () => {
+    setOpen(false);
+    setWho(null);
+  };
+  const chosen = people.length === 1 ? people[0]! : people.find((o) => o.p.contactId === who);
+  const subject = encodeURIComponent(`Booking enquiry: ${venue.name}`);
+  return (
+    <>
+      <Button variant="cta" onClick={() => setOpen(true)}>
+        <Icon name="phone" size={16} />
+        Contact venue
+      </Button>
+      {open && (
+        <Dialog
+          title={`Contact ${venue.name}`}
+          onClose={close}
+          footer={
+            <Button variant="ghost" onClick={close}>
+              Close
+            </Button>
+          }
+        >
+          {people.length === 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="m-0">
+                No one at {venue.name} has an email or phone number yet. Add a venue manager or
+                booker with their details.
+              </p>
+              {onEdit && (
+                <Button
+                  variant="navy"
+                  onClick={() => {
+                    close();
+                    onEdit();
+                  }}
+                >
+                  Edit venue
+                </Button>
+              )}
+            </div>
+          ) : !chosen ? (
+            <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+              <legend className="mb-1.5 text-[15px] font-bold">Who do you want to contact?</legend>
+              {people.map(({ role, p }) => (
+                <button
+                  key={p.contactId}
+                  type="button"
+                  className="flex flex-col items-start gap-0.5 rounded-lg border border-input bg-card p-3 text-left hover:bg-[#F6F8FA] dark:hover:bg-secondary"
+                  onClick={() => setWho(p.contactId)}
+                >
+                  <span className="eyebrow text-muted-foreground">{role}</span>
+                  <b>{p.name}</b>
+                  <span className="src">
+                    {[p.email && 'Email', p.phone && 'Phone'].filter(Boolean).join(' or ')}
+                  </span>
+                </button>
+              ))}
+            </fieldset>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {people.length > 1 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="self-start"
+                  onClick={() => setWho(null)}
+                >
+                  ← Someone else
+                </Button>
+              )}
+              <div className="flex flex-col gap-0.5">
+                <span className="eyebrow text-muted-foreground">{chosen.role}</span>
+                <b>{chosen.p.name}</b>
+                {chosen.p.jobTitle && <span className="src">{chosen.p.jobTitle}</span>}
+              </div>
+              <p className="m-0 text-[15px] font-bold">How do you want to get in touch?</p>
+              <div className="flex flex-wrap gap-2">
+                {chosen.p.email && (
+                  <a
+                    className={`${linkBtn} border-primary bg-primary text-primary-foreground hover:opacity-90`}
+                    href={`mailto:${chosen.p.email}?subject=${subject}`}
+                    onClick={close}
+                  >
+                    <Icon name="mail" size={16} />
+                    Email {chosen.p.email}
+                  </a>
+                )}
+                {chosen.p.phone && (
+                  <a
+                    className={`${linkBtn} border-foreground bg-card text-foreground hover:bg-[#F6F8FA] dark:hover:bg-secondary`}
+                    href={`tel:${chosen.p.phone.replace(/\s/g, '')}`}
+                    onClick={close}
+                  >
+                    <Icon name="phone" size={16} />
+                    Call {chosen.p.phone}
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+        </Dialog>
+      )}
+    </>
   );
 }
 
@@ -612,16 +984,14 @@ export function Venues({
             </>
           }
           back={{ to: 'Venues', onClick: toList }}
+          primary={
+            <ContactVenue venue={v} {...(v.canEdit ? { onEdit: () => setEditing(true) } : {})} />
+          }
           onEdit={v.canEdit ? () => setEditing(true) : undefined}
         >
           {actionError && <Notice tone="error">{actionError}</Notice>}
           {note && <Notice tone="success">{note}</Notice>}
-          <VenueMap venue={v} />
-          {v.website && (
-            <a href={v.website} target="_blank" rel="noreferrer">
-              {v.website}
-            </a>
-          )}
+          <VenueMapAndSite cfg={cfg} token={token} venue={v} />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <Person role="Venue manager" p={v.manager} />
             <Person role="Venue booker" p={v.booker} />
