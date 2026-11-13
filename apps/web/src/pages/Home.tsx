@@ -843,10 +843,19 @@ function StudioHq({
                 <Avatar
                   name={c.title}
                   artistId={c.artists.find((x) => x.displayName === c.title)?.artistId}
+                  // Team chats (rev 14): the teammate's own picture.
+                  userSub={
+                    c.type === 'staff-direct'
+                      ? (c.members?.find((m) => !m.me) ?? c.members?.[0])?.sub
+                      : undefined
+                  }
                 />
               )}
               <span className="min-w-0 flex-1">
-                <b className="block">{c.title}</b>
+                <b className="block">
+                  {c.title}
+                  {c.team && <span className="wa-teamtag">Team</span>}
+                </b>
                 <span className="src block truncate">{c.preview ?? 'No messages yet'}</span>
               </span>
               {c.unreadCount > 0 && (

@@ -182,7 +182,7 @@ export function buildTools(ctx: () => TurnContext, fetchImpl: Fetch = fetch) {
         description: describe(
           c,
           'list_artists',
-          "List the artists whose workspaces you can see, with their ids. Artists who turned AI off aren't included.",
+          "List the artists whose workspaces you can see, with their ids, and the Blueprint team (team: sub, name, job title) for messaging a teammate. Artists who turned AI off aren't included. Team chats themselves can't be read.",
         ),
         inputSchema: z.object({}),
         callback: async () => {

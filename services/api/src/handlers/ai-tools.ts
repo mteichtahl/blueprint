@@ -14,6 +14,7 @@ import type { Gig } from '../events/model.ts';
 import { authContext, db, env, handle, HttpError, json, principalFor } from '../lib.ts';
 import type { Submission } from '../review/model.ts';
 import { artistPk, PLAN_SK, ROSTER_GSI1PK, type Plan, type Todo } from '../workspace/model.ts';
+import { people, type Person } from '../files/people.ts';
 
 /**
  * Read tools for the assistant (design 10.2): `/ai/tools/*`, called by the
@@ -112,8 +113,14 @@ export const handler = handle(async (event) => {
       }
       const states = await aiStates(artists.map((a) => a.artistId));
       const visible = artists.filter((a) => states[a.artistId]);
+      // The Blueprint team (rev 14), so the assistant can draft a message to a
+      // teammate. Names and job titles only; team chats themselves are never read here.
+      const team = (await people().catch(() => [] as Person[]))
+        .filter((p) => p.role !== 'artist' && p.sub !== principal.sub)
+        .map((p) => ({ sub: p.sub, name: p.displayName, jobTitle: p.jobTitle }));
       return json(200, {
         artists: visible,
+        team,
         notUsingAi: artists.length - visible.length,
         note:
           artists.length > visible.length

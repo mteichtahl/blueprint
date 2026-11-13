@@ -360,7 +360,11 @@ export class ApiStack extends BmgStack {
       'AiTools',
       'ai-tools',
       "the assistant's read tools",
-      { AI_RETRIEVE_ROLE_ARN: `arn:aws:iam::${this.account}:role/${p}-ai-retrieve` },
+      {
+        AI_RETRIEVE_ROLE_ARN: `arn:aws:iam::${this.account}:role/${p}-ai-retrieve`,
+        // Rev 14: the Blueprint team's names, so the assistant can message a teammate.
+        USER_POOL_ID: props.userPool.userPoolId,
+      },
       true,
     );
     const aiActions = fn('AiActions', 'ai-actions', 'carry out confirmed assistant actions', {
@@ -681,6 +685,7 @@ export class ApiStack extends BmgStack {
       [main],
     );
     allow(aiTools, 'Roster', ['dynamodb:Query'], [`${main}/index/GSI1`]);
+    allow(aiTools, 'ListPeople', ['cognito-idp:ListUsersInGroup'], [props.userPool.userPoolArn]);
     allow(
       aiTools,
       'RetrieveSessions',
