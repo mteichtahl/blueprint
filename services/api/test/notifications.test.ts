@@ -134,6 +134,36 @@ describe('who hears about what', () => {
     expect(subs(d)).toEqual(['chloe']);
     expect(d.draft.title).toBe('Announcement from Kyra');
   });
+  it('tells only the members of a team chat (rev 14), never artists or other staff', () => {
+    const e = {
+      type: 'message.created' as const,
+      conversationId: 'sg-xxxxxxxxxx',
+      conversationType: 'staff-group' as const,
+      artistIds: [],
+      staffSubs: ['kyra', 'staffA'],
+      senderSub: 'kyra',
+      senderName: 'Kyra',
+      title: 'Mixer crew',
+    };
+    const d = plan(e, people)!;
+    expect(subs(d)).toEqual(['staffA']);
+    expect(d.draft.title).toBe('New message in Mixer crew');
+    expect(d.draft.body).toBe('From Kyra.');
+    expect(subs(plan({ ...e, mutedMembers: ['STAFF#staffA'] }, people))).toEqual([]);
+    expect(
+      subs(
+        plan(
+          {
+            ...e,
+            conversationType: 'staff-direct',
+            staffSubs: ['kyra', 'staffA'],
+            title: undefined,
+          },
+          people,
+        ),
+      ),
+    ).toEqual(['staffA']);
+  });
   it('never puts message text in a notification', () => {
     const d = plan(
       {

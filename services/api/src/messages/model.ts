@@ -415,6 +415,8 @@ export const UpdateConversation = z
     description: Description.optional(),
     settings: Settings.optional(),
     staffSettings: StaffSettings.optional(),
+    /** Team groups (rev 14): make someone a group admin, or not (group admins only). */
+    admin: z.object({ sub: StaffSub, admin: z.boolean() }).strict().optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, 'Nothing to change');
@@ -464,9 +466,6 @@ export function reactionSummary(
 export const AddStaff = z
   .object({ staffSubs: z.array(StaffSub).min(1, 'Pick a team member').max(MAX_STAFF_GROUP) })
   .strict();
-
-/** Team groups (rev 14): make someone admin, or not. */
-export const UpdateAdmin = z.object({ sub: StaffSub, admin: z.boolean() }).strict();
 
 export const UpdateMine = z
   .object({

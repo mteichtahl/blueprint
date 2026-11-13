@@ -14,6 +14,7 @@ import {
   members,
   NewConversation,
   planConversation,
+  UpdateConversation,
   staffPairId,
   wrapContext,
   type Conversation,
@@ -148,6 +149,13 @@ describe('team chats: starting one', () => {
     );
     expect(NewConversation.safeParse({ kind: 'group', title: 'x' }).success).toBe(false);
     expect(AddStaff.safeParse({ staffSubs: [] }).success).toBe(false);
+    expect(UpdateConversation.safeParse({ admin: { sub: SAM, admin: true } }).success).toBe(true);
+    expect(UpdateConversation.safeParse({ admin: { sub: 'x', admin: true } }).success).toBe(false);
+    expect(
+      UpdateConversation.safeParse({
+        staffSettings: { onlyAdminsSend: true, onlyAdminsEditInfo: false },
+      }).success,
+    ).toBe(true);
   });
 });
 
