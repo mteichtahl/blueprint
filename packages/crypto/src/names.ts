@@ -62,3 +62,37 @@ export function encryptionContext(
     ...(visibility === 'private' ? { visibility: 'private' } : {}),
   };
 }
+
+// ── Team chats: each Blueprint person's own key (decided 13 Nov 2026) ─────
+
+/** A Cognito sub (UUID). Used in staff key tags, aliases and session tags. */
+export const STAFF_SUB_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function assertStaffSub(value: unknown): string {
+  if (typeof value !== 'string' || !STAFF_SUB_PATTERN.test(value))
+    throw new Error('Invalid staff sub');
+  return value;
+}
+
+/** Alias of a Blueprint person's own KMS key, for wrapping their team chat keys. */
+export function staffKeyAlias(project: string, env: string, staffSub: string): string {
+  return `alias/${project}/${env}/staff/${assertStaffSub(staffSub)}`;
+}
+
+/** Tag key the staff key policies and the staff data-access role compare. */
+export const TAG_STAFF_SUB = 'staffSub';
+/** Tag that marks a key as a Blueprint person's own key. */
+export const TAG_KEY_KIND = 'bmg:key-kind';
+
+/** Session roles allowed on the staff data-access role: Blueprint people only. */
+export const STAFF_SESSION_ROLES = ['bmg-admin', 'bmg-staff'] as const;
+export type StaffSessionRole = (typeof STAFF_SESSION_ROLES)[number];
+
+/**
+ * KMS encryption context for one member's copy of a team chat key. The key
+ * policy checks `staffSub`, so a copy made for one person can't be opened as
+ * another's.
+ */
+export function staffWrapContext(staffSub: string, conversationId: string): Record<string, string> {
+  return { staffSub: assertStaffSub(staffSub), purpose: 'staff-conversation', conversationId };
+}

@@ -179,6 +179,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       bus: audit.bus,
       alarmTopic: foundation.alarmTopic,
       onboarding: keys.onboarding,
+      onboardFunctionArn: keys.onboardFunction.functionArn,
       quarantineKey: files.quarantineKey,
       agentRuntimeArn: ai.runtime.agentRuntimeArn,
       actionKey: ai.actionKey,

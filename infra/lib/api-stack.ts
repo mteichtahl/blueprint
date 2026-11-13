@@ -50,6 +50,8 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly bus: IEventBus;
   readonly alarmTopic: ITopic;
   readonly onboarding: IStateMachine;
+  /** Keys stack: creates a Blueprint person's own team chat key on first use (decided 13 Nov 2026). */
+  readonly onboardFunctionArn: string;
   /** The files stack's quarantine key; the buckets have fixed names (names.bucket). */
   readonly quarantineKey: IKey;
   /** The assistant (AI stack): its runtime and the key that signs "Do it" tokens. */
@@ -272,6 +274,9 @@ export class ApiStack extends BmgStack {
       EVENTS_HTTP_DOMAIN: this.realtime.httpDns,
       // Team chats (rev 14): the Blueprint team's names and working logins.
       USER_POOL_ID: props.userPool.userPoolId,
+      // Team chats: each member's own key (decided 13 Nov 2026).
+      STAFF_DATA_ACCESS_ROLE_ARN: `arn:aws:iam::${this.account}:role/${p}-staff-data-access`,
+      ONBOARD_FUNCTION_ARN: props.onboardFunctionArn,
     });
     // ── Web push: the environment's VAPID key pair, generated once inside AWS ──
     const vapidSecretId = `${cfg.project}/${env}/vapid`;
@@ -759,6 +764,15 @@ export class ApiStack extends BmgStack {
     allow(messages, 'ListPeople', ['cognito-idp:ListUsersInGroup'], [props.userPool.userPoolArn]);
     // Artist-to-artist keys are wrapped under each artist's key, in an artist session.
     allow(messages, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
+    // Team chats (decided 13 Nov 2026): keys open only in the signed-in person's own
+    // session; a missing personal key is created by the keys stack's onboarding function.
+    allow(
+      messages,
+      'StaffSessions',
+      ['sts:AssumeRole', 'sts:TagSession'],
+      [`arn:aws:iam::${this.account}:role/${p}-staff-data-access`],
+    );
+    allow(messages, 'CreateStaffKeys', ['lambda:InvokeFunction'], [props.onboardFunctionArn]);
     this.realtime.grantPublish(messages);
     acknowledge(
       messages.role!,

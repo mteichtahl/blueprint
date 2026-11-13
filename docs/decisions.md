@@ -793,3 +793,18 @@ Spec: the project's `BMG_Rev15_Artist_To_dos_for_Plan_Owner.md`. Artists can sen
   - **Connectors:** the hand-made two-click **Disconnect** and the connector app's **Remove** are now `DangerArea`s, so they have the 6-second timeout and the same look.
 - **New pattern component:** `EditDialog` is P4 for small items with no page of their own: fields, Save and Cancel (Enter saves, Escape cancels), then the danger area. `Dialog` moved from `Folders.tsx` to `ui.tsx` so the patterns can use it; `Folders.tsx` re-exports it.
 - **Not changed (by design):** events, gigs, to-dos and submissions have no delete in the API (cancel, mark done or complete instead). Your own comment on a to-do is removed in place, like a chat message (added to the exceptions). Chat keeps WhatsApp's conventions.
+
+## Team chats: each member's own key (13 Nov 2026, decided by Marc)
+
+Team chat keys were wrapped under the platform key, so the chat function (or anyone who could use the platform key) could open any team chat; only the API's membership check kept them private. Now each member holds their own copy, under their own key.
+
+- **A key per Blueprint person:** `alias/<project>/<env>/staff/<sub>`, tagged `staffSub` and `bmg:key-kind=staff`, made by the keys stack's onboarding function (key-admin role: it can create keys, never use them) the first time the person is in a team chat. Same rotation, admin limits and "deleted only by offboarding" rule as artist keys.
+- **A separate role for them:** `<p>-staff-data-access`, assumed only by `api-messages` (and the staging gate), with exactly two session tags, `staffSub` and `role` (`bmg-admin` or `bmg-staff`). The artist data-access role is unchanged.
+- **Who can do what (IAM and each key's policy both say so):**
+  - **Decrypt** a copy only in the owner's own session (`aws:PrincipalTag/staffSub` = the key's sub = `kms:EncryptionContext:staffSub`).
+  - **Encrypt** (make a copy for someone) from any Blueprint session, with the owner's sub in the context. This is how creating a chat and adding people to a group work, without ever opening someone else's session.
+  - Artist sessions, the platform key and every other role can't open a copy.
+- **The chat function only ever assumes the signed-in person's own session.** It makes everyone's copies when a chat is created or people are added; it opens only the caller's copy. Leaving or being removed deletes your copy.
+- **Moving existing team chats:** a chat made before this change still has its platform copy. The first member to open it makes every member's copy and removes the platform copy in one conditional update; after that the platform key can't open it.
+- **What it doesn't do:** someone who was in a chat may have opened the key before they left (there's no re-keying on removal), and the AWS account root can still change key policies, as for artist keys. It's the same protection artist-to-artist chats have.
+- **Staging gate:** the isolation gate now also makes two test staff keys and checks 8 things with real KMS on every staging deploy: B can make a copy for A; A opens it; B can't open it (also with a forged context); a copy for A can't carry B's sub; an artist-data session can't open it; untagged and artist-tagged sessions can't assume the staff role.

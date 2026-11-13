@@ -53,9 +53,16 @@ export const DATA_ACCESS_CALLERS = [
   'api-meetings-worker',
 ] as const;
 
+/** Functions that open team chat keys in a Blueprint person's own session (decided 13 Nov 2026). */
+export const STAFF_DATA_ACCESS_CALLERS = ['api-messages'] as const;
+
 export class KeysStack extends BmgStack {
   readonly dataAccessRole: Role;
+  /** Team chats: sessions tagged with one Blueprint person's sub. */
+  readonly staffDataAccessRole: Role;
   readonly onboarding: StateMachine;
+  /** Creates keys (artists' and Blueprint people's); can't use them. */
+  readonly onboardFunction: BmgFunction;
 
   constructor(scope: Construct, id: string, props: KeysStackProps) {
     const env = props.envName;
@@ -70,6 +77,8 @@ export class KeysStack extends BmgStack {
     const roleArn = (name: string) => `arn:aws:iam::${this.account}:role/${name}`;
     const keyAdminRoleName = `${p}-key-admin`;
     const dataAccessRoleName = `${p}-data-access`;
+    const staffDataAccessRoleName = `${p}-staff-data-access`;
+    const staffAliases = `arn:aws:kms:${this.region}:${this.account}:alias/${cfg.project}/${env}/staff/*`;
     const gateRoleName = `${p}-isolation-gate`;
     const anyKey = `arn:aws:kms:${this.region}:${this.account}:key/*`;
     const artistAliases = `arn:aws:kms:${this.region}:${this.account}:alias/${cfg.project}/${env}/artist/*`;
@@ -131,8 +140,59 @@ export class KeysStack extends BmgStack {
       `AwsSolutions-IAM5[Resource::${anyKey}]`,
     );
 
+    // ── Staff data-access role (team chats, decided 13 Nov 2026) ──
+    // Assumed per request with the signed-in Blueprint person's sub. KMS then
+    // only opens that person's copies of team chat keys; any Blueprint session
+    // may make a copy for someone else (adding them to a group), never open one.
+    this.staffDataAccessRole = new Role(this, 'StaffDataAccess', {
+      roleName: staffDataAccessRoleName,
+      description: `BMG ${env}: team chat keys. Usable only in sessions tagged with a Blueprint person's sub and role.`,
+      maxSessionDuration: Duration.hours(1),
+      assumedBy: new AccountPrincipal(this.account).withSessionTags().withConditions({
+        ArnEquals: {
+          'aws:PrincipalArn': [
+            ...STAFF_DATA_ACCESS_CALLERS.map((name) => roleArn(`${p}-${name}`)),
+            ...(prod ? [] : [roleArn(gateRoleName)]),
+          ],
+        },
+        Null: { 'aws:RequestTag/staffSub': 'false', 'aws:RequestTag/role': 'false' },
+        StringLike: { 'aws:RequestTag/staffSub': '????????-????-????-????-????????????' },
+        StringEquals: { 'aws:RequestTag/role': ['bmg-admin', 'bmg-staff'] },
+        'ForAllValues:StringEquals': { 'aws:TagKeys': ['staffSub', 'role'] },
+      }),
+    });
+    this.staffDataAccessRole.addToPolicy(
+      new PolicyStatement({
+        sid: 'OpenOnlyYourOwnTeamChatCopies',
+        actions: ['kms:Decrypt'],
+        resources: [anyKey],
+        conditions: {
+          StringEquals: {
+            'aws:ResourceTag/bmg:key-kind': 'staff',
+            'aws:ResourceTag/staffSub': '${aws:PrincipalTag/staffSub}',
+            'kms:EncryptionContext:staffSub': '${aws:PrincipalTag/staffSub}',
+          },
+        },
+      }),
+    );
+    this.staffDataAccessRole.addToPolicy(
+      new PolicyStatement({
+        sid: 'MakeCopiesForOtherBlueprintPeople',
+        actions: ['kms:Encrypt'],
+        resources: [anyKey],
+        conditions: {
+          StringEquals: { 'aws:ResourceTag/bmg:key-kind': 'staff', 'aws:ResourceTag/bmg:env': env },
+        },
+      }),
+    );
+    acknowledge(
+      this.staffDataAccessRole,
+      "Blueprint people's keys are created at run time; Decrypt is limited to the key whose staffSub tag equals the session tag, with a matching encryption context. Encrypt (making a copy for a group member) is limited to this environment's staff keys, and each key's policy requires that person's sub in the context.",
+      `AwsSolutions-IAM5[Resource::${anyKey}]`,
+    );
+
     // ── Onboarding task (runs as the key-admin role) ──
-    const onboard = new BmgFunction(this, 'OnboardArtist', {
+    const onboard = (this.onboardFunction = new BmgFunction(this, 'OnboardArtist', {
       entry: 'services/keys/src/onboard.ts',
       description: `BMG ${env}: create an artist's KMS key and first workspace record`,
       roleName: keyAdminRoleName,
@@ -144,9 +204,10 @@ export class KeysStack extends BmgStack {
         ACCOUNT_ID: this.account,
         KEY_ADMIN_ROLE_ARN: roleArn(keyAdminRoleName),
         DATA_ACCESS_ROLE_ARN: roleArn(dataAccessRoleName),
+        STAFF_DATA_ACCESS_ROLE_ARN: roleArn(staffDataAccessRoleName),
         MAIN_TABLE: props.mainTable.tableName,
       },
-    });
+    }));
     onboard.addToRolePolicy(
       new PolicyStatement({
         sid: 'CreateArtistKeysForThisEnvironment',
@@ -155,7 +216,15 @@ export class KeysStack extends BmgStack {
         conditions: {
           StringEquals: { 'aws:RequestTag/bmg:env': env },
           'ForAllValues:StringEquals': {
-            'aws:TagKeys': ['artistId', 'bmg:env', 'bmg:project', 'bmg:managed-by'],
+            'aws:TagKeys': [
+              'artistId',
+              // Blueprint people's own keys (team chats, decided 13 Nov 2026).
+              'staffSub',
+              'bmg:key-kind',
+              'bmg:env',
+              'bmg:project',
+              'bmg:managed-by',
+            ],
           },
         },
       }),
@@ -172,7 +241,7 @@ export class KeysStack extends BmgStack {
       new PolicyStatement({
         sid: 'ArtistAliasesOnly',
         actions: ['kms:CreateAlias', 'kms:DescribeKey'],
-        resources: [artistAliases],
+        resources: [artistAliases, staffAliases],
       }),
     );
     // Finds this environment's artist keys for the policy refresh (finding K1).
@@ -197,6 +266,7 @@ export class KeysStack extends BmgStack {
       'AwsSolutions-IAM5[Resource::*]',
       `AwsSolutions-IAM5[Resource::${anyKey}]`,
       `AwsSolutions-IAM5[Resource::${artistAliases}]`,
+      `AwsSolutions-IAM5[Resource::${staffAliases}]`,
     );
     const onboardArnFinding = `AwsSolutions-IAM5[Resource::<${this.getLogicalId(onboard.node.defaultChild as never)}.Arn>:*]`;
 
@@ -227,6 +297,7 @@ export class KeysStack extends BmgStack {
 
     const params: Record<string, string> = {
       'keys/data-access-role-arn': this.dataAccessRole.roleArn,
+      'keys/staff-data-access-role-arn': this.staffDataAccessRole.roleArn,
       'keys/onboarding-state-machine-arn': this.onboarding.stateMachineArn,
     };
 
@@ -249,6 +320,7 @@ export class KeysStack extends BmgStack {
         prod,
         environment: {
           DATA_ACCESS_ROLE_ARN: roleArn(dataAccessRoleName),
+          STAFF_DATA_ACCESS_ROLE_ARN: roleArn(staffDataAccessRoleName),
           ONBOARD_FUNCTION_NAME: onboard.functionName,
         },
       });
@@ -257,7 +329,7 @@ export class KeysStack extends BmgStack {
         new PolicyStatement({
           sid: 'TaggedDataAccessSessions',
           actions: ['sts:AssumeRole', 'sts:TagSession'],
-          resources: [this.dataAccessRole.roleArn],
+          resources: [this.dataAccessRole.roleArn, this.staffDataAccessRole.roleArn],
         }),
       );
       acknowledge(
@@ -270,7 +342,14 @@ export class KeysStack extends BmgStack {
         resourceType: 'Custom::BmgIsolationGate',
         properties: { version: props.version ?? 'unversioned' },
       });
-      run.node.addDependency(this.dataAccessRole, onboard, onboard.role!, gate, gate.role!);
+      run.node.addDependency(
+        this.dataAccessRole,
+        this.staffDataAccessRole,
+        onboard,
+        onboard.role!,
+        gate,
+        gate.role!,
+      );
       params['keys/isolation-gate-function'] = gate.functionName;
       new CfnOutput(this, 'IsolationGateFunction', { value: gate.functionName });
     }
