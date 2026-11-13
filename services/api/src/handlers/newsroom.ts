@@ -296,15 +296,17 @@ export const handler = handle(async (event) => {
     case 'PATCH /sites/:id': {
       ensure(principal, 'admin');
       if (!ID.test(id)) throw new HttpError(404, 'No such site');
-      const { enabled } = parseBody(event, SitePatch);
+      const patch = parseBody(event, SitePatch);
+      const keys = Object.keys(patch) as (keyof typeof patch)[];
       try {
         await db.send(
           new UpdateCommand({
             TableName: table(),
             Key: { PK: NEWSROOM_PK, SK: siteSk(id) },
-            UpdateExpression: 'SET enabled = :e',
+            UpdateExpression: `SET ${keys.map((k) => `#${k} = :${k}`).join(', ')}`,
             ConditionExpression: 'attribute_exists(PK)',
-            ExpressionAttributeValues: { ':e': enabled },
+            ExpressionAttributeNames: Object.fromEntries(keys.map((k) => [`#${k}`, k])),
+            ExpressionAttributeValues: Object.fromEntries(keys.map((k) => [`:${k}`, patch[k]])),
           }),
         );
       } catch (err) {
@@ -312,6 +314,8 @@ export const handler = handle(async (event) => {
           throw new HttpError(404, 'No such site');
         throw err;
       }
+      if (keys.some((k) => k !== 'enabled'))
+        await audit(event, 'newsroom.siteChanged', 'success', { siteId: id });
       return json(200, { ok: true });
     }
 

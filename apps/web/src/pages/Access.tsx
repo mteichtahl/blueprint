@@ -9,6 +9,7 @@ import {
 } from '../lib/api.ts';
 import { ArtistTodosCard } from './Profile.tsx';
 import type { AppConfig } from '../lib/config.ts';
+import { DangerArea, EditDialog } from '../components/patterns.tsx';
 import {
   Avatar,
   Button,
@@ -325,7 +326,7 @@ export function AccessPage({
                 .join(' · ')}
               {...(isAdmin
                 ? {
-                    onOpen: () => setEditing(editing === m.sub ? null : m.sub),
+                    onOpen: () => setEditing(m.sub),
                     openLabel: `Edit ${m.displayName}`,
                   }
                 : {})}
@@ -338,11 +339,6 @@ export function AccessPage({
               <th scope="col">Access</th>
               <th scope="col">Artists</th>
               <th scope="col">Login</th>
-              {isAdmin && (
-                <th scope="col">
-                  <span className="sr-only">Actions</span>
-                </th>
-              )}
             </tr>
           </thead>
           <tbody>
@@ -352,10 +348,21 @@ export function AccessPage({
                   <span className="flex items-center gap-3">
                     <Avatar name={m.displayName} userSub={m.sub} size={32} />
                     <span className="flex flex-col">
-                      <b>
-                        {m.displayName}
-                        {m.sub === me.sub ? ' (you)' : ''}
-                      </b>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          className="text-left font-bold hover:underline"
+                          onClick={() => setEditing(m.sub)}
+                        >
+                          {m.displayName}
+                          {m.sub === me.sub ? ' (you)' : ''}
+                        </button>
+                      ) : (
+                        <b>
+                          {m.displayName}
+                          {m.sub === me.sub ? ' (you)' : ''}
+                        </b>
+                      )}
                       <span className="src">{m.jobTitle || (isAdmin ? m.email : '')}</span>
                     </span>
                   </span>
@@ -379,18 +386,6 @@ export function AccessPage({
                     <Tag tone="n">Active</Tag>
                   )}
                 </td>
-                {isAdmin && (
-                  <td className="text-right">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-expanded={editing === m.sub}
-                      onClick={() => setEditing(editing === m.sub ? null : m.sub)}
-                    >
-                      {editing === m.sub ? 'Close' : `Edit ${m.displayName.split(' ')[0]}`}
-                    </Button>
-                  </td>
-                )}
               </tr>
             ))}
           </tbody>
@@ -409,14 +404,27 @@ export function AccessPage({
                 self={m.sub === me.sub}
                 artists={artists}
                 busy={busy}
-                onSave={(patch, done) =>
-                  void run(() => api(cfg, token, 'PATCH', `/access/team/${m.sub}`, patch), done)
+                error={
+                  error ??
+                  (stepUp
+                    ? 'Changing access needs a fresh sign-in check. Close this, choose Verify now, then try again.'
+                    : null)
                 }
+                onCancel={() => {
+                  setEditing(null);
+                  setError(null);
+                }}
+                onSave={async (patch, done) => {
+                  if (
+                    await run(() => api(cfg, token, 'PATCH', `/access/team/${m.sub}`, patch), done)
+                  )
+                    setEditing(null);
+                }}
                 onResend={() =>
                   void run(
                     () => api(cfg, token, 'POST', `/access/team/${m.sub}/resend`),
                     `Sent ${m.displayName} a new invitation.`,
-                  )
+                  ).then((ok) => ok && setEditing(null))
                 }
               />
             );
@@ -582,6 +590,40 @@ function AddMember({
   );
 }
 
+/** What a change to someone's access does, in plain words (P6: review, then commit). */
+function accessChanges(
+  member: Pick<Member, 'role' | 'artistIds'>,
+  next: { role: TeamRole; artistIds: string[] },
+  artistName: (id: string) => string,
+): string[] {
+  const lines: string[] = [];
+  if (next.role !== member.role)
+    lines.push(
+      next.role === 'bmg-admin'
+        ? 'Becomes an admin: sees every artist and can change settings.'
+        : 'Stops being an admin: sees only the artists listed.',
+    );
+  const before = member.role === 'bmg-admin' ? null : new Set(member.artistIds);
+  const after = next.role === 'bmg-admin' ? null : new Set(next.artistIds);
+  if (before && after) {
+    const gains = [...after].filter((id) => !before.has(id)).map(artistName);
+    const loses = [...before].filter((id) => !after.has(id)).map(artistName);
+    if (gains.length) lines.push(`Gains: ${gains.join(', ')}.`);
+    if (loses.length) lines.push(`Loses: ${loses.join(', ')}.`);
+  } else if (after && !before) {
+    lines.push(
+      after.size
+        ? `Keeps only: ${[...after].map(artistName).join(', ')}.`
+        : 'Keeps no artists until some are given.',
+    );
+  }
+  return lines;
+}
+
+/**
+ * Editing a team member (P4 in a dialog). Changes to their access are listed
+ * before Save (P6). Turning off their login is in the danger area (P5).
+ */
 function EditMember({
   cfg,
   token,
@@ -589,8 +631,10 @@ function EditMember({
   self,
   artists,
   busy,
+  error,
   onSave,
   onResend,
+  onCancel,
 }: {
   cfg: AppConfig;
   token: string;
@@ -598,8 +642,10 @@ function EditMember({
   self: boolean;
   artists: ArtistSummary[];
   busy: boolean;
-  onSave: (patch: Record<string, unknown>, done: string) => void;
+  error: string | null;
+  onSave: (patch: Record<string, unknown>, done: string) => Promise<void>;
   onResend: () => void;
+  onCancel: () => void;
 }) {
   const [role, setRole] = useState<TeamRole>(member.role);
   const [jobTitle, setJobTitle] = useState(member.jobTitle);
@@ -613,10 +659,44 @@ function EditMember({
     JSON.stringify([...artistIds].sort()) !== JSON.stringify([...member.artistIds].sort())
   )
     patch.artistIds = artistIds;
+  const name = (id: string) => artists.find((a) => a.artistId === id)?.displayName ?? 'an artist';
+  const changes = accessChanges(member, { role, artistIds }, name);
   return (
-    <section
-      className="flex flex-col gap-4 rounded-lg border border-input p-4"
-      aria-label={`Edit ${member.displayName}`}
+    <EditDialog
+      title={`Edit ${member.displayName}`}
+      saveLabel={changes.length ? 'Save access' : 'Save'}
+      onSave={() => onSave(patch, `Saved ${first}'s access.`)}
+      onCancel={onCancel}
+      busy={busy}
+      canSave={Object.keys(patch).length > 0}
+      error={error}
+      danger={
+        self ? undefined : member.enabled ? (
+          <DangerArea
+            title={`Turn off ${first}'s login`}
+            action="Turn off login"
+            what="They're signed out everywhere at once and can't sign in until an admin turns it back on. Nothing they made is deleted."
+            onConfirm={() =>
+              onSave({ enabled: false }, `${first}'s login is off and they've been signed out.`)
+            }
+          />
+        ) : (
+          <section className="mt-4 flex flex-col gap-2 rounded-[10px] border border-input p-3.5">
+            <h3 className="text-[15px] font-bold">{first}'s login is off</h3>
+            <span className="flex">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => void onSave({ enabled: true }, `${first} can sign in again.`)}
+              >
+                Turn login back on
+              </Button>
+            </span>
+          </section>
+        )
+      }
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
@@ -650,43 +730,29 @@ function EditMember({
           }}
         />
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="cta"
-          size="sm"
-          disabled={busy || Object.keys(patch).length === 0}
-          onClick={() => onSave(patch, `Saved ${first}'s access.`)}
+      {changes.length > 0 && (
+        <div
+          className="rounded-lg border border-input bg-secondary p-3 text-sm"
+          role="status"
+          aria-label="What changes"
         >
-          Save
-        </Button>
-        {member.status === 'FORCE_CHANGE_PASSWORD' && member.enabled && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onResend}>
+          <b className="block pb-1">What changes for {first}</b>
+          <ul className="m-0 list-disc pl-5">
+            {changes.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+          <span className="src">Saving signs them out everywhere, so it applies at once.</span>
+        </div>
+      )}
+      {member.status === 'FORCE_CHANGE_PASSWORD' && member.enabled && (
+        <span className="flex items-center gap-2">
+          <span className="src flex-1">They haven't signed in yet.</span>
+          <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onResend}>
             Resend invite
           </Button>
-        )}
-        {!self &&
-          (member.enabled ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() =>
-                onSave({ enabled: false }, `${first}'s login is off and they've been signed out.`)
-              }
-            >
-              Turn off login
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => onSave({ enabled: true }, `${first} can sign in again.`)}
-            >
-              Turn login back on
-            </Button>
-          ))}
-      </div>
-    </section>
+        </span>
+      )}
+    </EditDialog>
   );
 }

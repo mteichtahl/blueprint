@@ -679,3 +679,68 @@ export const shortDate = (iso: string) =>
     day: 'numeric',
     month: 'short',
   });
+
+/** A modal on desktop; a full-screen PhonePanel on phones (P7). */
+export function Dialog({
+  title,
+  onClose,
+  children,
+  footer,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const phone = usePhone();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (phone) return;
+    const opener = document.activeElement as HTMLElement | null;
+    ref.current?.focus();
+    return () => opener?.focus?.();
+  }, [phone]);
+  if (phone) {
+    return (
+      <PhonePanel title={title} onClose={onClose}>
+        {children}
+        {footer && <div className="flex flex-wrap gap-2 pt-2">{footer}</div>}
+      </PhonePanel>
+    );
+  }
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(1,25,53,.35)] p-4"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className="card flex max-h-[85vh] w-full max-w-[560px] flex-col gap-3 overflow-hidden outline-none"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+      >
+        <div className="card-hd">
+          <h2 className="poster text-[20px] leading-none">{title}</h2>
+          <button
+            type="button"
+            className="ml-auto flex size-9 items-center justify-center rounded-lg hover:bg-secondary"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-1">{children}</div>
+        {footer && <div className="flex flex-wrap justify-end gap-2 pb-1">{footer}</div>}
+      </div>
+    </div>
+  );
+}
