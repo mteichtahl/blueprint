@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { DangerArea, RecordPage, SectionSwitch } from '../components/patterns.tsx';
 import { Button, Card, Notice, RowCard, Tag, WaveLoader } from '../components/ui.tsx';
-import { api, ApiError } from '../lib/api.ts';
+import { api, ApiError, needsFreshSignIn } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 
 /** One artist invitation and where it stands (GET /access/invitations). */
@@ -199,7 +199,9 @@ function InvitationPage({
   const [tone, label] = STATUS[i.status];
   const path = `/access/invitations/${i.artistId}`;
   const failed = (e: unknown) => {
-    const reauth = e instanceof ApiError && e.status === 403 && /step-up|two-step/.test(e.message);
+    const reauth =
+      needsFreshSignIn(e) ||
+      (e instanceof ApiError && e.status === 403 && /two-step/.test(e.message));
     return { text: reauth ? 'For security, sign in again first.' : (e as Error).message, reauth };
   };
 

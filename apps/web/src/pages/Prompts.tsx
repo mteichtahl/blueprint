@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError } from '../lib/api.ts';
+import { api, needsFreshSignIn } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
   Button,
@@ -161,7 +161,7 @@ function PromptEditor({
       onChanged();
       setSaved(done);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 403 && /step-up/.test(e.message)) setStepUp(true);
+      if (needsFreshSignIn(e)) setStepUp(true);
       else setError((e as Error).message);
     }
   }

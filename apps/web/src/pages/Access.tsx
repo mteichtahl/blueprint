@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, type ArtistSummary, type Me } from '../lib/api.ts';
+import { api, ApiError, needsFreshSignIn, type ArtistSummary, type Me } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
   Avatar,
@@ -79,7 +79,7 @@ function Fixed({ children, tone, tag }: { children: string; tone: 'n' | 's' | 'c
 }
 
 function stepUpNeeded(e: unknown) {
-  return e instanceof ApiError && e.status === 403 && /step-up/.test(e.message);
+  return needsFreshSignIn(e);
 }
 
 export function AccessPage({

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, type Me } from '../lib/api.ts';
+import { api, needsFreshSignIn, type Me } from '../lib/api.ts';
 import {
   setPhone as setPhoneNumber,
   setSmsMfa,
@@ -250,7 +250,7 @@ function Security({
       setCodes(r.codes);
       setInfo({ left: r.codes.length, createdAt: r.createdAt });
     } catch (e) {
-      if (e instanceof ApiError && e.status === 403 && /step-up/.test(e.message)) setFresh(true);
+      if (needsFreshSignIn(e)) setFresh(true);
       else setMsg({ tone: 'error', text: (e as Error).message });
     }
   }
