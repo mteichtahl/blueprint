@@ -12,6 +12,7 @@ import {
   Notice,
   PageHeader,
   RowCard,
+  Select,
   Tag,
   WaveLoader,
 } from '../components/ui.tsx';
@@ -24,6 +25,8 @@ import { ContactPicker } from './Contacts.tsx';
 interface EventInfo {
   eventId: string;
   name: string;
+  /** Workshops are events too; older events have no kind. */
+  kind?: 'event' | 'workshop';
   date: string;
   venue: string;
   venueId?: string;
@@ -90,9 +93,18 @@ const SPEAKER_TAG = {
   declined: ['s', 'Declined'],
 } as const;
 
-export function Events({ cfg, token }: { cfg: AppConfig; token: string }) {
+export function Events({
+  cfg,
+  token,
+  openEventId,
+}: {
+  cfg: AppConfig;
+  token: string;
+  /** Open this event straight away (a row on Studio HQ's Tickets card). */
+  openEventId?: string | null;
+}) {
   const [events, setEvents] = useState<EventInfo[] | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(openEventId ?? null);
   const [creating, setCreating] = useState(false);
   const [listing, setListing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -231,6 +243,11 @@ function EventCards({
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col gap-1">
                       <b className="t line-clamp-2 text-[19px] leading-tight">{e.name}</b>
+                      {e.kind === 'workshop' && (
+                        <span>
+                          <Tag tone="c">Workshop</Tag>
+                        </span>
+                      )}
                       <span className="src">
                         {[
                           d.toLocaleDateString('en-AU', { weekday: 'short' }),
@@ -292,6 +309,7 @@ function EventForm({
 }) {
   const [f, setF] = useState({
     name: event?.name ?? '',
+    kind: event?.kind ?? 'event',
     date: event?.date ?? '',
     startTime: event?.startTime ?? '',
     endTime: event?.endTime ?? '',
@@ -327,6 +345,7 @@ function EventForm({
   async function save() {
     const body = {
       name: f.name,
+      kind: f.kind,
       date: f.date,
       startTime: f.startTime,
       endTime: f.endTime,
@@ -362,6 +381,15 @@ function EventForm({
           value={f.name}
           onChange={set('name')}
           placeholder="Industry Mixer Night"
+        />
+        <Select
+          label="Type"
+          value={f.kind}
+          onChange={set('kind')}
+          options={[
+            { value: 'event', label: 'Event' },
+            { value: 'workshop', label: 'Workshop' },
+          ]}
         />
         <Field label="Date" type="date" value={f.date} onChange={set('date')} />
         <Field

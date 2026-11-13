@@ -279,8 +279,12 @@ export const EVENT_PARTS = ['guests', 'speakers', 'crew', 'run', 'budget'] as co
 export type EventPart = (typeof EVENT_PARTS)[number];
 export const partSk = (part: EventPart, id: string) => `${part.toUpperCase()}#${id}`;
 
+/** An event is a one-off (the Mixer Night) or a workshop; older events are events. */
+export const EVENT_KINDS = ['event', 'workshop'] as const;
+
 export const EventBody = z.object({
   name: z.string().trim().min(1, 'Name the event').max(120),
+  kind: z.enum(EVENT_KINDS).default('event'),
   date: IsoDate,
   /** 'HH:MM'; required for new events (EventCreate). Older events may lack them. */
   startTime: Time.optional(),
