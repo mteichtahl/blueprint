@@ -33,6 +33,9 @@
   --color-pop: #e8726e;
   --color-pop-hover: #f08b87;
   --color-pop-foreground: #011935;
+  /* Headliner's second colour (lilac, approved 13 Nov 2026): ribbon and Ask BMG. */
+  --color-lilac: #c9b8ff;
+  --color-lilac-hover: #d8cbff;
   --color-raised: #0b2847;
   --color-paper: #ede9e1;
   --radius-md: 10px;
@@ -400,7 +403,7 @@ main {
     padding: 0 16px;
     border: 2px solid #011935;
     border-radius: 999px;
-    background: #e8726e;
+    background: #c9b8ff;
     color: #011935;
     font: 800 15px var(--font-title);
     letter-spacing: 0.02em;
@@ -409,7 +412,7 @@ main {
     box-shadow: 3px 3px 0 #011935;
   }
   .askbtn:hover {
-    background: #f08b87;
+    background: #d8cbff;
   }
   .askbtn:disabled {
     opacity: 0.6;
@@ -2432,7 +2435,7 @@ nav,
   /* The wristband ribbon: decoration only (aria-hidden), tilted across the top. */
   .ribbon {
     display: block;
-    background: #e8726e;
+    background: #c9b8ff;
     color: #011935;
     transform: rotate(-3deg);
     padding: 6px 0;
@@ -2557,7 +2560,7 @@ html.dark {
   accent-color: #e8726e;
 }
 .dark .ribbon {
-  background: #e8726e;
+  background: #c9b8ff;
 }
 /* A paper card stays light on the navy stage. */
 .paper-card .eyebrow {

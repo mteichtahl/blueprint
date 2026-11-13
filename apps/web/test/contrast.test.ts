@@ -69,6 +69,8 @@ describe('colour contrast (WCAG 2.2 AA)', () => {
     ['phone tab (on the off-white tab bar)', hex(value('.ptab', 'color')), '#F1F4F7'],
     ['selected workspace tab', hex(value(".wtab[aria-selected='true']", 'color')), NAVY],
     ['ask button', hex(value('.askbtn', 'color')), hex(value('.askbtn', 'background'))],
+    ['lilac (hover)', NAVY, hex(token('lilac-hover'))],
+    ['ribbon', hex(value('.ribbon', 'color')), hex(value('.ribbon', 'background'))],
     ['sidebar item', hex(value('.nav', 'color')), NAVY],
     ['sidebar section label', hex(value('.navlabel', 'color')), NAVY],
     ['workspace tab', hex(value('.wtab', 'color')), light.bg],
