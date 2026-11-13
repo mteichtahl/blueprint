@@ -75,7 +75,7 @@ export function Card({
 }
 
 const control =
-  'min-h-12 w-full rounded-[14px] border-2 border-input bg-white px-3.5 text-base outline-none focus:ring-[3px] focus:ring-[rgba(1,25,53,0.22)]';
+  'min-h-12 w-full min-w-0 rounded-[14px] border-2 border-input bg-white px-3.5 text-base outline-none focus:ring-[3px] focus:ring-[rgba(1,25,53,0.22)]';
 
 export function Field({
   label,
@@ -83,7 +83,7 @@ export function Field({
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }) {
   return (
-    <label className="flex flex-col gap-1.5">
+    <label className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[15px] font-bold">{label}</span>
       <input className={control} {...props} />
       {hint && <span className="src">{hint}</span>}
@@ -100,7 +100,7 @@ export function Select({
   options: { value: string; label: string }[];
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
+    <label className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[15px] font-bold">{label}</span>
       <select className={control} {...props}>
         {options.map((o) => (
@@ -118,7 +118,7 @@ export function TextArea({
   ...props
 }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string }) {
   return (
-    <label className="flex flex-col gap-1.5">
+    <label className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[15px] font-bold">{label}</span>
       <textarea className={`${control} min-h-24 py-2.5`} {...props} />
     </label>
