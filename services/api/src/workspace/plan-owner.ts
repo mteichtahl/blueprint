@@ -61,10 +61,11 @@ export function ownerStatus(
  * whoever finished them.
  */
 export function movesWithOwner(
-  todo: Pick<Todo, 'done' | 'bmgOwnerSub'>,
+  todo: Pick<Todo, 'done' | 'bmgOwnerSub' | 'sentBack'>,
   previousOwnerSub: string | undefined,
 ): boolean {
-  if (todo.done) return false;
+  // Done and sent-back to-dos (rev 15) stay as they are.
+  if (todo.done || todo.sentBack) return false;
   return !todo.bmgOwnerSub || todo.bmgOwnerSub === previousOwnerSub;
 }
 

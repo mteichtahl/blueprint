@@ -31,6 +31,11 @@ export const Action = z.discriminatedUnion('type', [
       title: z.string().trim().min(1).max(200),
       notes: z.string().trim().max(2000).optional(),
       due: z.iso.date().optional(),
+      /**
+       * Rev 15, artists only: send it to their Blueprint plan owner, within the
+       * owner's on/off setting and maximum (the API says if it can't).
+       */
+      forPlanOwner: z.boolean().optional(),
     })
     .strict(),
   z

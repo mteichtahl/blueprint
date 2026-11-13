@@ -28,6 +28,8 @@ import {
   type TeamRole,
 } from '../access/model.ts';
 import { audit, authContext, db, env, HttpError, json, parseBody, principalFor } from '../lib.ts';
+import { settingsFrom, settingsKey } from '../workspace/owner-todos.ts';
+import { saveArtistTodos } from '../workspace/owner-todos-store.ts';
 
 /**
  * Access & permissions (screens doc "Artists & access", canvas X-Artists):
@@ -95,7 +97,9 @@ export async function listTeam(): Promise<TeamMember[]> {
     const res = await db.send(
       new BatchGetCommand({
         RequestItems: {
-          [table()]: { Keys: chunk.flatMap((s) => [profileKey(s), assignKey(s)]) },
+          [table()]: {
+            Keys: chunk.flatMap((s) => [profileKey(s), assignKey(s), settingsKey(s)]),
+          },
         },
       }),
     );
@@ -117,6 +121,7 @@ export async function listTeam(): Promise<TeamMember[]> {
         status: user.UserStatus ?? 'UNKNOWN',
         artistIds: role === 'bmg-staff' ? ((assign?.artistIds as string[] | undefined) ?? []) : [],
         createdAt: user.UserCreateDate ? user.UserCreateDate.toISOString() : null,
+        artistTodos: settingsFrom(extra.get(`USER#${sub}|ARTIST_TODOS`)),
       };
     })
     .sort((a, b) =>
@@ -401,6 +406,7 @@ export async function accessRoutes(event: APIGatewayProxyEvent, temporaryPasswor
         }),
       );
     }
+    if (patch.artistTodos !== undefined) await saveArtistTodos(target.sub, patch.artistTodos);
     if (patch.enabled === false && target.enabled) {
       await cognito.send(new AdminDisableUserCommand({ UserPoolId: pool(), Username }));
       signOut = true;

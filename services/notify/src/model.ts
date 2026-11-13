@@ -23,6 +23,10 @@ export interface TodoItem {
   visibility?: 'normal' | 'bmg-only';
   /** The Blueprint person looking after it (rev 12): the plan owner. */
   bmgOwnerSub?: string;
+  /** Rev 15: `bmg` when the artist sent it to their plan owner. */
+  assignee?: 'artist' | 'bmg';
+  /** Rev 15: sent back to the artist; no reminders. */
+  sentBack?: unknown;
 }
 
 export interface TodoUpdated {
@@ -90,9 +94,13 @@ export function onTodoReminder(
 ): Decision {
   if (!todo) return { send: false, reason: 'todo-missing' };
   if (todo.done) return { send: false, reason: 'done' };
-  if (todo.visibility === 'bmg-only') return { send: false, reason: 'bmg-only' };
+  if (todo.sentBack) return { send: false, reason: 'sent-back' };
   // The to-do was edited after this schedule was made: a newer schedule exists (or none).
   if (!todo.remindAt || todo.remindAt !== e.remindAt) return { send: false, reason: 'stale' };
+  // A to-do the artist sent their plan owner reminds the owner (rev 15).
+  if (todo.assignee === 'bmg')
+    return { send: true, to: 'bmg', email: todoReminderEmail(ctx, todo) };
+  if (todo.visibility === 'bmg-only') return { send: false, reason: 'bmg-only' };
   return { send: true, to: 'artist', email: todoReminderEmail(ctx, todo) };
 }
 

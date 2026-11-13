@@ -12,6 +12,8 @@ import {
   REMINDER_OPTIONS,
   TODO_FILTERS,
   type ArtistSummary,
+  type OwnerTodos,
+  type PlanResponse,
   type Reminder,
   type Todo,
 } from '../lib/api.ts';
@@ -42,6 +44,16 @@ const SOURCE_LABEL: Record<Todo['source'], string> = {
   feedback: 'From feedback',
   artist: "Artist's own",
 };
+/**
+ * Where a to-do came from, as each side reads it. Rev 15: one the artist
+ * sent their plan owner reads "For Kyra" to the artist and "From the artist"
+ * to Blueprint.
+ */
+function fromLabel(t: Todo, isBmg: boolean): string {
+  if (t.assignee === 'bmg') return isBmg ? 'From the artist' : `For ${t.forName ?? 'Blueprint'}`;
+  return SOURCE_LABEL[t.source];
+}
+const SEND_BACK_MAX = 500;
 const today = () => new Date().toISOString().slice(0, 10);
 type Filter = (typeof TODO_FILTERS)[number]['id'];
 
@@ -125,6 +137,7 @@ const REMINDER_FAILED =
 /** Who is told when a to-do is edited (matches the API's rule). */
 function notifyNote(t: Todo, isBmg: boolean): string | null {
   if (isBmg) return t.bmgOnly ? null : 'The artist is notified when you save.';
+  if (t.assignee === 'bmg') return `${t.forName ?? 'Blueprint'} is notified when you save.`;
   return t.source === 'artist' ? null : 'Blueprint is notified when you save.';
 }
 
@@ -164,6 +177,22 @@ function TodoEditor({
   const [error, setError] = useState<string | null>(null);
   const note = notifyNote(todo, isBmg);
   const phone = usePhone();
+  // Rev 15: Send back (the owner or an admin), and the artist's answers to it.
+  const [sendingBack, setSendingBack] = useState(false);
+  const [reason, setReason] = useState('');
+
+  async function act(body: Record<string, unknown>, msg: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(cfg, token, 'PATCH', `/artists/${todo.artistId}/todos/${todo.todoId}`, body);
+      onSaved(msg);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -244,14 +273,75 @@ function TodoEditor({
         >
           {todo.title}
         </b>
+        {todo.assignee === 'bmg' && (
+          <span className="src">
+            For {todo.forName ?? 'Blueprint'} · added by {isBmg ? 'the artist' : 'you'}
+          </span>
+        )}
         <span className="flex flex-wrap items-center gap-1.5">
           {done && <Tag tone="s">Done</Tag>}
+          {todo.sentBack && !done && <Tag tone="c">Sent back</Tag>}
           {todo.bmgOnly && <Tag tone="n">BMG only</Tag>}
           {todo.due && <DueTag t={todo} />}
         </span>
         {todo.notes && <p className="m-0 whitespace-pre-line">{todo.notes}</p>}
       </div>
+      {todo.sentBack && !done && (
+        <Notice tone="info">
+          {todo.sentBack.byName} sent this back: “{todo.sentBack.reason}”
+        </Notice>
+      )}
       {error && <Notice tone="error">{error}</Notice>}
+      {sendingBack && (
+        <div className="flex flex-col gap-2 rounded-lg border border-input p-3">
+          <TextArea
+            label="Reason"
+            required
+            value={reason}
+            maxLength={SEND_BACK_MAX}
+            placeholder="Not something I can do; ask the venue directly"
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <span className="src">The artist sees this, and it goes in the conversation.</span>
+          <div className="flex gap-2">
+            <Button
+              variant="cta"
+              disabled={busy || !reason.trim()}
+              onClick={() =>
+                void act(
+                  { sendBack: { reason: reason.trim() } },
+                  'Sent back. The artist is told why.',
+                )
+              }
+            >
+              {busy ? 'Sending…' : 'Send back'}
+            </Button>
+            <Button variant="ghost" onClick={() => setSendingBack(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {!isBmg && todo.sentBack && !done && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="cta"
+            disabled={busy}
+            onClick={() =>
+              void act({ sendAgain: true }, `Sent to ${todo.forName ?? 'Blueprint'} again.`)
+            }
+          >
+            Send again
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void act({ makeMine: true }, 'It’s on your own list now.')}
+          >
+            Make it mine
+          </Button>
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button
           variant={done ? 'ghost' : 'cta'}
@@ -269,6 +359,11 @@ function TodoEditor({
           <Icon name="pencil" size={16} />
           Edit details
         </Button>
+        {isBmg && todo.canSendBack && !done && !sendingBack && (
+          <Button variant="ghost" onClick={() => setSendingBack(true)}>
+            Send back
+          </Button>
+        )}
       </div>
     </>
   );
@@ -280,7 +375,7 @@ function TodoEditor({
     return (
       <PhonePanel
         title={heading}
-        aside={SOURCE_LABEL[todo.source]}
+        aside={fromLabel(todo, isBmg)}
         onClose={mode === 'edit' ? () => setMode('view') : onClose}
       >
         <section className="card gap-3" aria-label={`${heading}: ${todo.title}`}>
@@ -300,7 +395,7 @@ function TodoEditor({
     >
       <div className="card-hd">
         <h3 className="t text-[17px]">{heading}</h3>
-        <span className="src ml-auto">{SOURCE_LABEL[todo.source]}</span>
+        <span className="src ml-auto">{fromLabel(todo, isBmg)}</span>
         <BackLink to="To-dos" onClick={onClose} />
       </div>
       {body}
@@ -577,7 +672,7 @@ function TodoRows({
           muted={t.done}
           status={t.done ? <Tag tone="s">Done</Tag> : undefined}
           title={t.title}
-          sub={[artistName?.(t.artistId), SOURCE_LABEL[t.source], t.bmgOnly ? 'BMG only' : '']
+          sub={[artistName?.(t.artistId), fromLabel(t, true), t.bmgOnly ? 'BMG only' : '']
             .filter(Boolean)
             .join(' · ')}
           tags={t.due ? <DueTag t={t} /> : undefined}
@@ -647,7 +742,10 @@ function TodoRows({
               </td>
             )}
             <td>
-              <Tag tone={t.source === 'artist' ? 's' : 'c'}>{SOURCE_LABEL[t.source]}</Tag>
+              <Tag tone={t.assignee === 'bmg' ? 'k' : t.source === 'artist' ? 's' : 'c'}>
+                {fromLabel(t, true)}
+              </Tag>
+              {t.sentBack && !t.done && <Tag tone="c">Sent back</Tag>}
             </td>
             <td>
               <DueTag t={t} />
@@ -678,6 +776,8 @@ export function ArtistTodos({
   const { filter, setFilter, todos, error, setError, load, toggle } = useTodos(cfg, token, path);
   const all = useAllCounts(cfg, token, artistId, todos);
   const ed = useEditing(load);
+  // Rev 15: the artist's to-dos that their plan owner sent back.
+  const sentBack = useSentBack(cfg, token, artistId, !isBmg, todos);
   const sel = useSelect();
   const editor = ed.editing && (
     <TodoEditor
@@ -696,6 +796,7 @@ export function ArtistTodos({
     return (
       <PhoneTodos
         todos={todos}
+        sentBack={sentBack}
         error={error}
         onEdit={ed.open}
         editor={editor}
@@ -757,6 +858,42 @@ export function ArtistTodos({
   );
 }
 
+/** Rev 15: sent-back to-dos (their own filter; they're neither open nor done). */
+function useSentBack(
+  cfg: AppConfig,
+  token: string,
+  artistId: string,
+  on: boolean,
+  trigger: unknown,
+) {
+  const [items, setItems] = useState<Todo[]>([]);
+  useEffect(() => {
+    if (!on) return;
+    api<{ todos: Todo[] }>(cfg, token, 'GET', `/artists/${artistId}/todos?filter=sent-back`)
+      .then((r) => setItems(r.todos.filter((t) => !!t.sentBack)))
+      .catch(() => setItems([]));
+  }, [cfg, token, artistId, on, trigger]);
+  return items;
+}
+
+/** Rev 15: whether the artist can send their plan owner a to-do right now. */
+export function useOwnerTodos(
+  cfg: AppConfig,
+  token: string,
+  artistId: string,
+  trigger?: unknown,
+  on = true,
+) {
+  const [state, setState] = useState<OwnerTodos | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    api<PlanResponse>(cfg, token, 'GET', `/artists/${artistId}/plan`)
+      .then((r) => setState(r.ownerTodos ?? null))
+      .catch(() => setState(null));
+  }, [cfg, token, artistId, trigger, on]);
+  return state;
+}
+
 /** Done / total across every to-do for the progress bar (the list itself may be filtered). */
 function useAllCounts(cfg: AppConfig, token: string, artistId: string, trigger: unknown) {
   const [counts, setCounts] = useState<{ done: number; total: number } | null>(null);
@@ -779,6 +916,7 @@ function useAllCounts(cfg: AppConfig, token: string, artistId: string, trigger: 
  */
 function PhoneTodos({
   todos,
+  sentBack,
   error,
   onEdit,
   editor,
@@ -786,6 +924,7 @@ function PhoneTodos({
   add,
 }: {
   todos: Todo[] | null;
+  sentBack: Todo[];
   error: string | null;
   onEdit: (t: Todo) => void;
   editor: React.ReactNode;
@@ -794,7 +933,9 @@ function PhoneTodos({
 }) {
   if (!todos) return <WaveLoader />;
   const fromBmg = todos.filter((t) => t.source !== 'artist');
-  const own = todos.filter((t) => t.source === 'artist');
+  // Rev 15: what the artist asked their plan owner to do.
+  const forBmg = todos.filter((t) => t.source === 'artist' && t.assignee === 'bmg');
+  const own = todos.filter((t) => t.source === 'artist' && t.assignee !== 'bmg');
   const overdue = (t: Todo) => !t.done && !!t.due && t.due < today();
   const card = (t: Todo) => (
     <RowCard
@@ -805,8 +946,14 @@ function PhoneTodos({
       title={t.title}
       sub={
         [
-          t.source === 'feedback' ? 'From your feedback' : t.source === 'bmg' ? 'Blueprint' : '',
-          t.notes,
+          t.source === 'feedback'
+            ? 'From your feedback'
+            : t.source === 'bmg'
+              ? 'Blueprint'
+              : t.assignee === 'bmg'
+                ? `For ${t.forName ?? 'Blueprint'}`
+                : '',
+          t.sentBack ? `Sent back: “${t.sentBack.reason}”` : t.notes,
         ]
           .filter(Boolean)
           .join(' · ') || undefined
@@ -830,6 +977,18 @@ function PhoneTodos({
         list('From Blueprint', fromBmg)
       ) : (
         <p className="src">Nothing from Blueprint right now.</p>
+      )}
+      {forBmg.length > 0 && (
+        <>
+          <div className="eyebrow pt-2.5 pb-1.5 text-muted-foreground">For Blueprint</div>
+          {list('For Blueprint', forBmg)}
+        </>
+      )}
+      {sentBack.length > 0 && (
+        <>
+          <div className="eyebrow pt-2.5 pb-1.5 text-muted-foreground">Sent back</div>
+          {list('Sent back', sentBack)}
+        </>
       )}
       <div className="eyebrow pt-2.5 pb-1.5 text-muted-foreground">My own</div>
       {own.length ? list('My own', own) : <p className="src">Nothing of your own yet.</p>}
@@ -950,6 +1109,11 @@ function AddTodo({
   const [dueTime, setDueTime] = useState('');
   const [reminder, setReminder] = useState<'' | Reminder>('');
   const [bmgOnly, setBmgOnly] = useState(false);
+  // Rev 15: artists can send it to their plan owner instead.
+  const [forOwner, setForOwner] = useState(false);
+  const [sent, setSent] = useState(0);
+  const owner = useOwnerTodos(cfg, token, artistId, sent, !isBmg);
+  const offer = !isBmg && owner && owner.enabled;
 
   async function add() {
     try {
@@ -959,12 +1123,15 @@ function AddTodo({
         ...(due && dueTime ? { dueTime } : {}),
         ...(due && reminder ? { reminder } : {}),
         ...(isBmg && bmgOnly ? { bmgOnly } : {}),
+        ...(offer && forOwner ? { for: 'planOwner' } : {}),
       });
       setTitle('');
       setDue('');
       setDueTime('');
       setReminder('');
       setBmgOnly(false);
+      setForOwner(false);
+      setSent((n) => n + 1);
       onAdded();
       if (created.reminderFailed) onError(`To-do added. ${REMINDER_FAILED}`);
     } catch (e) {
@@ -1038,9 +1205,143 @@ function AddTodo({
           BMG only
         </label>
       )}
+      {offer && (
+        <label>
+          <span className="sr-only">For</span>
+          <select
+            className="h-9 rounded-lg border border-input bg-white px-2 text-sm"
+            value={forOwner ? 'owner' : 'me'}
+            title={owner.refused ?? undefined}
+            onChange={(e) => setForOwner(e.target.value === 'owner')}
+          >
+            <option value="me">For: Me</option>
+            <option value="owner" disabled={!!owner.refused}>
+              For: {owner.to}
+              {owner.to === 'Blueprint' ? '' : ' · Plan owner'}
+            </option>
+          </select>
+        </label>
+      )}
       <Button type="submit" variant="cta" size="sm" disabled={!title.trim()}>
-        Add
+        {offer && forOwner ? 'Send' : 'Add'}
       </Button>
+      {!isBmg && owner && (owner.refused || owner.to === 'Blueprint') && (
+        <span className="src w-full">
+          {owner.refused ??
+            "Your plan doesn't have a Blueprint owner yet. To-dos for Blueprint go to the Blueprint team."}
+        </span>
+      )}
     </form>
+  );
+}
+
+/**
+ * Rev 15, My plan: "Ask Kyra to do something". A to-do for the artist's plan
+ * owner, optionally linked to a stage or milestone of the plan.
+ */
+export function AskOwner({
+  cfg,
+  token,
+  artistId,
+  owner,
+  phases,
+  onClose,
+  onSent,
+}: {
+  cfg: AppConfig;
+  token: string;
+  artistId: string;
+  owner: OwnerTodos;
+  phases: PlanResponse['plan']['phases'];
+  onClose: () => void;
+  onSent: (msg: string) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [notes, setNotes] = useState('');
+  const [due, setDue] = useState('');
+  const [link, setLink] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const options = [
+    { value: '', label: 'Not linked to the plan' },
+    ...phases.flatMap((p) => [
+      { value: `${p.id}|`, label: p.name },
+      ...p.milestones.map((m) => ({ value: `${p.id}|${m.id}`, label: `${p.name} › ${m.title}` })),
+    ]),
+  ];
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    const [phaseId, milestoneId] = link.split('|');
+    try {
+      await api(cfg, token, 'POST', `/artists/${artistId}/todos`, {
+        title: title.trim(),
+        ...(notes.trim() ? { notes: notes.trim() } : {}),
+        ...(due ? { due } : {}),
+        ...(phaseId ? { phaseId } : {}),
+        ...(phaseId && milestoneId ? { milestoneId } : {}),
+        for: 'planOwner',
+      });
+      onSent(`Sent to ${owner.to}. They're told now.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title={<span className="eyebrow">Ask {owner.to} to do something</span>}>
+      {owner.refused ? (
+        <Notice tone="info">{owner.refused}</Notice>
+      ) : (
+        <>
+          <Field
+            label="To-do"
+            value={title}
+            maxLength={200}
+            placeholder="Book the rehearsal room"
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <TextArea
+            label="Notes"
+            value={notes}
+            maxLength={2000}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Due date"
+              type="date"
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+            />
+            <Select
+              label="Linked to"
+              value={link}
+              options={options}
+              onChange={(e) => setLink(e.target.value)}
+            />
+          </div>
+          <span className="src">
+            {owner.to === 'Blueprint'
+              ? "Your plan doesn't have a Blueprint owner yet. This goes to the Blueprint team."
+              : `${owner.to} can have up to ${owner.max} open to-dos from you (${owner.open} now).`}
+          </span>
+        </>
+      )}
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="flex gap-2">
+        {!owner.refused && (
+          <Button variant="cta" disabled={busy || !title.trim()} onClick={() => void send()}>
+            {busy ? 'Sending…' : `Send to ${owner.to}`}
+          </Button>
+        )}
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Card>
   );
 }

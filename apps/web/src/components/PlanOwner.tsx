@@ -15,11 +15,16 @@ export function OwnerChip({
   owner,
   ownerNeeded,
   onChange,
+  onAsk,
+  askLabel,
 }: {
   owner: PlanOwner | null;
   ownerNeeded: boolean;
   /** Blueprint only. */
   onChange?: () => void;
+  /** Rev 15, artists: "Ask Kyra to do something". */
+  onAsk?: () => void;
+  askLabel?: string;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2.5 text-[15px]">
@@ -37,6 +42,11 @@ export function OwnerChip({
       {onChange && (
         <Button size="sm" variant="ghost" onClick={onChange}>
           {owner ? 'Change owner' : 'Choose an owner'}
+        </Button>
+      )}
+      {onAsk && (
+        <Button size="sm" variant="ghost" onClick={onAsk}>
+          {askLabel ?? 'Ask Blueprint to do something'}
         </Button>
       )}
     </div>

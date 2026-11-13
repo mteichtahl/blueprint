@@ -78,6 +78,15 @@ import {
   PLAN_DIGEST_MINUTES,
   planDigestScheduleName,
 } from '../workspace/plan-owner.ts';
+import {
+  canSendBack,
+  isOpenForBmg,
+  limitFor,
+  openFor,
+  refusal,
+  settingsFrom,
+  settingsKey,
+} from '../workspace/owner-todos.ts';
 import { people, type Person } from '../files/people.ts';
 import {
   audit,
@@ -120,7 +129,7 @@ async function domainEvent(type: string, detail: Record<string, unknown>) {
 async function syncReminder(todo: Todo) {
   const Name = reminderScheduleName(todo.artistId, todo.todoId);
   const GroupName = env('REMINDER_GROUP');
-  if (!todo.remindAt || todo.done) {
+  if (!todo.remindAt || todo.done || todo.sentBack) {
     try {
       await scheduler.send(new DeleteScheduleCommand({ Name, GroupName }));
     } catch (err) {
@@ -214,7 +223,7 @@ function withReminder(todo: Todo, strict: boolean): Todo {
   const next = { ...todo };
   delete next.remindAt;
   if (todo.reminder && !todo.due) throw new HttpError(400, 'Set a due date to add a reminder');
-  if (!at || todo.done) return next;
+  if (!at || todo.done || todo.sentBack) return next;
   if (at.getTime() <= Date.now()) {
     if (strict) {
       throw new HttpError(400, 'That reminder time has already passed. Pick a shorter reminder.');
@@ -451,7 +460,73 @@ const publicProfile = (p: Record<string, unknown>) => ({
   createdAt: p.createdAt,
 });
 
-const publicTodo = (t: Todo) => ({
+/**
+ * Where an artist's to-dos for Blueprint go (rev 15): the plan owner if the
+ * plan has a current one, else the Blueprint team; whether they can send
+ * another; and how many are open now.
+ */
+async function ownerTodoState(artistId: string, plan?: Plan) {
+  const stored = plan ?? (await loadPlan(artistId));
+  const everyone = await team();
+  const status = stored
+    ? ownerFor(stored.ownerSub, everyone, artistId)
+    : { owner: null, ownerNeeded: true };
+  const owner = !status.ownerNeeded && status.owner ? status.owner : null;
+  const settings = owner
+    ? settingsFrom(
+        (await db.send(new GetCommand({ TableName: table(), Key: settingsKey(owner.sub) }))).Item,
+      )
+    : undefined;
+  const limit = limitFor(settings, artistId, !!owner);
+  const todos = await allTodos(artistId);
+  const open = openFor(todos, owner?.sub);
+  return {
+    plan: stored,
+    owner,
+    limit,
+    open,
+    refused: refusal(limit, open, owner?.displayName),
+    everyone,
+  };
+}
+
+/** The artist's name, for notices ("Chloe Poli added a to-do for you"). */
+async function artistName(artistId: string): Promise<string> {
+  const res = await db.send(
+    new GetCommand({ TableName: table(), Key: { PK: artistPk(artistId), SK: PROFILE_SK } }),
+  );
+  return String(res.Item?.displayName ?? 'An artist');
+}
+
+/**
+ * Rev 15 extras for to-dos the artist sent Blueprint: who they're for, by
+ * name, and whether this viewer can send them back.
+ */
+interface TodoViewer {
+  principal: Principal;
+  everyone: Person[];
+}
+async function viewerFor(principal: Principal, todos: readonly Todo[]): Promise<TodoViewer> {
+  const needed = todos.some((t) => t.assignee === 'bmg');
+  return { principal, everyone: needed ? await team() : [] };
+}
+function forOwnerView(t: Todo, v?: TodoViewer) {
+  if (t.assignee !== 'bmg') return {};
+  const name = t.bmgOwnerSub
+    ? v?.everyone.find((p) => p.sub === t.bmgOwnerSub)?.displayName
+    : undefined;
+  return {
+    forName: name ?? 'Blueprint',
+    canSendBack:
+      !!v &&
+      isOpenForBmg(t) &&
+      canSendBack(v.principal.role, v.principal.sub, t) &&
+      v.principal.role !== 'artist',
+  };
+}
+
+const publicTodo = (t: Todo, v?: TodoViewer) => ({
+  ...forOwnerView(t, v),
   todoId: t.todoId,
   artistId: t.artistId,
   title: t.title,
@@ -464,12 +539,181 @@ const publicTodo = (t: Todo) => ({
   commentCount: (t as Todo & { commentCount?: number }).commentCount ?? 0,
   phaseId: t.phaseId ?? null,
   submissionId: t.submissionId ?? null,
+  milestoneId: t.milestoneId ?? null,
   done: t.done,
   source: t.source,
   bmgOnly: t.visibility === 'bmg-only',
+  /** Rev 15: `bmg` when the artist sent it to their plan owner. */
+  assignee: t.assignee ?? 'artist',
+  bmgOwnerSub: t.bmgOwnerSub ?? null,
+  sentBack: t.sentBack
+    ? { reason: t.sentBack.reason, byName: t.sentBack.byName, at: t.sentBack.at }
+    : null,
   createdAt: t.createdAt,
   updatedAt: t.updatedAt ?? null,
 });
+
+const personName = (everyone: Person[], sub: string) =>
+  everyone.find((p) => p.sub === sub)?.displayName ?? 'Blueprint';
+
+/**
+ * Rev 15: Send back (the plan owner or an admin, with a reason), and the
+ * artist's answers to it: send it again (limits checked again) or make it
+ * their own. The reason also goes in the to-do's conversation.
+ */
+async function sentBackAction(
+  event: APIGatewayProxyEvent,
+  principal: Principal,
+  existing: Todo,
+  patch: { sendBack?: { reason: string }; sendAgain?: true; makeMine?: true },
+): Promise<Todo> {
+  const { artistId, todoId } = existing;
+  const key = { PK: artistPk(artistId), SK: todoSk(todoId) };
+  const at = new Date().toISOString();
+
+  if (patch.sendBack) {
+    if (principal.role === 'artist') throw new HttpError(403, 'Only Blueprint sends to-dos back');
+    if (!isOpenForBmg(existing))
+      throw new HttpError(409, 'Only open to-dos an artist sent Blueprint can be sent back');
+    if (!canSendBack(principal.role, principal.sub, existing))
+      throw new HttpError(403, 'Only the plan owner or a Blueprint admin can send this back');
+    const everyone = await team();
+    const byName = personName(everyone, principal.sub);
+    const sentBack = { reason: patch.sendBack.reason, bySub: principal.sub, byName, at };
+    const commentId = newId();
+    await db
+      .send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: table(),
+                Key: key,
+                // The reason is also a comment, so the thread's count goes up.
+                UpdateExpression:
+                  'SET sentBack = :sb, updatedAt = :at, updatedBy = :by, lastCommentAt = :at REMOVE remindAt ADD commentCount :one',
+                ConditionExpression:
+                  'attribute_exists(PK) AND attribute_not_exists(sentBack) AND done = :f',
+                ExpressionAttributeValues: {
+                  ':sb': sentBack,
+                  ':at': at,
+                  ':by': principal.sub,
+                  ':f': false,
+                  ':one': 1,
+                },
+              },
+            },
+            {
+              Put: {
+                TableName: table(),
+                Item: {
+                  PK: artistPk(artistId),
+                  SK: todoCommentSk(todoId, at, commentId),
+                  type: 'todo-comment',
+                  commentId,
+                  todoId,
+                  artistId,
+                  text: `Sent back: ${patch.sendBack.reason}`,
+                  authorSub: principal.sub,
+                  authorRole: principal.role,
+                  authorName: byName,
+                  createdAt: at,
+                } satisfies TodoComment & Record<string, unknown>,
+              },
+            },
+          ],
+        }),
+      )
+      .catch((err) => {
+        if ((err as Error).name === 'TransactionCanceledException')
+          throw new HttpError(409, 'This to-do changed just now. Open it again.');
+        throw err;
+      });
+    const next: Todo = { ...existing, sentBack, updatedAt: at, updatedBy: principal.sub };
+    delete next.remindAt;
+    await syncReminder(next).catch(() => undefined);
+    await domainEvent('todo.sentBack', {
+      artistId,
+      todoId,
+      title: existing.title,
+      reason: patch.sendBack.reason,
+      bySub: principal.sub,
+      byName,
+    });
+    await audit(event, 'todo.sentBack', 'success', { artistId, todoId });
+    const comments = (existing as Todo & { commentCount?: number }).commentCount ?? 0;
+    return { ...next, commentCount: comments + 1 } as Todo;
+  }
+
+  // Send again / Make it mine: the artist, on a to-do that was sent back.
+  if (principal.role !== 'artist')
+    throw new HttpError(403, 'Only the artist can send it again or keep it');
+  if (!existing.sentBack || existing.done) throw new HttpError(409, "This to-do wasn't sent back");
+
+  if (patch.makeMine) {
+    const next: Todo = withReminder(
+      { ...existing, assignee: 'artist', updatedAt: at, updatedBy: principal.sub },
+      false,
+    );
+    delete next.sentBack;
+    await db.send(
+      new UpdateCommand({
+        TableName: table(),
+        Key: key,
+        UpdateExpression: `SET assignee = :a, updatedAt = :at, updatedBy = :by${next.remindAt ? ', remindAt = :r' : ''} REMOVE sentBack${next.remindAt ? '' : ', remindAt'}`,
+        ConditionExpression: 'attribute_exists(sentBack)',
+        ExpressionAttributeValues: {
+          ':a': 'artist',
+          ':at': at,
+          ':by': principal.sub,
+          ...(next.remindAt ? { ':r': next.remindAt } : {}),
+        },
+      }),
+    );
+    await audit(event, 'todo.madeMine', 'success', { artistId, todoId });
+    return scheduleReminder(next, key);
+  }
+
+  const state = await ownerTodoState(artistId);
+  if (state.refused) throw new HttpError(409, state.refused);
+  const next: Todo = withReminder(
+    {
+      ...existing,
+      updatedAt: at,
+      updatedBy: principal.sub,
+      ...(state.owner ? { bmgOwnerSub: state.owner.sub } : {}),
+    },
+    false,
+  );
+  delete next.sentBack;
+  if (!state.owner) delete next.bmgOwnerSub;
+  await db.send(
+    new UpdateCommand({
+      TableName: table(),
+      Key: key,
+      UpdateExpression: `SET updatedAt = :at, updatedBy = :by${state.owner ? ', bmgOwnerSub = :o' : ''}${next.remindAt ? ', remindAt = :r' : ''} REMOVE sentBack${state.owner ? '' : ', bmgOwnerSub'}${next.remindAt ? '' : ', remindAt'}`,
+      ConditionExpression: 'attribute_exists(sentBack)',
+      ExpressionAttributeValues: {
+        ':at': at,
+        ':by': principal.sub,
+        ...(state.owner ? { ':o': state.owner.sub } : {}),
+        ...(next.remindAt ? { ':r': next.remindAt } : {}),
+      },
+    }),
+  );
+  await domainEvent('todo.forOwner', {
+    artistId,
+    todoId,
+    title: existing.title,
+    ...(existing.due ? { due: existing.due } : {}),
+    ...(state.owner ? { ownerSub: state.owner.sub } : {}),
+    artistName: await artistName(artistId),
+    bySub: principal.sub,
+    again: true,
+  });
+  await audit(event, 'todo.sentAgain', 'success', { artistId, todoId });
+  return scheduleReminder(next, key);
+}
 
 /**
  * Artists, plans and to-dos. Every route checks the shared authz rules
@@ -609,6 +853,8 @@ export const handler = handle(async (event) => {
         bmg && stored
           ? (await allTodos(artistId)).filter((t) => movesWithOwner(t, stored.ownerSub)).length
           : 0;
+      // Rev 15: whether the artist can send their owner a to-do right now.
+      const forOwner = stored ? await ownerTodoState(artistId, stored) : undefined;
       return json(200, {
         plan: {
           outcome: plan.outcome,
@@ -625,6 +871,15 @@ export const handler = handle(async (event) => {
         ownerSince: stored?.ownerSince ?? null,
         ownerNeeded: bmg && status.ownerNeeded,
         ...(bmg ? { ownerCandidates: ownerCandidates(everyone, artistId), movableTodos } : {}),
+        ownerTodos: forOwner
+          ? {
+              to: forOwner.owner ? forOwner.owner.displayName : 'Blueprint',
+              enabled: forOwner.limit.enabled,
+              max: forOwner.limit.max,
+              open: forOwner.open,
+              refused: forOwner.refused,
+            }
+          : null,
       });
     }
 
@@ -899,9 +1154,9 @@ export const handler = handle(async (event) => {
               visibility: t.visibility,
             }).allow,
         )
-        .filter((t) => matchesFilter(t, filter, now))
-        .map(publicTodo);
-      return json(200, { todos });
+        .filter((t) => matchesFilter(t, filter, now, principal.sub));
+      const viewer = await viewerFor(principal, todos);
+      return json(200, { todos: todos.map((t) => publicTodo(t, viewer)) });
     }
 
     case 'POST /artists/{artistId}/todos': {
@@ -910,9 +1165,22 @@ export const handler = handle(async (event) => {
       const body = parseBody(event, TodoCreate);
       if (body.bmgOnly && principal.role === 'artist')
         throw new HttpError(403, 'Only Blueprint can add BMG-only to-dos');
+      const forOwner = body.for === 'planOwner';
+      if (forOwner && principal.role !== 'artist')
+        throw new HttpError(400, 'Only artists send to-dos to their plan owner');
       const todoId = newId();
+      // Rev 15: a to-do for the plan owner goes to the current owner (or the
+      // Blueprint team), within the owner's on/off setting and maximum.
+      const state = forOwner ? await ownerTodoState(artistId) : undefined;
+      if (state?.refused) throw new HttpError(409, state.refused);
+      const plan = state ? state.plan : await loadPlan(artistId);
+      if (body.milestoneId) {
+        const phase = plan?.phases.find((p) => p.id === body.phaseId);
+        if (!phase?.milestones.some((m) => m.id === body.milestoneId))
+          throw new HttpError(400, "That milestone isn't in the plan any more");
+      }
       // Looked after on Blueprint's side by the plan owner (rev 12).
-      const planOwner = (await loadPlan(artistId))?.ownerSub;
+      const planOwner = state ? state.owner?.sub : plan?.ownerSub;
       const todo: Todo = withReminder(
         {
           todoId,
@@ -923,6 +1191,8 @@ export const handler = handle(async (event) => {
           ...(body.due && body.dueTime ? { dueTime: body.dueTime } : {}),
           ...(body.reminder ? { reminder: body.reminder } : {}),
           ...(body.phaseId ? { phaseId: body.phaseId } : {}),
+          ...(body.phaseId && body.milestoneId ? { milestoneId: body.milestoneId } : {}),
+          ...(forOwner ? { assignee: 'bmg' as const } : {}),
           done: false,
           source: principal.role === 'artist' ? 'artist' : 'bmg',
           visibility: body.bmgOnly ? 'bmg-only' : 'normal',
@@ -946,11 +1216,38 @@ export const handler = handle(async (event) => {
           ConditionExpression: 'attribute_not_exists(PK)',
         }),
       );
+      if (state) {
+        // Two quick sends can both pass the check above: count again, and
+        // take this one back if it went over the maximum.
+        const open = openFor(await allTodos(artistId), state.owner?.sub);
+        if (open > state.limit.max) {
+          await db.send(
+            new DeleteCommand({
+              TableName: table(),
+              Key: { PK: artistPk(artistId), SK: todoSk(todoId) },
+            }),
+          );
+          throw new HttpError(409, refusal(state.limit, open - 1, state.owner?.displayName)!);
+        }
+      }
       const saved = await scheduleReminder(todo, {
         PK: artistPk(artistId),
         SK: todoSk(todoId),
       });
-      return json(201, publicTodo(saved));
+      if (state) {
+        await domainEvent('todo.forOwner', {
+          artistId,
+          todoId,
+          title: todo.title,
+          ...(todo.due ? { due: todo.due } : {}),
+          ...(state.owner ? { ownerSub: state.owner.sub } : {}),
+          artistName: await artistName(artistId),
+          bySub: principal.sub,
+          again: false,
+        });
+        await audit(event, 'todo.forOwner', 'success', { artistId, todoId });
+      }
+      return json(201, publicTodo(saved, await viewerFor(principal, [saved])));
     }
 
     case 'PATCH /artists/{artistId}/todos/{todoId}': {
@@ -965,6 +1262,10 @@ export const handler = handle(async (event) => {
       const patch = parseBody(event, TodoPatch);
       if (patch.bmgOnly !== undefined && principal.role === 'artist') {
         throw new HttpError(403, 'Only Blueprint can change who sees a to-do');
+      }
+      if (patch.sendBack || patch.sendAgain || patch.makeMine) {
+        const after = await sentBackAction(event, principal, existing, patch);
+        return json(200, publicTodo(after, await viewerFor(principal, [after])));
       }
       // Artists and Blueprint can both edit any to-do they can see (BMG-only
       // ones are invisible to artists, and `ensure` above refuses them).
@@ -1026,7 +1327,24 @@ export const handler = handle(async (event) => {
         }),
       );
       const stored = await scheduleReminder(updated, key);
-      const notify = changed.length > 0 && notifyOnEdit(principal.role, existing);
+      // Rev 15: the plan owner finished a to-do the artist sent them.
+      const finished =
+        principal.role !== 'artist' &&
+        existing.assignee === 'bmg' &&
+        !existing.done &&
+        updated.done;
+      if (finished) {
+        await domainEvent('todo.finished', {
+          artistId,
+          todoId,
+          title: updated.title,
+          bySub: principal.sub,
+          byName: personName(await team(), principal.sub),
+        });
+      }
+      // "Kyra finished: …" already tells the artist when that's all that changed.
+      const onlyFinished = finished && changed.length === 1;
+      const notify = changed.length > 0 && !onlyFinished && notifyOnEdit(principal.role, existing);
       if (notify) {
         await domainEvent('todo.updated', {
           artistId,
@@ -1041,7 +1359,7 @@ export const handler = handle(async (event) => {
         todoId,
         fields: [...changed, ...(visibilityChanged ? ['visibility'] : [])].join(','),
       });
-      return json(200, publicTodo(stored));
+      return json(200, publicTodo(stored, await viewerFor(principal, [stored])));
     }
 
     // ── To-do threads (rev 7): artist + Blueprint; BMG-only to-dos stay BMG-only ──
@@ -1205,9 +1523,9 @@ export const handler = handle(async (event) => {
               visibility: t.visibility,
             }).allow,
         )
-        .filter((t) => matchesFilter(t, filter, now))
-        .map(publicTodo);
-      return json(200, { todos });
+        .filter((t) => matchesFilter(t, filter, now, principal.sub));
+      const viewer = await viewerFor(principal, todos);
+      return json(200, { todos: todos.map((t) => publicTodo(t, viewer)) });
     }
 
     default:

@@ -58,3 +58,15 @@ describe('todo.reminder', () => {
     );
   });
 });
+
+describe('rev 15: to-dos for the plan owner', () => {
+  const forOwner = { ...todo, assignee: 'bmg' as const, bmgOwnerSub: 'kyra' };
+  const e = { ...base, remindAt: todo.remindAt };
+  it('reminds the plan owner, not the artist', () => {
+    const d = onTodoReminder(ctx, e, forOwner);
+    expect(d.send && d.to).toBe('bmg');
+  });
+  it('sends no reminder once it has been sent back', () => {
+    expect(onTodoReminder(ctx, e, { ...forOwner, sentBack: { reason: 'x' } }).send).toBe(false);
+  });
+});

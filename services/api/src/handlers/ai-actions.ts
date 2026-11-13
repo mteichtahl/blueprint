@@ -36,6 +36,8 @@ export function stepsFor(action: Action, role: string): Step[] {
             title: action.title,
             ...(action.notes ? { notes: action.notes } : {}),
             ...(action.due ? { due: action.due } : {}),
+            // Rev 15: an artist's to-do for their plan owner.
+            ...(action.forPlanOwner && role === 'artist' ? { for: 'planOwner' } : {}),
           },
         },
       ];
