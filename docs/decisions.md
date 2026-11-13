@@ -731,3 +731,26 @@ A **Tickets** section on Studio HQ (the BMG overview) tracks ticket sales for ev
 - **Takings:** events use the takings typed in, else tickets sold × ticket price; gigs use their ticket and door takings (merchandise isn't ticket money, so it's left out).
 - **Source:** "Humanitix" when the event is linked to Humanitix or the gig's ticket link is a humanitix.com page (both synced hourly by the connector), else "Typed in".
 - **Opening a row:** an event opens on the Events page; a gig opens its gig page under Artist gigs ("← Artist gigs"). The footer links go to Events & workshops and Artist gigs.
+
+## Chat quick reactions (13 Nov 2026)
+
+Marc asked for quick reactions in Chat on the phone and the web: 👍 👎 😊 😢.
+This reverses the rev 7 call ("no reactions").
+
+- **Where:** the four emoji lead the hover bar on a message (desktop) and the
+  bar that opens when a message is tapped (phone), before Reply and Star.
+  Reactions show as chips under the bubble with a count; hovering (or a screen
+  reader) names who reacted. Tapping a chip toggles yours.
+- **One reaction per person per message**, like WhatsApp: tapping the same one
+  again takes it off, a different one swaps it. Each Blueprint person counts
+  separately (keyed by Cognito sub, not the shared Blueprint member).
+- **Who can react:** anyone who can read the chat, including announcements and
+  "only admins can send" groups. System notes can't be reacted to.
+- **Storage:** a `reactions` map on the message item (`sub → { e, n, at }`), so
+  reading a page needs no extra query. Reactions are not sealed: they are one of
+  four fixed emoji plus a name, like `senderName` already is. Access is the same
+  as the chat's, so artist-to-artist reactions stay private from Blueprint.
+- **No new route:** the API stack is at its resource limit, so reactions ride on
+  `PATCH /conversations/{id}/me` as `react: { messageId, createdAt, emoji | null }`.
+  The response is the message's updated reaction list; members get a realtime
+  refresh. No push or email notification for reactions.

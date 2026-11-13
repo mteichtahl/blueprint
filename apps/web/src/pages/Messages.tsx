@@ -62,8 +62,46 @@ interface ChatMessage {
   mine: boolean;
   ticks?: TickState | null;
   starred: boolean;
+  /** Quick reactions (rev 14); older API responses may leave it out. */
+  reactions?: ReactionCount[];
   replyTo: { messageId: string; senderName: string; text: string } | null;
   attachment: ChatAttachment | null;
+}
+
+/** The four quick reactions, in bar order (matches the API's QUICK_REACTIONS). */
+export const QUICK_REACTIONS = [
+  { emoji: '👍', label: 'Thumbs up' },
+  { emoji: '👎', label: 'Thumbs down' },
+  { emoji: '😊', label: 'Smile' },
+  { emoji: '😢', label: 'Sad' },
+] as const;
+type QuickReaction = (typeof QUICK_REACTIONS)[number]['emoji'];
+
+interface ReactionCount {
+  emoji: QuickReaction;
+  count: number;
+  mine: boolean;
+  names: string[];
+}
+
+/**
+ * The caller's reaction after tapping `emoji`: the same one again takes it
+ * off, a different one swaps it (one reaction per person, like WhatsApp).
+ * Returns the new list and what to send (`null` = take mine off).
+ */
+export function toggleReaction(
+  list: ReactionCount[],
+  emoji: QuickReaction,
+): { next: ReactionCount[]; send: QuickReaction | null } {
+  const had = list.find((r) => r.mine)?.emoji ?? null;
+  const send = had === emoji ? null : emoji;
+  const next = QUICK_REACTIONS.map(({ emoji: e }) => {
+    const cur = list.find((r) => r.emoji === e);
+    let names = (cur?.names ?? []).filter((n) => !(cur?.mine && n === 'You'));
+    if (e === send) names = [...names, 'You'];
+    return { emoji: e, count: names.length, mine: e === send, names };
+  }).filter((r) => r.count > 0);
+  return { next, send };
 }
 
 interface ThreadPage {
@@ -1665,6 +1703,26 @@ function Conversation({
     }
   }
 
+  async function react(m: ChatMessage, emoji: QuickReaction) {
+    const before = m.reactions ?? [];
+    const { next, send } = toggleReaction(before, emoji);
+    thread.patchMessage(m.messageId, { reactions: next });
+    setError(null);
+    try {
+      const res = await api<{ reactions: ReactionCount[] }>(
+        ctx.cfg,
+        ctx.token,
+        'PATCH',
+        `/conversations/${encodeURIComponent(conv.conversationId)}/me`,
+        { react: { messageId: m.messageId, createdAt: m.createdAt, emoji: send } },
+      );
+      thread.patchMessage(m.messageId, { reactions: res.reactions });
+    } catch (e) {
+      thread.patchMessage(m.messageId, { reactions: before });
+      setError((e as Error).message);
+    }
+  }
+
   async function star(m: ChatMessage) {
     thread.patchMessage(m.messageId, { starred: !m.starred });
     await me({ star: { messageId: m.messageId, starred: !m.starred } });
@@ -1765,6 +1823,7 @@ function Conversation({
         }}
         onReplyPrivately={() => onReplyPrivately(m)}
         onStar={() => void star(m)}
+        onReact={(e) => void react(m, e)}
         onOpen={(a) => ctx.onNavigate(attachmentView(a, ctx.isBmg))}
       />,
     );
@@ -2115,6 +2174,7 @@ function MessageBubble({
   onReply,
   onReplyPrivately,
   onStar,
+  onReact,
   onOpen,
   ctx,
 }: {
@@ -2127,10 +2187,14 @@ function MessageBubble({
   onReply: () => void;
   onReplyPrivately: () => void;
   onStar: () => void;
+  onReact: (emoji: QuickReaction) => void;
   onOpen: (a: ChatAttachment) => void;
 }) {
+  const reactions = m.reactions ?? [];
   return (
-    <div className={`wa-msgrow ${m.mine ? 'wa-msgrow-out' : ''}`}>
+    <div
+      className={`wa-msgrow ${m.mine ? 'wa-msgrow-out' : ''} ${reactions.length ? 'wa-msgrow-reacted' : ''}`}
+    >
       <div className={`wa-msg ${m.mine ? 'wa-out' : ''} ${first ? 'wa-first' : ''}`} tabIndex={0}>
         {showName && (
           <span className="wa-from" style={{ color: nameColour(m.senderName) }}>
@@ -2158,6 +2222,26 @@ function MessageBubble({
           </button>
         )}
         <span className="wa-acts">
+          <span className="wa-quickreacts" role="group" aria-label="React">
+            {QUICK_REACTIONS.map((q) => {
+              const on = reactions.some((r) => r.mine && r.emoji === q.emoji);
+              return (
+                <button
+                  key={q.emoji}
+                  type="button"
+                  className="wa-actbtn wa-reactbtn"
+                  aria-label={
+                    on ? `Remove ${q.label.toLowerCase()}` : `React ${q.label.toLowerCase()}`
+                  }
+                  aria-pressed={on}
+                  title={q.label}
+                  onClick={() => onReact(q.emoji)}
+                >
+                  <span aria-hidden="true">{q.emoji}</span>
+                </button>
+              );
+            })}
+          </span>
           {canReply && !replyPrivately && (
             <button
               type="button"
@@ -2180,6 +2264,24 @@ function MessageBubble({
             <G n="star" size={16} filled={m.starred} />
           </button>
         </span>
+        {reactions.length > 0 && (
+          <span className="wa-reactions">
+            {reactions.map((r) => (
+              <button
+                key={r.emoji}
+                type="button"
+                className={`wa-reaction ${r.mine ? 'wa-reaction-mine' : ''}`}
+                aria-pressed={r.mine}
+                aria-label={`${r.emoji} ${r.count}: ${r.names.join(', ')}${r.mine ? '. Tap to remove yours' : ''}`}
+                title={r.names.join(', ')}
+                onClick={() => onReact(r.emoji)}
+              >
+                <span aria-hidden="true">{r.emoji}</span>
+                {r.count > 1 && <span className="wa-reaction-n">{r.count}</span>}
+              </button>
+            ))}
+          </span>
+        )}
       </div>
     </div>
   );

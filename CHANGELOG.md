@@ -24,6 +24,8 @@ Plus invitation tracking, finished reviews, and a smarter library.
 
 ### New
 
+- **Quick reactions in Chat:** tap or hover a message to react with 👍 👎 😊
+  or 😢. Tap the same one again to take it off.
 - **Invitations** are listed under Invite artist, showing whether each is
   waiting, expired, accepted or revoked. Open one to **Resend** or
   **Revoke** it. The invitation email now explains the website, installing

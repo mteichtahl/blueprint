@@ -10,6 +10,9 @@ import {
   NewMessage,
   previewOf,
   publicType,
+  QUICK_REACTIONS,
+  reactionSummary,
+  UpdateMine,
   ticks,
   channelsFor,
   CONVERSATION_ID_PATTERN,
@@ -173,5 +176,40 @@ describe('WhatsApp-style chat rules', () => {
     expect(
       planConversation(admin, { kind: 'announcement', title: 'News', artistIds: [A] }),
     ).toMatchObject({ ok: true, type: 'announcement' });
+  });
+});
+
+describe('quick reactions (rev 14)', () => {
+  const at = (n: number) => `2026-11-13T10:00:0${n}.000Z`;
+  const id = '3f2a8c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b';
+
+  it('accepts only the four quick reactions, or null to remove', () => {
+    expect(QUICK_REACTIONS).toEqual(['👍', '👎', '😊', '😢']);
+    for (const emoji of [...QUICK_REACTIONS, null])
+      expect(
+        UpdateMine.safeParse({ react: { messageId: id, createdAt: at(1), emoji } }).success,
+      ).toBe(true);
+    expect(
+      UpdateMine.safeParse({ react: { messageId: id, createdAt: at(1), emoji: '🔥' } }).success,
+    ).toBe(false);
+    expect(
+      UpdateMine.safeParse({ react: { messageId: 'x', createdAt: at(1), emoji: '👍' } }).success,
+    ).toBe(false);
+  });
+
+  it('groups reactions in bar order, marks mine and names who reacted', () => {
+    const summary = reactionSummary(
+      {
+        'sub-kyra': { e: '👍', n: 'Kyra', at: at(1) },
+        'sub-me': { e: '👍', n: 'Chloe', at: at(2) },
+        'sub-sam': { e: '😢', n: 'Sam', at: at(3) },
+      },
+      'sub-me',
+    );
+    expect(summary).toEqual([
+      { emoji: '👍', count: 2, mine: true, names: ['Kyra', 'You'] },
+      { emoji: '😢', count: 1, mine: false, names: ['Sam'] },
+    ]);
+    expect(reactionSummary(undefined, 'sub-me')).toEqual([]);
   });
 });
