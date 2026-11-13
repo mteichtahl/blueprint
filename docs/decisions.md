@@ -763,3 +763,18 @@ This reverses the rev 7 call ("no reactions").
 - **All** lists every gig the artists share with Blueprint, by date (Idea and Cancelled included), from `GET /gigs?filter=all`. The API's default stays `upcoming`, so existing callers are unchanged.
 - Help requests are still counted on the sidebar badge ("N need help") and one tap away on Help wanted. The page subtitle no longer says "with help requests first".
 - The workspace Work → Gigs list keeps Upcoming · Past · Help wanted.
+
+## View, edit and delete are separate steps (13 Nov 2026)
+
+- **Asked for:** check the whole web flow so viewing, editing and deleting are always separate.
+- **Audit:** every object was traced from opening to editing to deleting. The full map is in `patterns.md` ("View, edit, delete"). Documents, folders, contacts, venues, invitations, meetings, gigs and plan stages already followed it.
+- **Fixed where they were mixed:**
+  - **Event lines** (guests, speakers, crew roles, run sheet items, costs) had a remove `×` on every line that deleted at once, and run-sheet notes were edited in place. Now the line's name opens an `EditDialog` with all its fields (notes, who's on a crew role) and **Remove** in the danger area. A guest's or speaker's status, what a cost cost, and adding someone to a crew role stay on the page as single actions (P3).
+  - **Industry sites** had a Remove on each row and a Use switch; now the site opens an `EditDialog` (name, address, kind, how it's read, Use this site) with Remove in the danger area. `PATCH /newsroom/sites/:id` now takes those fields too (still admin only, audited as `newsroom.siteChanged`).
+  - **Team members** were edited inline under the table, with an Edit button per row and a one-click **Turn off login**. Now the row opens an `EditDialog`. It lists what changes before Save (becomes or stops being an admin; artists gained and lost; P6). **Turn off login** is in the danger area, and **Turn login back on** sits in its place when the login is off.
+  - **Assets** were always editable in the details panel, with a one-click **Remove from assets**. Now the details are read-only with Download, **Edit** and Copy link. Edit is an `EditScreen` with Replace the file and **Remove from assets** in the danger area.
+  - **AI prompts** were always an open editor with a one-click **Discard draft**. Now the prompt shows its live text or draft with **Publish draft** (admins) and **Edit draft**. Editing is an `EditScreen` with **Discard** in the danger area. Admins now save a draft, then publish it from the prompt.
+  - **Submissions** had priority and needed-by changing on the page. Now they're read-only, behind **Edit details** (an `EditScreen`) while the submission is open.
+  - **Connectors:** the hand-made two-click **Disconnect** and the connector app's **Remove** are now `DangerArea`s, so they have the 6-second timeout and the same look.
+- **New pattern component:** `EditDialog` is P4 for small items with no page of their own: fields, Save and Cancel (Enter saves, Escape cancels), then the danger area. `Dialog` moved from `Folders.tsx` to `ui.tsx` so the patterns can use it; `Folders.tsx` re-exports it.
+- **Not changed (by design):** events, gigs, to-dos and submissions have no delete in the API (cancel, mark done or complete instead). Your own comment on a to-do is removed in place, like a chat message (added to the exceptions). Chat keeps WhatsApp's conventions.

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { DangerArea, EditDialog } from '../components/patterns.tsx';
 import { api, needsFreshSignIn } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import {
@@ -714,6 +715,8 @@ function Sites({
     kind: KINDS[0]!,
     mode: 'feed' as 'feed' | 'page',
   });
+  /** The site open for editing (admins). */
+  const [open, setOpen] = useState<Site | null>(null);
   return (
     <Card
       title="Industry sites"
@@ -734,48 +737,15 @@ function Sites({
                 <RowCard
                   key={s.siteId}
                   muted={!s.enabled}
-                  lead={
-                    <input
-                      className="chk"
-                      type="checkbox"
-                      aria-label={`Use ${s.name}`}
-                      checked={s.enabled}
-                      disabled={!isAdmin}
-                      onChange={() =>
-                        void run(
-                          () =>
-                            api(cfg, token, 'PATCH', `/newsroom/sites/${s.siteId}`, {
-                              enabled: !s.enabled,
-                            }),
-                          s.enabled ? `${s.name} paused.` : `${s.name} back on.`,
-                        )
-                      }
-                    />
-                  }
                   title={s.name}
+                  status={s.enabled ? undefined : <Tag>Paused</Tag>}
                   sub={[
                     s.kind,
                     s.lastCheckedAt
                       ? `${s.lastFound ?? 0} found ${shortDate(s.lastCheckedAt)}`
                       : 'Not checked yet',
                   ].join(' · ')}
-                  actions={
-                    isAdmin ? (
-                      <button
-                        type="button"
-                        className="src px-2 py-2 font-bold"
-                        aria-label={`Remove ${s.name}`}
-                        onClick={() =>
-                          void run(
-                            () => api(cfg, token, 'DELETE', `/newsroom/sites/${s.siteId}`),
-                            `${s.name} removed.`,
-                          )
-                        }
-                      >
-                        Remove
-                      </button>
-                    ) : undefined
-                  }
+                  {...(isAdmin ? { onOpen: () => setOpen(s), openLabel: 'Edit site' } : {})}
                 />
               ))}
             >
@@ -786,18 +756,23 @@ function Sites({
                   <th scope="col">How it's read</th>
                   <th scope="col">Last check</th>
                   <th scope="col">Use</th>
-                  {isAdmin && (
-                    <th scope="col">
-                      <span className="sr-only">Remove</span>
-                    </th>
-                  )}
                 </tr>
               </thead>
               <tbody>
                 {sites.map((s) => (
                   <tr key={s.siteId} className={s.enabled ? '' : 'text-muted-foreground'}>
                     <td>
-                      <b>{s.name}</b>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          className="text-left font-bold hover:underline"
+                          onClick={() => setOpen(s)}
+                        >
+                          {s.name}
+                        </button>
+                      ) : (
+                        <b>{s.name}</b>
+                      )}
                     </td>
                     <td>{s.kind}</td>
                     <td>{s.mode === 'feed' ? 'News feed' : 'Page check'}</td>
@@ -806,41 +781,7 @@ function Sites({
                         ? `${s.lastFound ?? 0} found · ${shortDate(s.lastCheckedAt)}`
                         : 'Not yet'}
                     </td>
-                    <td>
-                      <input
-                        className="chk"
-                        type="checkbox"
-                        aria-label={`Use ${s.name}`}
-                        checked={s.enabled}
-                        disabled={!isAdmin}
-                        onChange={() =>
-                          void run(
-                            () =>
-                              api(cfg, token, 'PATCH', `/newsroom/sites/${s.siteId}`, {
-                                enabled: !s.enabled,
-                              }),
-                            s.enabled ? `${s.name} paused.` : `${s.name} back on.`,
-                          )
-                        }
-                      />
-                    </td>
-                    {isAdmin && (
-                      <td>
-                        <button
-                          type="button"
-                          className="src font-bold"
-                          aria-label={`Remove ${s.name}`}
-                          onClick={() =>
-                            void run(
-                              () => api(cfg, token, 'DELETE', `/newsroom/sites/${s.siteId}`),
-                              `${s.name} removed.`,
-                            )
-                          }
-                        >
-                          ×
-                        </button>
-                      </td>
-                    )}
+                    <td>{s.enabled ? 'On' : <Tag>Paused</Tag>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -893,6 +834,117 @@ function Sites({
           </div>
         )}
       </div>
+      {open && (
+        <SiteEditor
+          key={open.siteId}
+          cfg={cfg}
+          token={token}
+          site={open}
+          onCancel={() => setOpen(null)}
+          onDone={(done) => {
+            setOpen(null);
+            void run(() => Promise.resolve(), done);
+          }}
+        />
+      )}
     </Card>
+  );
+}
+
+/** Editing an industry site (P4 in a dialog): its fields, whether it's used, then Remove. */
+function SiteEditor({
+  cfg,
+  token,
+  site,
+  onCancel,
+  onDone,
+}: {
+  cfg: AppConfig;
+  token: string;
+  site: Site;
+  onCancel: () => void;
+  onDone: (done: string) => void;
+}) {
+  const [v, setV] = useState({
+    name: site.name,
+    url: site.url,
+    kind: site.kind,
+    mode: site.mode,
+    enabled: site.enabled,
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const path = `/newsroom/sites/${site.siteId}`;
+  const ready = !!v.name.trim() && /^https:\/\//.test(v.url);
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(cfg, token, 'PATCH', path, { ...v, name: v.name.trim(), url: v.url.trim() });
+      onDone(`${v.name.trim()} saved.`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <EditDialog
+      title="Edit site"
+      onSave={save}
+      onCancel={onCancel}
+      busy={busy}
+      canSave={ready}
+      error={error}
+      danger={
+        <DangerArea
+          title={`Remove ${site.name}`}
+          action="Remove"
+          what="It's no longer checked. Stories already found stay in past issues. To stop checking it for a while, untick Use this site instead."
+          onConfirm={async () => {
+            await api(cfg, token, 'DELETE', path);
+            onDone(`${site.name} removed.`);
+          }}
+        />
+      }
+    >
+      <Field
+        label="Name"
+        value={v.name}
+        maxLength={80}
+        required
+        onChange={(e) => setV({ ...v, name: e.target.value })}
+      />
+      <Field
+        label="Feed or page address"
+        type="url"
+        value={v.url}
+        required
+        onChange={(e) => setV({ ...v, url: e.target.value })}
+      />
+      <Select
+        label="Kind"
+        value={v.kind}
+        onChange={(e) => setV({ ...v, kind: e.target.value })}
+        options={KINDS.map((k) => ({ value: k, label: k }))}
+      />
+      <Select
+        label="How to read it"
+        value={v.mode}
+        onChange={(e) => setV({ ...v, mode: e.target.value as 'feed' | 'page' })}
+        options={[
+          { value: 'feed', label: 'News feed (RSS or Atom)' },
+          { value: 'page', label: 'Page check (tell me when it changes)' },
+        ]}
+      />
+      <label className="flex min-h-9 items-center gap-3">
+        <input
+          className="chk"
+          type="checkbox"
+          checked={v.enabled}
+          onChange={(e) => setV({ ...v, enabled: e.target.checked })}
+        />
+        Use this site (untick to pause it)
+      </label>
+    </EditDialog>
   );
 }

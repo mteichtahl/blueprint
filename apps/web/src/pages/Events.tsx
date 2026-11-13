@@ -1,4 +1,4 @@
-import { BackLink } from '../components/patterns.tsx';
+import { BackLink, DangerArea, EditDialog } from '../components/patterns.tsx';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
@@ -14,6 +14,7 @@ import {
   RowCard,
   Select,
   Tag,
+  TextArea,
   WaveLoader,
 } from '../components/ui.tsx';
 import { aud, PRESET_COSTS } from '../components/Money.tsx';
@@ -482,6 +483,8 @@ function EventDetail({
   const [adding, setAdding] = useState<Part | null>(null);
   const [editingSales, setEditingSales] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
+  /** A line (guest, speaker, crew role, run sheet item, cost) open for editing. */
+  const [line, setLine] = useState<{ part: Part; row: Row } | null>(null);
   const base = `/events/${eventId}`;
 
   const load = useCallback(async () => {
@@ -509,8 +512,6 @@ function EventDetail({
     });
   const patchRow = (part: Part, id: string, body: Record<string, unknown>) =>
     run(() => api(cfg, token, 'PATCH', `${base}/${part}/${id}`, body));
-  const removeRow = (part: Part, id: string) =>
-    run(() => api(cfg, token, 'DELETE', `${base}/${part}/${id}`));
   const addRow = (part: Part, body: Record<string, unknown>) =>
     run(async () => {
       await api(cfg, token, 'POST', `${base}/${part}`, body);
@@ -695,7 +696,9 @@ function EventDetail({
                   sub={[String(g.type || ''), g.fromOutreach ? 'From the outreach list' : '']
                     .filter(Boolean)
                     .join(' · ')}
-                  tags={
+                  openLabel="Edit guest"
+                  onOpen={() => setLine({ part: 'guests', row: g })}
+                  actions={
                     <StatusSelect
                       label={`Status for ${String(g.name)}`}
                       value={g.status as keyof typeof GUEST_TAG}
@@ -703,7 +706,6 @@ function EventDetail({
                       onChange={(v) => void patchRow('guests', g.itemId, { status: v })}
                     />
                   }
-                  actions={<RemoveButton onClick={() => void removeRow('guests', g.itemId)} />}
                 />
               ))}
             >
@@ -713,9 +715,6 @@ function EventDetail({
                   <th scope="col">Type</th>
                   <th scope="col">Status</th>
                   <th scope="col">From outreach list</th>
-                  <th scope="col">
-                    <span className="sr-only">Remove</span>
-                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -723,7 +722,12 @@ function EventDetail({
                   const status = g.status as keyof typeof GUEST_TAG;
                   return (
                     <tr key={g.itemId}>
-                      <td>{String(g.name)}</td>
+                      <td>
+                        <LineLink
+                          label={String(g.name)}
+                          onOpen={() => setLine({ part: 'guests', row: g })}
+                        />
+                      </td>
                       <td>{String(g.type || '—')}</td>
                       <td>
                         <StatusSelect
@@ -734,9 +738,6 @@ function EventDetail({
                         />
                       </td>
                       <td>{g.fromOutreach ? 'Yes' : 'No'}</td>
-                      <td>
-                        <RemoveButton onClick={() => void removeRow('guests', g.itemId)} />
-                      </td>
                     </tr>
                   );
                 })}
@@ -780,10 +781,12 @@ function EventDetail({
                 onChange={(v) => void patchRow('speakers', sp.itemId, { status: v })}
               />
               <span className="flex-1">
-                {String(sp.name)}
-                {sp.role ? ` · ${String(sp.role)}` : ''}
+                <LineLink
+                  label={String(sp.name)}
+                  onOpen={() => setLine({ part: 'speakers', row: sp })}
+                />
+                {sp.role ? <span className="src"> · {String(sp.role)}</span> : null}
               </span>
-              <RemoveButton onClick={() => void removeRow('speakers', sp.itemId)} />
             </div>
           ))}
 
@@ -811,7 +814,7 @@ function EventDetail({
               token={token}
               role={c as CrewRow}
               onPatch={(body) => patchRow('crew', c.itemId, body)}
-              onRemove={() => void removeRow('crew', c.itemId)}
+              onOpen={() => setLine({ part: 'crew', row: c })}
             />
           ))}
           <p className="src">Everyone on the crew is saved to Contacts.</p>
@@ -855,14 +858,16 @@ function EventDetail({
             {d.run.map((r) => (
               <div key={r.itemId} className="li flex-wrap">
                 <b className="w-16 flex-none">{time12(String(r.time))}</b>
-                <span className="flex-1">{String(r.item)}</span>
+                <span className="flex-1">
+                  <LineLink
+                    label={String(r.item)}
+                    onOpen={() => setLine({ part: 'run', row: r })}
+                  />
+                </span>
                 <span className="src">{String(r.who ?? '')}</span>
-                <RemoveButton onClick={() => void removeRow('run', r.itemId)} />
-                <RunNotes
-                  item={String(r.item)}
-                  notes={String(r.notes ?? '')}
-                  onSave={(notes) => void patchRow('run', r.itemId, { notes })}
-                />
+                {r.notes ? (
+                  <span className="src w-full pl-16 whitespace-pre-line">{String(r.notes)}</span>
+                ) : null}
               </div>
             ))}
           </div>
@@ -934,14 +939,15 @@ function EventDetail({
                     key={b.itemId}
                     title={String(b.item)}
                     sub={b.inKind ? 'In-kind' : `Budget ${money(Number(b.budgetCents))}`}
-                    tags={
+                    openLabel="Edit cost"
+                    onOpen={() => setLine({ part: 'budget', row: b })}
+                    actions={
                       <SpentInput
                         label={`Spent on ${String(b.item)}`}
                         cents={Number(b.spentCents)}
                         onSave={(c) => void patchRow('budget', b.itemId, { spentCents: c })}
                       />
                     }
-                    actions={<RemoveButton onClick={() => void removeRow('budget', b.itemId)} />}
                   />
                 ))}
                 <RowCard
@@ -962,15 +968,17 @@ function EventDetail({
                 <th scope="col">Cost</th>
                 <th scope="col">Budget</th>
                 <th scope="col">Spent</th>
-                <th scope="col">
-                  <span className="sr-only">Delete</span>
-                </th>
               </tr>
             </thead>
             <tbody>
               {d.budget.map((b) => (
                 <tr key={b.itemId}>
-                  <td>{String(b.item)}</td>
+                  <td>
+                    <LineLink
+                      label={String(b.item)}
+                      onOpen={() => setLine({ part: 'budget', row: b })}
+                    />
+                  </td>
                   <td>{b.inKind ? 'In-kind' : money(Number(b.budgetCents))}</td>
                   <td>
                     <SpentInput
@@ -978,9 +986,6 @@ function EventDetail({
                       cents={Number(b.spentCents)}
                       onSave={(c) => void patchRow('budget', b.itemId, { spentCents: c })}
                     />
-                  </td>
-                  <td>
-                    <RemoveButton onClick={() => void removeRow('budget', b.itemId)} />
                   </td>
                 </tr>
               ))}
@@ -994,13 +999,12 @@ function EventDetail({
                 <td>
                   <b>{money(s.spentCents)}</b>
                 </td>
-                <td />
               </tr>
               <tr>
                 <td colSpan={2}>
                   <b>Profit</b> <span className="src">(takings − spent)</span>
                 </td>
-                <td colSpan={2}>
+                <td>
                   <b className={s.profitCents < 0 ? 'text-[#8E2F2C]' : ''}>
                     {aud(s.profitCents)}
                     {s.profitCents < 0 && ' loss'}
@@ -1020,6 +1024,24 @@ function EventDetail({
           </label>
         </Card>
       </div>
+      {line && (
+        <LineEditor
+          key={line.row.itemId}
+          part={line.part}
+          row={line.row}
+          onCancel={() => setLine(null)}
+          onSave={async (body) => {
+            await api(cfg, token, 'PATCH', `${base}/${line.part}/${line.row.itemId}`, body);
+            setLine(null);
+            await load();
+          }}
+          onRemove={async () => {
+            await api(cfg, token, 'DELETE', `${base}/${line.part}/${line.row.itemId}`);
+            setLine(null);
+            await load();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1052,15 +1074,11 @@ function StatusSelect<T extends string>({
   );
 }
 
-function RemoveButton({ onClick }: { onClick: () => void }) {
+/** A line's name: opens its edit dialog (P1: the line opens; no buttons on it). */
+function LineLink({ label, onOpen }: { label: string; onOpen: () => void }) {
   return (
-    <button
-      type="button"
-      className="src font-bold hover:text-cta"
-      aria-label="Remove"
-      onClick={onClick}
-    >
-      ×
+    <button type="button" className="text-left font-bold hover:underline" onClick={onOpen}>
+      {label}
     </button>
   );
 }
@@ -1173,13 +1191,14 @@ function CrewRole({
   token,
   role,
   onPatch,
-  onRemove,
+  onOpen,
 }: {
   cfg: AppConfig;
   token: string;
   role: CrewRow;
   onPatch: (body: Record<string, unknown>) => Promise<void>;
-  onRemove: () => void;
+  /** Opens the role's edit dialog: its name, how many, who's on it, and Remove. */
+  onOpen: () => void;
 }) {
   const people = role.people ?? [];
   const filled = role.people ? people.length : Number(role.filled);
@@ -1189,14 +1208,15 @@ function CrewRole({
   return (
     <div className="flex flex-col gap-1.5 border-b border-input py-2">
       <div className="flex items-center gap-2">
-        <span className="flex-1 font-bold">{role.role}</span>
+        <span className="flex-1">
+          <LineLink label={role.role} onOpen={onOpen} />
+        </span>
         <Tag tone={filled >= needed ? 'n' : 'c'}>
           {filled} / {needed}
         </Tag>
         <Button size="sm" variant="ghost" onClick={() => setAdding((v) => !v)}>
           + Person
         </Button>
-        <RemoveButton onClick={onRemove} />
       </div>
       {!role.people && role.names && (
         <span className="src">
@@ -1219,14 +1239,6 @@ function CrewRole({
           <Tag tone={p.type === 'volunteer' ? 's' : 'n'}>
             {p.type === 'volunteer' ? 'Volunteer' : 'Crew'}
           </Tag>
-          <button
-            type="button"
-            className="src font-bold hover:text-cta"
-            aria-label={`Take ${p.name} off ${role.role}`}
-            onClick={() => void save(people.filter((_, j) => j !== i))}
-          >
-            ×
-          </button>
         </div>
       ))}
       {adding && (
@@ -1325,72 +1337,6 @@ function CrewPersonForm({
   );
 }
 
-/** A run sheet item's notes: shown under the row, edited in place. */
-function RunNotes({
-  item,
-  notes,
-  onSave,
-}: {
-  item: string;
-  notes: string;
-  onSave: (notes: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [v, setV] = useState(notes);
-  if (editing) {
-    return (
-      <div className="flex w-full flex-col gap-2 pl-16">
-        <textarea
-          aria-label={`Notes for ${item}`}
-          className="min-h-20 w-full rounded-lg border border-input bg-white px-3 py-2 text-[15px]"
-          maxLength={1000}
-          value={v}
-          onChange={(e) => setV(e.target.value)}
-        />
-        <span className="flex gap-2">
-          <Button
-            size="sm"
-            variant="navy"
-            onClick={() => {
-              setEditing(false);
-              if (v.trim() !== notes) onSave(v.trim());
-            }}
-          >
-            Save notes
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setV(notes);
-              setEditing(false);
-            }}
-          >
-            Cancel
-          </Button>
-        </span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex w-full gap-2 pl-16 text-sm">
-      {notes ? (
-        <span className="src flex-1 whitespace-pre-line">{notes}</span>
-      ) : (
-        <span className="flex-1" />
-      )}
-      <button
-        type="button"
-        className="font-bold underline"
-        aria-label={`${notes ? 'Edit' : 'Add'} notes for ${item}`}
-        onClick={() => setEditing(true)}
-      >
-        {notes ? 'Edit notes' : '+ Notes'}
-      </button>
-    </div>
-  );
-}
-
 function SpentInput({
   label,
   cents,
@@ -1414,6 +1360,231 @@ function SpentInput({
         if (c !== cents) onSave(c);
       }}
     />
+  );
+}
+
+const LINE_WORDS: Record<Part, { one: string; gone: string }> = {
+  guests: { one: 'guest', gone: 'They come off the guest list.' },
+  speakers: { one: 'speaker', gone: 'They come off the speaker list.' },
+  crew: {
+    one: 'crew role',
+    gone: "The role and who's on it come off the event. Everyone stays in Contacts.",
+  },
+  run: { one: 'run sheet item', gone: 'It comes off the run sheet.' },
+  budget: { one: 'cost', gone: 'It comes off the budget, and the profit is worked out again.' },
+};
+
+/** The display name of a line, for titles. */
+const lineName = (part: Part, r: Row) =>
+  String((part === 'crew' ? r.role : part === 'run' || part === 'budget' ? r.item : r.name) ?? '');
+
+/**
+ * Editing one line of the event (P4 in a dialog): its fields, Save and Cancel,
+ * then Remove in the danger area. Quick changes (a guest's status, what a cost
+ * cost, adding someone to a crew role) stay on the page as single actions (P3).
+ */
+function LineEditor({
+  part,
+  row,
+  onSave,
+  onRemove,
+  onCancel,
+}: {
+  part: Part;
+  row: Row;
+  onSave: (body: Record<string, unknown>) => Promise<void>;
+  onRemove: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const str = (k: string) => String(row[k] ?? '');
+  const [v, setV] = useState<Record<string, string>>(() => ({
+    name: str('name'),
+    type: str('type'),
+    email: str('email'),
+    role: str('role'),
+    needed: String(row.needed ?? 1),
+    time: str('time'),
+    item: str('item'),
+    who: str('who'),
+    notes: str('notes'),
+    budget: row.budgetCents ? String(Number(row.budgetCents) / 100) : '',
+  }));
+  const [flag, setFlag] = useState(
+    part === 'guests' ? !!row.fromOutreach : part === 'budget' ? !!row.inKind : false,
+  );
+  const [people, setPeople] = useState<CrewPerson[]>((row.people as CrewPerson[]) ?? []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: string) => (e: { target: { value: string } }) =>
+    setV((x) => ({ ...x, [k]: e.target.value }));
+  const name = lineName(part, row);
+  const words = LINE_WORDS[part];
+
+  const required: Record<Part, string[]> = {
+    guests: ['name'],
+    speakers: ['name'],
+    crew: ['role'],
+    run: ['time', 'item'],
+    budget: ['item'],
+  };
+  const ready = required[part].every((k) => v[k]?.trim());
+
+  function body(): Record<string, unknown> {
+    const t = (k: string) => v[k]!.trim();
+    switch (part) {
+      case 'guests':
+        return {
+          name: t('name'),
+          type: t('type'),
+          ...(t('email') ? { email: t('email') } : {}),
+          fromOutreach: flag,
+        };
+      case 'speakers':
+        return { name: t('name'), role: t('role') };
+      case 'crew':
+        return {
+          role: t('role'),
+          needed: Math.max(0, Math.round(Number(t('needed')) || 0)),
+          ...(row.people ? { people } : {}),
+        };
+      case 'run':
+        return { time: t('time'), item: t('item'), who: t('who'), notes: t('notes') };
+      case 'budget':
+        return {
+          item: t('item'),
+          inKind: flag,
+          budgetCents: Math.round((Number(t('budget')) || 0) * 100),
+        };
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(body());
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <EditDialog
+      title={`Edit ${words.one}`}
+      onSave={save}
+      onCancel={onCancel}
+      busy={busy}
+      canSave={ready}
+      error={error}
+      danger={
+        <DangerArea
+          title={`Remove ${name || `this ${words.one}`}`}
+          action="Remove"
+          what={words.gone}
+          onConfirm={onRemove}
+        />
+      }
+    >
+      {part === 'guests' && (
+        <>
+          <Field label="Guest" value={v.name} maxLength={120} onChange={set('name')} required />
+          <Field label="Type" value={v.type} maxLength={80} onChange={set('type')} />
+          <Field label="Email" type="email" value={v.email} onChange={set('email')} />
+          <label className="flex min-h-9 items-center gap-3">
+            <input
+              className="chk"
+              type="checkbox"
+              checked={flag}
+              onChange={(e) => setFlag(e.target.checked)}
+            />
+            From the outreach list
+          </label>
+        </>
+      )}
+      {part === 'speakers' && (
+        <>
+          <Field label="Name" value={v.name} maxLength={120} onChange={set('name')} required />
+          <Field label="Role" value={v.role} maxLength={120} onChange={set('role')} />
+        </>
+      )}
+      {part === 'crew' && (
+        <>
+          <Field label="Role" value={v.role} maxLength={120} onChange={set('role')} required />
+          <Field
+            label="Needed"
+            type="number"
+            min={0}
+            max={100}
+            value={v.needed}
+            onChange={set('needed')}
+          />
+          {people.length > 0 && (
+            <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
+              <legend className="pb-1 text-[15px] font-bold">On this role</legend>
+              {people.map((p, i) => (
+                <span
+                  key={`${p.contactId ?? p.email}-${i}`}
+                  className="flex min-h-9 items-center gap-2"
+                >
+                  <span className="flex-1">
+                    {p.name}{' '}
+                    <span className="src">{p.type === 'volunteer' ? 'Volunteer' : 'Crew'}</span>
+                  </span>
+                  {/* Exception: a line inside a form is removed in the form. */}
+                  <button
+                    type="button"
+                    className="src font-bold hover:text-cta"
+                    aria-label={`Take ${p.name} off ${v.role || name}`}
+                    onClick={() => setPeople(people.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <span className="src">They stay in Contacts.</span>
+            </fieldset>
+          )}
+        </>
+      )}
+      {part === 'run' && (
+        <>
+          <Field label="Time" type="time" value={v.time} onChange={set('time')} required />
+          <Field label="Item" value={v.item} maxLength={200} onChange={set('item')} required />
+          <Field label="Who" value={v.who} maxLength={120} onChange={set('who')} />
+          <TextArea
+            label="Notes"
+            value={v.notes}
+            maxLength={1000}
+            placeholder="Cues, gear, who to call"
+            onChange={set('notes')}
+          />
+        </>
+      )}
+      {part === 'budget' && (
+        <>
+          <Field label="Item" value={v.item} maxLength={120} onChange={set('item')} required />
+          <Field
+            label="Budget ($)"
+            type="number"
+            min={0}
+            step="0.01"
+            value={v.budget}
+            disabled={flag}
+            onChange={set('budget')}
+          />
+          <label className="flex min-h-9 items-center gap-3">
+            <input
+              className="chk"
+              type="checkbox"
+              checked={flag}
+              onChange={(e) => setFlag(e.target.checked)}
+            />
+            In-kind
+          </label>
+        </>
+      )}
+    </EditDialog>
   );
 }
 

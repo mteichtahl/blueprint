@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import axe from 'axe-core';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Me } from '../src/lib/api.ts';
 import type { AppConfig } from '../src/lib/config.ts';
@@ -1116,7 +1116,13 @@ describe('WCAG 2.2 AA (axe-core): Access & permissions', () => {
     await settle();
     fireEvent.click(screen.getAllByRole('button', { name: /^Access & permissions/ })[0]!);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Sam' }));
+    // The row opens the member; editing is a dialog with Turn off login in its danger area.
+    fireEvent.click(screen.getAllByRole('button', { name: /Sam Lee/ })[0]!);
+    await settle();
+    const dialog = screen.getByRole('dialog', { name: 'Edit Sam Lee' });
+    expect(dialog.querySelector('[data-pattern="danger"]')?.textContent).toMatch(/Turn off/);
+    expect(await violations()).toEqual([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await settle();
     fireEvent.click(screen.getByRole('button', { name: 'Add team member' }));
     await settle();

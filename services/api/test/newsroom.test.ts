@@ -10,6 +10,7 @@ import {
   sectionsFromModel,
   weekOf,
   type Story,
+  SitePatch,
 } from '../src/newsroom/model.ts';
 
 const since = new Date('2026-11-01T00:00:00Z');
@@ -146,5 +147,24 @@ describe('newsroom text extraction', () => {
       new Date(0),
     );
     expect(r[0]!.title).toBe('Tom &amp; Jerry ’s');
+  });
+});
+
+describe('editing an industry site (rev 13: the row opens, Edit saves)', () => {
+  it('takes any of the site fields, or just whether it is used', () => {
+    expect(SitePatch.parse({ enabled: false })).toEqual({ enabled: false });
+    expect(
+      SitePatch.parse({ name: ' Music Victoria ', url: 'https://musicvictoria.com.au/feed' }),
+    ).toEqual({ name: 'Music Victoria', url: 'https://musicvictoria.com.au/feed' });
+    expect(SitePatch.parse({ kind: 'Festival', mode: 'page' })).toEqual({
+      kind: 'Festival',
+      mode: 'page',
+    });
+  });
+  it('refuses an empty change, unknown fields, a blank name and a non-https address', () => {
+    expect(SitePatch.safeParse({}).success).toBe(false);
+    expect(SitePatch.safeParse({ siteId: 'x' }).success).toBe(false);
+    expect(SitePatch.safeParse({ name: '  ' }).success).toBe(false);
+    expect(SitePatch.safeParse({ url: 'http://example.com/feed' }).success).toBe(false);
   });
 });

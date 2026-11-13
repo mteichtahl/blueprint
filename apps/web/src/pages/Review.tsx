@@ -1,4 +1,4 @@
-import { BackLink } from '../components/patterns.tsx';
+import { BackLink, EditScreen } from '../components/patterns.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
@@ -506,13 +506,21 @@ function SubmissionView({
   }, [cfg, token, path]);
   useEffect(() => void load(), [load]);
 
+  /** P3/P4: the submission is worked on here; its priority and date sit behind Edit details. */
+  const [editing, setEditing] = useState<{ priority: string; neededBy: string } | null>(null);
+  const [busy, setBusy] = useState(false);
   async function change(patch: { priority?: string; neededBy?: string }) {
+    setBusy(true);
     try {
       await api(cfg, token, 'PATCH', path, patch);
       await load();
       onChanged();
+      setEditing(null);
+      setError(null);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -521,30 +529,76 @@ function SubmissionView({
   const fileName = (id: string) => files.find((f) => f.fileId === id)?.name ?? 'File';
   const phase = phases.find((p) => p.id === sub.phaseId)?.name;
 
+  if (editing) {
+    return (
+      <EditScreen
+        title="Edit details"
+        back={{ to: sub.title, onClick: () => setEditing(null) }}
+        onSave={() =>
+          change({
+            ...(editing.priority !== sub.priority ? { priority: editing.priority } : {}),
+            ...(editing.neededBy !== sub.neededBy ? { neededBy: editing.neededBy } : {}),
+          })
+        }
+        onCancel={() => {
+          setEditing(null);
+          setError(null);
+        }}
+        busy={busy}
+        canSave={
+          !!editing.neededBy &&
+          (editing.priority !== sub.priority || editing.neededBy !== sub.neededBy)
+        }
+        error={error}
+      >
+        <SelectField
+          label="Priority"
+          value={editing.priority}
+          onChange={(v) => setEditing({ ...editing, priority: v })}
+          options={PRIORITY_OPTIONS}
+        />
+        <Field
+          label="Needed by"
+          type="date"
+          value={editing.neededBy}
+          onChange={(e) => setEditing({ ...editing, neededBy: e.target.value })}
+        />
+        {!isBmg && <span className="src">Blueprint is told about the change.</span>}
+      </EditScreen>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <BackLink to={backTo} onClick={onBack} />
-      <h2 className="font-title text-2xl">{sub.title}</h2>
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="font-title min-w-0 flex-1 text-2xl">{sub.title}</h2>
+        {open && (
+          <Button
+            variant="ghost"
+            onClick={() => setEditing({ priority: sub.priority, neededBy: sub.neededBy })}
+          >
+            <Icon name="pencil" size={16} />
+            Edit details
+          </Button>
+        )}
+      </div>
       {error && <Notice tone="error">{error}</Notice>}
       {!isBmg && sub.changedByBmgAt && open && (
         <Notice>Blueprint changed the priority or date on {date(sub.changedByBmgAt)}.</Notice>
       )}
       <Card>
         <div className="grid gap-4 sm:grid-cols-3">
-          <SelectField
-            label="Priority"
-            value={sub.priority}
-            onChange={(v) => void change({ priority: v })}
-            options={PRIORITY_OPTIONS}
-            disabled={!open}
-          />
-          <Field
-            label="Needed by"
-            type="date"
-            value={sub.neededBy}
-            disabled={!open}
-            onChange={(e) => e.target.value && void change({ neededBy: e.target.value })}
-          />
+          <div className="space-y-1.5 text-sm">
+            <span className="font-semibold">Priority</span>
+            <p>
+              <PriorityBadge p={sub.priority} />
+            </p>
+          </div>
+          <div className="space-y-1.5 text-sm">
+            <span className="font-semibold">Needed by</span>
+            <p>{date(sub.neededBy)}</p>
+          </div>
           <div className="space-y-1.5 text-sm">
             <span className="font-semibold">Details</span>
             <p>

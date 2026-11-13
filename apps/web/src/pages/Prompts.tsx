@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, needsFreshSignIn } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
+import { DangerArea, EditScreen } from '../components/patterns.tsx';
 import {
   Button,
   Card,
   Field,
+  Icon,
   Notice,
   Tag,
   TextArea,
@@ -141,6 +143,9 @@ function PromptEditor({
   const [error, setError] = useState<string | null>(null);
   const [stepUp, setStepUp] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
+  /** P2/P4: the prompt is read here; Edit draft opens its own screen. */
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [busy, setBusy] = useState(false);
   const base = `/ai/prompts/${encodeURIComponent(id)}`;
 
   const load = useCallback(async () => {
@@ -155,24 +160,29 @@ function PromptEditor({
     setError(null);
     setSaved(null);
     setStepUp(false);
+    setBusy(true);
     try {
       await fn();
       await load();
       onChanged();
       setSaved(done);
+      return true;
     } catch (e) {
       if (needsFreshSignIn(e)) setStepUp(true);
       else setError((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
     }
   }
   const saveDraft = () =>
     run(() => api(cfg, token, 'PUT', `${base}/draft`, { text, note }), 'Draft saved.');
   const discard = () => run(() => api(cfg, token, 'DELETE', `${base}/draft`), 'Draft discarded.');
   const publish = () =>
-    run(async () => {
-      if (dirty) await api(cfg, token, 'PUT', `${base}/draft`, { text, note });
-      await api(cfg, token, 'POST', `${base}/publish`, { note });
-    }, 'Published. Live in about a minute.');
+    run(
+      () => api(cfg, token, 'POST', `${base}/publish`, { note: p?.draft?.note ?? '' }),
+      'Published. Live in about a minute.',
+    );
   const rollback = (version: number) =>
     run(
       () => api(cfg, token, 'POST', `${base}/rollback`, { version }),
@@ -185,30 +195,53 @@ function PromptEditor({
   const used = [...text.matchAll(/\{\{\s*([a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g)].map((m) => m[1]!);
   const unknown = [...new Set(used.filter((v) => !p.variables.includes(v)))];
 
-  return (
+  const notices = (
     <>
-      <Card
-        title={
-          <span className="flex flex-wrap items-center gap-3">
-            <h2 className="poster text-[20px] leading-none">{p.label}</h2>
-            <Tag tone={p.liveVersion ? 'n' : 's'}>
-              {p.liveVersion ? `Live: v${p.liveVersion}` : 'Live: built-in default'}
-            </Tag>
-            {p.draft && <Tag tone="c">Draft saved {shortDate(p.draft.at)}</Tag>}
-          </span>
+      {error && <Notice tone="error">{error}</Notice>}
+      {saved && <Notice tone="success">{saved}</Notice>}
+      {stepUp && (
+        <Notice tone="error">
+          Publishing needs a fresh sign-in check.{' '}
+          <button type="button" className="font-bold underline" onClick={onReauth}>
+            Verify now
+          </button>
+        </Notice>
+      )}
+    </>
+  );
+
+  if (mode === 'edit') {
+    const cancel = () => {
+      setText(current);
+      setNote(p.draft?.note ?? '');
+      setError(null);
+      setMode('view');
+    };
+    return (
+      <EditScreen
+        title={p.draft ? 'Edit draft' : 'New draft'}
+        back={{ to: p.label, onClick: cancel }}
+        saveLabel="Save draft"
+        onSave={async () => {
+          if (await saveDraft()) setMode('view');
+        }}
+        onCancel={cancel}
+        busy={busy}
+        canSave={dirty && unknown.length === 0 && !!text.trim()}
+        error={error}
+        danger={
+          p.draft ? (
+            <DangerArea
+              title="Discard this draft"
+              action="Discard"
+              what={`The saved draft goes. ${p.liveVersion ? `v${p.liveVersion}` : 'The built-in default'} stays live.`}
+              onConfirm={async () => {
+                if (await discard()) setMode('view');
+              }}
+            />
+          ) : undefined
         }
       >
-        <p className="src m-0">{p.usedBy}</p>
-        {error && <Notice tone="error">{error}</Notice>}
-        {saved && <Notice tone="success">{saved}</Notice>}
-        {stepUp && (
-          <Notice tone="error">
-            Publishing needs a fresh sign-in check.{' '}
-            <button type="button" className="font-bold underline" onClick={onReauth}>
-              Verify now
-            </button>
-          </Notice>
-        )}
         <TextArea
           label="Prompt"
           value={text}
@@ -230,6 +263,16 @@ function PromptEditor({
               {`{{${v}}}`}
             </button>
           ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="ml-auto"
+            disabled={text === p.defaultText}
+            onClick={() => setText(p.defaultText)}
+          >
+            Start from the default
+          </Button>
         </div>
         {unknown.length > 0 && (
           <Notice tone="error">
@@ -244,40 +287,52 @@ function PromptEditor({
           placeholder="What changed and why"
           onChange={(e) => setNote(e.target.value)}
         />
+        <span className="src">
+          {isAdmin
+            ? 'Saving keeps it as a draft. Publish it from the prompt when you are happy.'
+            : 'Staff can save drafts. An admin reviews and publishes them.'}
+        </span>
+      </EditScreen>
+    );
+  }
+
+  return (
+    <>
+      <Card
+        title={
+          <span className="flex flex-wrap items-center gap-3">
+            <h2 className="poster text-[20px] leading-none">{p.label}</h2>
+            <Tag tone={p.liveVersion ? 'n' : 's'}>
+              {p.liveVersion ? `Live: v${p.liveVersion}` : 'Live: built-in default'}
+            </Tag>
+            {p.draft && <Tag tone="c">Draft saved {shortDate(p.draft.at)}</Tag>}
+          </span>
+        }
+      >
+        <p className="src m-0">{p.usedBy}</p>
+        {notices}
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="default"
-            disabled={!dirty || unknown.length > 0 || !text.trim()}
-            onClick={() => void saveDraft()}
-          >
-            Save draft
-          </Button>
-          {isAdmin && (
-            <Button
-              variant="cta"
-              disabled={(!p.draft && !dirty) || unknown.length > 0 || !text.trim()}
-              onClick={() => void publish()}
-            >
-              Publish
-            </Button>
-          )}
-          {p.draft && (
-            <Button variant="ghost" onClick={() => void discard()}>
-              Discard draft
+          {isAdmin && p.draft && (
+            <Button variant="cta" disabled={busy} onClick={() => void publish()}>
+              Publish draft
             </Button>
           )}
           <Button
             variant="ghost"
-            className="ml-auto"
-            disabled={text === p.defaultText}
-            onClick={() => setText(p.defaultText)}
+            onClick={() => {
+              setSaved(null);
+              setMode('edit');
+            }}
           >
-            Start from the default
+            <Icon name="pencil" size={16} />
+            {p.draft ? 'Edit draft' : 'Edit'}
           </Button>
         </div>
-        {!isAdmin && (
-          <span className="src">Staff can save drafts. An admin reviews and publishes them.</span>
-        )}
+        <span className="eyebrow">{p.draft ? 'Draft' : 'Live text'}</span>
+        {p.draft?.note && <span className="src">Note: {p.draft.note}</span>}
+        <pre className="m-0 max-h-[420px] overflow-auto rounded bg-secondary p-3 text-[13px] whitespace-pre-wrap">
+          {current}
+        </pre>
         <span className="src">
           Staging and production keep separate prompts. Previewing a draft against sample inputs
           arrives with the assistant.

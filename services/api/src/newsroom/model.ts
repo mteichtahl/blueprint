@@ -44,7 +44,17 @@ export const SiteBody = z
     mode: z.enum(['feed', 'page']).default('feed'),
   })
   .strict();
-export const SitePatch = z.object({ enabled: z.boolean() }).strict();
+/** Editing a site (P4): any of its fields, and whether it's used. */
+export const SitePatch = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    url: HttpsUrl.optional(),
+    kind: z.enum(SITE_KINDS).optional(),
+    mode: z.enum(['feed', 'page']).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict()
+  .refine((b) => Object.keys(b).length > 0, 'Nothing to change');
 
 export const Settings = z
   .object({

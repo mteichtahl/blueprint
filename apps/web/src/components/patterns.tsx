@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Button, Card, Icon, Notice } from './ui.tsx';
+import { Button, Card, Dialog, Icon, Notice } from './ui.tsx';
 
 /**
  * Rev 13 interaction patterns (docs/patterns.md). Every screen that shows one
@@ -183,6 +183,59 @@ export function EditScreen({
       </form>
       {danger}
     </Card>
+  );
+}
+
+/**
+ * P4 for a small item that has no page of its own (a line on a work page, an
+ * industry site): the row opens this. Fields, then Save and Cancel (Enter
+ * saves, Escape cancels), then the danger area. A desktop dialog, a phone page.
+ */
+export function EditDialog({
+  title,
+  onSave,
+  onCancel,
+  busy = false,
+  saveLabel = 'Save',
+  canSave = true,
+  error,
+  children,
+  danger,
+}: {
+  title: string;
+  onSave: () => void | Promise<void>;
+  onCancel: () => void;
+  busy?: boolean;
+  saveLabel?: string;
+  canSave?: boolean;
+  error?: string | null;
+  children: ReactNode;
+  /** A <DangerArea>, shown below Save and Cancel. */
+  danger?: ReactNode;
+}) {
+  return (
+    <Dialog title={title} onClose={() => !busy && onCancel()}>
+      <form
+        data-pattern="edit"
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!busy && canSave) void onSave();
+        }}
+      >
+        {children}
+        {error && <Notice tone="error">{error}</Notice>}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="cta" disabled={busy || !canSave}>
+            {busy ? 'Saving…' : saveLabel}
+          </Button>
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+      {danger}
+    </Dialog>
   );
 }
 

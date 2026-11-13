@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, needsFreshSignIn } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
+import { DangerArea } from '../components/patterns.tsx';
 import {
   ago,
   finishPendingCallback,
@@ -137,7 +138,6 @@ function ManagePanel({
 }) {
   const c = card.connection!;
   const setting = SETTING_FOR[card.id];
-  const [confirm, setConfirm] = useState(false);
   return (
     <div className="flex flex-col gap-2 border-t border-input pt-2">
       {c.lastError && <span className="src text-[#8E2F2C]">{c.lastError}</span>}
@@ -180,26 +180,21 @@ function ManagePanel({
             Sign in again
           </Button>
         )}
-        {canAdmin &&
-          (confirm ? (
-            <Button
-              size="sm"
-              variant="cta"
-              onClick={() =>
-                void act(
-                  () => api(cfg, token, 'DELETE', `${base}/${card.id}`),
-                  `${card.label} disconnected. Its history stays in the app.`,
-                )
-              }
-            >
-              Confirm disconnect
-            </Button>
-          ) : (
-            <Button size="sm" variant="ghost" onClick={() => setConfirm(true)}>
-              Disconnect
-            </Button>
-          ))}
       </div>
+      {canAdmin && (
+        <DangerArea
+          title={`Disconnect ${card.label}`}
+          action="Disconnect"
+          what="New numbers stop coming in. What's already been collected stays in the app, and you can connect again later."
+          onConfirm={async () => {
+            await api(cfg, token, 'DELETE', `${base}/${card.id}`);
+            await act(
+              () => Promise.resolve(),
+              `${card.label} disconnected. Its history stays in the app.`,
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -665,17 +660,19 @@ function ConnectorApps({
                   }
                   onRemove={
                     a.configured
-                      ? () =>
-                          run(
-                            () =>
-                              api<{ apps: ConnectorApp[] }>(
-                                cfg,
-                                token,
-                                'DELETE',
-                                `/connectors/apps/${a.provider}`,
-                              ),
+                      ? async () => {
+                          // Throws to the danger area if it fails; then refreshes the list.
+                          const r = await api<{ apps: ConnectorApp[] }>(
+                            cfg,
+                            token,
+                            'DELETE',
+                            `/connectors/apps/${a.provider}`,
+                          );
+                          await run(
+                            () => Promise.resolve(r),
                             `${APP_NAMES[a.provider]} app removed. Existing connections keep working until their sign-in expires.`,
-                          )
+                          );
+                        }
                       : undefined
                   }
                 />
@@ -700,7 +697,6 @@ function AppForm({
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const ready = clientId.trim().length >= 4 && clientSecret.trim().length >= 8;
 
@@ -771,26 +767,15 @@ function AppForm({
         <Button type="submit" variant="cta" size="sm" disabled={busy || !ready}>
           {app.configured ? 'Save new details' : 'Save'}
         </Button>
-        {onRemove &&
-          (confirm ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void onRemove().finally(() => setBusy(false));
-              }}
-            >
-              Click again to remove
-            </Button>
-          ) : (
-            <Button type="button" size="sm" variant="ghost" onClick={() => setConfirm(true)}>
-              Remove
-            </Button>
-          ))}
       </div>
+      {onRemove && (
+        <DangerArea
+          title={`Remove the ${APP_NAMES[app.provider]} app`}
+          action="Remove"
+          what="Nobody can connect new accounts until it's registered again. Existing connections keep working until their sign-in expires."
+          onConfirm={onRemove}
+        />
+      )}
     </form>
   );
 }
