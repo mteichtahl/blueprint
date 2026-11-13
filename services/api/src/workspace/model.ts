@@ -215,6 +215,13 @@ export const TodoCreate = z.object({
   phaseId: z.string().max(40).optional(),
   /** BMG-only to-dos are hidden from the artist (design 6.3). Artists can't set it. */
   bmgOnly: z.boolean().optional(),
+  /**
+   * Rev 15, artists only: `planOwner` sends it to the Blueprint person who owns
+   * their plan (the server works out who; the artist never names a person).
+   */
+  for: z.enum(['me', 'planOwner']).optional(),
+  /** Rev 15: the milestone it's about, in the stage given by `phaseId`. */
+  milestoneId: z.string().max(40).optional(),
 });
 
 export const TodoPatch = z
@@ -227,8 +234,27 @@ export const TodoPatch = z
     done: z.boolean().optional(),
     /** Blueprint only: hide it from the artist, or show it (a meeting shared or unshared). */
     bmgOnly: z.boolean().optional(),
+    /** Rev 15: the plan owner (or an admin) sends an artist's to-do back, with a reason. */
+    sendBack: z
+      .object({
+        reason: z
+          .string()
+          .trim()
+          .min(1, 'Say why you are sending it back')
+          .max(500, 'Keep the reason under 500 characters'),
+      })
+      .strict()
+      .optional(),
+    /** Rev 15, the artist: send a sent-back to-do to the plan owner again. */
+    sendAgain: z.literal(true).optional(),
+    /** Rev 15, the artist: keep a sent-back to-do as their own. */
+    makeMine: z.literal(true).optional(),
   })
-  .refine((v) => Object.keys(v).length > 0, 'Nothing to change');
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to change')
+  .refine(
+    (v) => [v.sendBack, v.sendAgain, v.makeMine].filter((x) => x !== undefined).length <= 1,
+    'Do one thing at a time',
+  );
 
 export interface Todo {
   todoId: string;
@@ -259,6 +285,15 @@ export interface Todo {
    * is told about the artist's changes through them.
    */
   bmgOwnerSub?: string;
+  /**
+   * Who it's for (rev 15). Absent or `artist`: the artist's to-do, as before.
+   * `bmg`: the artist sent it to their plan owner (`bmgOwnerSub`).
+   */
+  assignee?: 'artist' | 'bmg';
+  /** Rev 15: the milestone it's about (with `phaseId`). */
+  milestoneId?: string;
+  /** Rev 15: sent back to the artist by the owner, with why. Not open, not done. */
+  sentBack?: { reason: string; bySub: string; byName: string; at: string };
 }
 
 /** Offset of `timeZone` from UTC at `instant`, in ms (positive east of UTC). */
@@ -319,9 +354,11 @@ export function changedFields(before: Todo, after: Todo): string[] {
  */
 export function notifyOnEdit(
   role: 'artist' | 'bmg-admin' | 'bmg-staff',
-  todo: Pick<Todo, 'source' | 'visibility'>,
+  todo: Pick<Todo, 'source' | 'visibility' | 'assignee'>,
 ): 'artist' | 'bmg' | undefined {
-  if (role === 'artist') return todo.source === 'artist' ? undefined : 'bmg';
+  // Rev 15: a to-do the artist sent their plan owner tells the owner too.
+  if (role === 'artist')
+    return todo.source === 'artist' && todo.assignee !== 'bmg' ? undefined : 'bmg';
   return todo.visibility === 'bmg-only' ? undefined : 'artist';
 }
 
@@ -336,11 +373,25 @@ export const TODO_FILTERS = [
   'from-feedback',
   'own',
   'done',
+  /** Rev 15: to-dos artists sent Blueprint that are still open. */
+  'for-bmg',
+  /** Rev 15: the ones looked after by the person asking. */
+  'for-me',
+  /** Rev 15: sent back to the artist. */
+  'sent-back',
 ] as const;
 export type TodoFilter = (typeof TODO_FILTERS)[number];
 
 /** Quick filters from the "All artist to-dos" section (screens doc). */
-export function matchesFilter(todo: Todo, filter: TodoFilter | undefined, today: string): boolean {
+export function matchesFilter(
+  todo: Todo,
+  filter: TodoFilter | undefined,
+  today: string,
+  viewerSub?: string,
+): boolean {
+  // Sent-back to-dos are neither open nor done: they have their own filter.
+  if (filter === 'sent-back') return !todo.done && !!todo.sentBack;
+  if (todo.sentBack && filter !== 'done') return false;
   if (!filter) return !todo.done;
   switch (filter) {
     case 'done':
@@ -358,7 +409,11 @@ export function matchesFilter(todo: Todo, filter: TodoFilter | undefined, today:
     case 'from-feedback':
       return !todo.done && todo.source === 'feedback';
     case 'own':
-      return !todo.done && todo.source === 'artist';
+      return !todo.done && todo.source === 'artist' && todo.assignee !== 'bmg';
+    case 'for-bmg':
+      return !todo.done && todo.assignee === 'bmg';
+    case 'for-me':
+      return !todo.done && todo.assignee === 'bmg' && !!viewerSub && todo.bmgOwnerSub === viewerSub;
   }
 }
 

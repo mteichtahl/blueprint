@@ -28,6 +28,7 @@ import {
 } from '../components/ui.tsx';
 import { PlanTimeline } from '../components/PlanTimeline.tsx';
 import { ChangeOwnerPanel, OwnerChip, OwnerPicker } from '../components/PlanOwner.tsx';
+import { AskOwner } from './Todos.tsx';
 
 const MEASURES: MeasureId[] = ['M1', 'M2', 'M3', 'M4'];
 const fmtDay = (d: string) =>
@@ -124,6 +125,8 @@ export function PlanTab({
   const [ownerPick, setOwnerPick] = useState('');
   const [changingOwner, setChangingOwner] = useState(false);
   const [ownerDone, setOwnerDone] = useState<string | null>(null);
+  // Rev 15: the artist asks their plan owner to do something.
+  const [asking, setAsking] = useState(false);
 
   const stopEditing = () => {
     setDraft(null);
@@ -267,6 +270,8 @@ export function PlanTab({
       </div>
     </div>
   );
+  /** Rev 15: artists (no owner picker) can ask the owner, unless the owner turned it off. */
+  const askable = !canEdit && !data.ownerCandidates && !!data.ownerTodos && data.ownerTodos.enabled;
   const editButton = (label: string, t: Target) =>
     canEdit && !editing ? (
       <Button size="sm" variant="ghost" onClick={() => startEdit(t)}>
@@ -281,6 +286,15 @@ export function PlanTab({
         <OwnerChip
           owner={data.owner}
           ownerNeeded={data.ownerNeeded}
+          {...(askable && !asking
+            ? {
+                onAsk: () => {
+                  setOwnerDone(null);
+                  setAsking(true);
+                },
+                askLabel: `Ask ${data.ownerTodos!.to} to do something`,
+              }
+            : {})}
           {...(canEdit && !editing
             ? {
                 onChange: () => {
@@ -289,6 +303,21 @@ export function PlanTab({
                 },
               }
             : {})}
+        />
+      )}
+      {asking && askable && (
+        <AskOwner
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          owner={data.ownerTodos!}
+          phases={data.plan.phases}
+          onClose={() => setAsking(false)}
+          onSent={(msg) => {
+            setAsking(false);
+            setOwnerDone(msg);
+            void load();
+          }}
         />
       )}
       {changingOwner && canEdit && !editing && (

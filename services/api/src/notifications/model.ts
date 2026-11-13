@@ -106,6 +106,40 @@ export type DomainEvent =
       titles: string[];
       bySub: string;
     }
+  | {
+      /**
+       * Rev 15: an artist sent their plan owner a to-do (or sent one again
+       * after it came back). No owner: the Blueprint admins hear.
+       */
+      type: 'todo.forOwner';
+      artistId: string;
+      todoId: string;
+      title: string;
+      due?: string;
+      ownerSub?: string;
+      artistName: string;
+      bySub: string;
+      again: boolean;
+    }
+  | {
+      /** Rev 15: the plan owner sent an artist's to-do back, with why. */
+      type: 'todo.sentBack';
+      artistId: string;
+      todoId: string;
+      title: string;
+      reason: string;
+      bySub: string;
+      byName: string;
+    }
+  | {
+      /** Rev 15: the plan owner finished a to-do the artist sent them. */
+      type: 'todo.finished';
+      artistId: string;
+      todoId: string;
+      title: string;
+      bySub: string;
+      byName: string;
+    }
   | { type: 'connector.reminder'; artistId: string }
   | { type: 'connector.needsReauth'; connectorId: string; label: string; artistId?: string }
   | {
@@ -242,6 +276,15 @@ const HELP_LABEL: Record<string, string> = {
   promo: 'promo',
   setlist: 'the set list',
 };
+
+/** "Fri 20 Nov" for a due date (YYYY-MM-DD). */
+export function dueLabel(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  const part = (o: Intl.DateTimeFormatOptions) =>
+    d.toLocaleDateString('en-AU', { ...o, timeZone: 'UTC' });
+  return `${part({ weekday: 'short' })} ${part({ day: 'numeric' })} ${part({ month: 'short' })}`;
+}
 
 const isBmg = (r: Recipient) => r.role === 'bmg-admin' || r.role === 'bmg-staff';
 const bmgFor = (r: Recipient, artistIds: string[]) =>
@@ -405,6 +448,43 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
         },
       };
     }
+    case 'todo.forOwner': {
+      const owner = e.ownerSub ? everyone.find((r) => r.sub === e.ownerSub && isBmg(r)) : undefined;
+      const to = owner ? [owner] : everyone.filter((r) => r.role === 'bmg-admin');
+      const due = e.due ? ` · due ${dueLabel(e.due)}` : '';
+      return {
+        to: to.filter((r) => r.sub !== e.bySub),
+        draft: {
+          kind: 'todo',
+          title: owner
+            ? `${e.artistName} ${e.again ? 'sent you a to-do again' : 'added a to-do for you'}`
+            : `${e.artistName} ${e.again ? 'sent Blueprint a to-do again' : 'added a to-do for Blueprint'}`,
+          body: `“${e.title}”${due}${owner ? '' : '. Their plan has no owner yet.'}`,
+          link: 'todos',
+          throttleKey: `todo-${e.todoId}`,
+        },
+      };
+    }
+    case 'todo.sentBack':
+      return {
+        to: artistsOf([e.artistId]).filter((r) => r.sub !== e.bySub),
+        draft: {
+          kind: 'todo',
+          title: `${e.byName} sent back: ${e.title}`,
+          body: `“${e.reason}”`,
+          link: 'todos',
+        },
+      };
+    case 'todo.finished':
+      return {
+        to: artistsOf([e.artistId]).filter((r) => r.sub !== e.bySub),
+        draft: {
+          kind: 'todo',
+          title: `${e.byName} finished: ${e.title}`,
+          body: 'A to-do you sent Blueprint is done.',
+          link: 'todos',
+        },
+      };
     case 'connector.reminder':
       return {
         to: artistsOf([e.artistId]),

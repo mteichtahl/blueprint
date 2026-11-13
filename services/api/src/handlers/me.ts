@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { projectAiState } from '../ai/state.ts';
 import { LOGO_MAX_BYTES, parseLogoDataUrl } from '../address-book/logo.ts';
 import { authContext, db, env, handle, HttpError, json, parseBody } from '../lib.ts';
+import { ArtistTodosSettings, settingsFrom, settingsKey } from '../workspace/owner-todos.ts';
+import { saveArtistTodos } from '../workspace/owner-todos-store.ts';
 
 /** Artists' job title is always "Artist" (rev 7); Blueprint people set their own. */
 export const ARTIST_JOB_TITLE = 'Artist';
@@ -61,9 +63,14 @@ export const ProfilePatch = z
       .max(Math.ceil((LOGO_MAX_BYTES * 4) / 3) + 64, 'The picture is too large')
       .nullable()
       .optional(),
+    /** Rev 15, Blueprint only: to-dos from artists (on/off, maximums). */
+    artistTodos: ArtistTodosSettings.optional(),
   })
   .strict()
-  .refine((p) => p.jobTitle !== undefined || p.avatar !== undefined, 'Nothing to change');
+  .refine(
+    (p) => p.jobTitle !== undefined || p.avatar !== undefined || p.artistTodos !== undefined,
+    'Nothing to change',
+  );
 
 /** Checks a profile picture data URL and returns it normalised; throws a 400 if it's not a safe image. */
 export function checkAvatar(dataUrl: string): string {
@@ -111,9 +118,15 @@ export const handler = handle(async (event) => {
   }
 
   if (event.httpMethod === 'PATCH') {
-    const { jobTitle, avatar } = parseBody(event, ProfilePatch);
+    const { jobTitle, avatar, artistTodos } = parseBody(event, ProfilePatch);
     if (jobTitle !== undefined && ctx.role === 'artist')
       throw new HttpError(403, `Artists' job title is always "${ARTIST_JOB_TITLE}"`);
+    if (artistTodos !== undefined) {
+      if (ctx.role === 'artist')
+        throw new HttpError(403, 'Only Blueprint people take to-dos from artists');
+      await saveArtistTodos(ctx.sub, artistTodos);
+      if (jobTitle === undefined && avatar === undefined) return json(200, { artistTodos });
+    }
     const sets = ['updatedAt = :at', '#type = :type'];
     const removes: string[] = [];
     const values: Record<string, unknown> = {
@@ -146,10 +159,11 @@ export const handler = handle(async (event) => {
     return json(200, {
       ...(jobTitle !== undefined ? { jobTitle } : {}),
       ...(stored !== undefined ? { avatar: stored } : {}),
+      ...(artistTodos !== undefined ? { artistTodos } : {}),
     });
   }
 
-  const [latest, profile] = await Promise.all([
+  const [latest, profile, todoSettings] = await Promise.all([
     db.send(
       new QueryCommand({
         TableName: env('CONSENT_TABLE'),
@@ -160,6 +174,9 @@ export const handler = handle(async (event) => {
       }),
     ),
     db.send(new GetCommand({ TableName: env('MAIN_TABLE'), Key: profileKey(ctx.sub) })),
+    ctx.role === 'artist'
+      ? Promise.resolve(undefined)
+      : db.send(new GetCommand({ TableName: env('MAIN_TABLE'), Key: settingsKey(ctx.sub) })),
   ]);
   const consent = latest.Items?.[0];
   const avatar = typeof profile.Item?.avatar === 'string' ? profile.Item.avatar : null;
@@ -182,6 +199,7 @@ export const handler = handle(async (event) => {
     jobTitle: jobTitleFor(ctx.role, profile.Item?.jobTitle),
     avatar,
     mfaLevel: ctx.mfaLevel,
+    ...(ctx.role === 'artist' ? {} : { artistTodos: settingsFrom(todoSettings?.Item) }),
     stepUpRequired: !ctx.mfaSatisfied,
     consent: consent
       ? {

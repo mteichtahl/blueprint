@@ -1,3 +1,4 @@
+import { ArtistTodosSettings } from '../workspace/owner-todos.ts';
 import { z } from 'zod';
 
 /**
@@ -75,6 +76,8 @@ export const TeamPatch = z
     jobTitle: z.string().trim().max(80).optional(),
     /** False turns their login off (and signs them out everywhere); true turns it back on. */
     enabled: z.boolean().optional(),
+    /** Rev 15: their to-dos-from-artists settings (on/off, maximums). */
+    artistTodos: ArtistTodosSettings.optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, 'Nothing to change');
@@ -90,6 +93,8 @@ export interface TeamMember {
   status: string;
   artistIds: string[];
   createdAt: string | null;
+  /** Rev 15: to-dos from artists (defaults when never set). */
+  artistTodos: ArtistTodosSettings;
 }
 
 /**

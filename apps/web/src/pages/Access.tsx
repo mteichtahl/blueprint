@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, needsFreshSignIn, type ArtistSummary, type Me } from '../lib/api.ts';
+import {
+  api,
+  ApiError,
+  needsFreshSignIn,
+  type ArtistSummary,
+  type ArtistTodosSettings,
+  type Me,
+} from '../lib/api.ts';
+import { ArtistTodosCard } from './Profile.tsx';
 import type { AppConfig } from '../lib/config.ts';
 import {
   Avatar,
@@ -43,6 +51,8 @@ interface Member {
   status: string;
   artistIds: string[];
   createdAt: string | null;
+  /** Rev 15: their limits on to-dos from artists. */
+  artistTodos?: ArtistTodosSettings;
 }
 
 const ROLE_LABEL: Record<TeamRole, string> = { 'bmg-admin': 'Admin', 'bmg-staff': 'Team member' };
@@ -393,6 +403,8 @@ export function AccessPage({
             return (
               <EditMember
                 key={m.sub}
+                cfg={cfg}
+                token={token}
                 member={m}
                 self={m.sub === me.sub}
                 artists={artists}
@@ -571,6 +583,8 @@ function AddMember({
 }
 
 function EditMember({
+  cfg,
+  token,
   member,
   self,
   artists,
@@ -578,6 +592,8 @@ function EditMember({
   onSave,
   onResend,
 }: {
+  cfg: AppConfig;
+  token: string;
   member: Member;
   self: boolean;
   artists: ArtistSummary[];
@@ -622,6 +638,17 @@ function EditMember({
       )}
       {role === 'bmg-staff' && (
         <ArtistPicker artists={artists} value={artistIds} onChange={setArtistIds} />
+      )}
+      {member.artistTodos && (
+        <ArtistTodosCard
+          cfg={cfg}
+          token={token}
+          title={`${first}'s to-dos from artists`}
+          initial={member.artistTodos}
+          save={async (artistTodos) => {
+            await api(cfg, token, 'PATCH', `/access/team/${member.sub}`, { artistTodos });
+          }}
+        />
       )}
       <div className="flex flex-wrap gap-2">
         <Button

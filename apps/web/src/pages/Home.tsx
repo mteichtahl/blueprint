@@ -715,6 +715,10 @@ function StudioHq({
   const week = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
   const overdue = todos.filter((t) => t.due && t.due < today).length;
   const dueSoon = todos.filter((t) => t.due && t.due >= today && t.due <= week).length;
+  // Rev 15: open to-dos artists sent me (I own their plan).
+  const fromArtistsForMe = todos.filter(
+    (t) => t.assignee === 'bmg' && t.bmgOwnerSub === meSub,
+  ).length;
   const go = (v: string) => (
     <button type="button" className="w-full" onClick={() => onNavigate(v)}>
       {v === 'review'
@@ -855,7 +859,16 @@ function StudioHq({
           ))}
         </Card>
 
-        <Card className="flex-[1_1_320px]" title="Tasks & to-dos" footer={go('todos')}>
+        <Card
+          className="flex-[1_1_320px]"
+          title="Tasks & to-dos"
+          action={
+            fromArtistsForMe > 0 ? (
+              <Tag tone="c">{fromArtistsForMe} from artists for you</Tag>
+            ) : undefined
+          }
+          footer={go('todos')}
+        >
           <div className="big">
             {todos.length}{' '}
             <span className="text-[22px] tracking-normal text-muted-foreground">open</span>

@@ -66,6 +66,28 @@ export interface Me {
   mfaLevel: 'cognito' | 'federated';
   stepUpRequired: boolean;
   consent: { termsVersion: string; aiOptIn: boolean; decidedAt: string } | null;
+  /** Rev 15, Blueprint only: to-dos from artists (on/off and maximums). */
+  artistTodos?: ArtistTodosSettings;
+}
+
+/** Rev 15: a Blueprint person's limits on to-dos artists send them. */
+export interface ArtistTodosSettings {
+  enabled: boolean;
+  maxOpenPerArtist: number;
+  /** A different maximum for some artists, e.g. during a release week. */
+  perArtist: Record<string, number>;
+}
+export const MAX_OPEN_LIMIT = 50;
+
+/** Rev 15: whether the artist can send their plan owner a to-do right now. */
+export interface OwnerTodos {
+  /** The owner's name, or "Blueprint" when the plan has no owner. */
+  to: string;
+  enabled: boolean;
+  max: number;
+  open: number;
+  /** Why they can't send another, or null. */
+  refused: string | null;
 }
 
 /** Bump when the Terms & Privacy Policy change; everyone is asked again. */
@@ -151,6 +173,8 @@ export interface PlanResponse {
   ownerCandidates?: PlanOwner[];
   /** Blueprint only: open to-dos that would move to a new owner. */
   movableTodos?: number;
+  /** Rev 15: to-dos for the plan owner (null before the plan exists). */
+  ownerTodos?: OwnerTodos | null;
 }
 
 /** One saved change to a plan (rev 8): who, when and what, newest first. */
@@ -188,6 +212,17 @@ export interface Todo {
   bmgOnly: boolean;
   /** Comments in the to-do's thread (rev 7). */
   commentCount?: number;
+  /** Rev 15: `bmg` when the artist sent it to their plan owner. */
+  assignee?: 'artist' | 'bmg';
+  /** The Blueprint person looking after it (rev 12): the plan owner. */
+  bmgOwnerSub?: string | null;
+  /** Rev 15: who it's for, by name ("Blueprint" with no owner). */
+  forName?: string;
+  /** Rev 15: whether you can send it back (the owner or an admin). */
+  canSendBack?: boolean;
+  /** Rev 15: sent back to the artist, with why. */
+  sentBack?: { reason: string; byName: string; at: string } | null;
+  milestoneId?: string | null;
   createdAt: string;
   updatedAt: string | null;
 }
@@ -208,6 +243,10 @@ export const TODO_FILTERS = [
   { id: 'from-bmg', label: 'From Blueprint' },
   { id: 'from-feedback', label: 'From feedback' },
   { id: 'own', label: "Artist's own" },
+  // Rev 15: to-dos artists sent Blueprint.
+  { id: 'for-bmg', label: 'From artists' },
+  { id: 'for-me', label: 'For me' },
+  { id: 'sent-back', label: 'Sent back' },
   { id: 'done', label: 'Done' },
 ] as const;
 

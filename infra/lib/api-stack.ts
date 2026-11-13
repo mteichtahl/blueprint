@@ -859,6 +859,10 @@ export class ApiStack extends BmgStack {
           'todo.commented',
           // A meeting shared with the artist: the to-dos its actions made (rev 11 change).
           'todo.shared',
+          // Rev 15: to-dos artists send their plan owner, sent back, and finished.
+          'todo.forOwner',
+          'todo.sentBack',
+          'todo.finished',
           'connector.reminder',
           'connector.needsReauth',
           'meeting.processed',
