@@ -819,16 +819,19 @@ export function AllGigs({
   token,
   artists,
   onOpenArtist,
+  initialGig,
 }: {
   cfg: AppConfig;
   token: string;
   artists: ArtistSummary[];
   onOpenArtist: (artistId: string) => void;
+  /** Open this gig's page straight away (a row on Studio HQ's Tickets card). */
+  initialGig?: Gig | null;
 }) {
-  const [filter, setFilter] = useState<Filter>('help');
+  const [filter, setFilter] = useState<Filter>(initialGig ? 'upcoming' : 'help');
   const { gigs, error, load, patch } = useGigs(cfg, token, `/gigs?filter=${filter}`);
   // Keep the last copy: a change (help done) can move the gig out of this filter.
-  const [openGig, setOpenGig] = useState<Gig | null>(null);
+  const [openGig, setOpenGig] = useState<Gig | null>(initialGig ?? null);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
   const open = openGig ? (gigs?.find((g) => g.gigId === openGig.gigId) ?? openGig) : null;
   if (open) {
