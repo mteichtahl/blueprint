@@ -123,7 +123,8 @@ function fromJsonLd(html: string): FoundAddress | null {
 }
 
 // ── Microdata ────────────────────────────────────────────────────────────
-function itemprop(html: string, name: string): string {
+function itemprop(html: string, prop: string): string {
+  const name = escapeRegExp(prop);
   const re = new RegExp(
     `<([a-z0-9]+)\\b[^>]*itemprop\\s*=\\s*["']${name}["'][^>]*>([\\s\\S]*?)</\\1>`,
     'i',
@@ -143,9 +144,12 @@ function fromMicrodata(html: string): FoundAddress | null {
 }
 
 // ── Meta tags (Open Graph / Facebook business) ──────────────────────────
+/** Every regex special character escaped, backslash included. */
+export const escapeRegExp = (s: string) => s.replace(/[\\^$.*+?()[\]{}|/-]/g, '\\$&');
+
 function metaContent(html: string, names: string[]): string {
   for (const n of names) {
-    const esc = n.replace(/[.:]/g, '\\$&');
+    const esc = escapeRegExp(n);
     const a = new RegExp(
       `<meta\\b[^>]*(?:property|name)\\s*=\\s*["']${esc}["'][^>]*content\\s*=\\s*["']([^"']*)["']`,
       'i',
