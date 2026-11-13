@@ -17,22 +17,29 @@ import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   access,
   AddMembers,
+  AddStaff,
+  adminsAfterLeaving,
   artistMember,
   BMG_MEMBER,
   BROADCAST_ID,
   canAddMembers,
+  canAddStaff,
+  canRemoveStaff,
   canSend,
   canShareFiles,
+  MAX_STAFF_GROUP,
   channelsFor,
   CONV_META,
   CONVERSATION_ID_PATTERN,
   convPk,
   decodePayload,
   DEFAULT_SETTINGS,
+  DEFAULT_STAFF_SETTINGS,
   encodePayload,
   inboxPk,
   inboxSk,
   isAnnouncementType,
+  isGroupAdmin,
   members,
   messageSk,
   newConversationKey,
@@ -49,6 +56,9 @@ import {
   quoteOf,
   reactionSummary,
   seal,
+  staffChannel,
+  staffMember,
+  SUB_PATTERN,
   ticks,
   UpdateConversation,
   UpdateMine,
@@ -61,6 +71,7 @@ import {
   type Viewer,
 } from '../messages/model.ts';
 import { chatUseSk, fileUsePk } from '../files/model.ts';
+import { people, type Person } from '../files/people.ts';
 import { publish } from '../realtime.ts';
 import { ROSTER_GSI1PK } from '../workspace/model.ts';
 import {
@@ -150,7 +161,7 @@ async function wrapKeys(
       new EncryptCommand({
         KeyId: env('PLATFORM_KEY_ARN'),
         Plaintext: key,
-        EncryptionContext: wrapContext(c.conversationId),
+        EncryptionContext: wrapContext(c.conversationId, undefined, c.type),
       }),
     );
     wraps.platform = res.CiphertextBlob!;
@@ -181,7 +192,7 @@ async function conversationKey(viewer: Viewer, c: Conversation): Promise<Uint8Ar
     const res = await kms.send(
       new DecryptCommand({
         CiphertextBlob: c.keyWraps.platform,
-        EncryptionContext: wrapContext(c.conversationId),
+        EncryptionContext: wrapContext(c.conversationId, undefined, c.type),
       }),
     );
     key = res.Plaintext!;
@@ -200,7 +211,8 @@ async function loadConversation(id: string): Promise<Conversation | undefined> {
 
 /** Creates the conversation and an inbox row per member, once (idempotent for direct chats). */
 async function createConversation(
-  c: Pick<Conversation, 'conversationId' | 'type' | 'artistIds' | 'title'>,
+  c: Pick<Conversation, 'conversationId' | 'type' | 'artistIds' | 'title'> &
+    Partial<Pick<Conversation, 'staffSubs' | 'admins' | 'staffSettings'>>,
   createdBy: string,
 ): Promise<Conversation> {
   const key = newConversationKey();
@@ -306,19 +318,71 @@ async function artistNames(ids: string[]): Promise<Record<string, string>> {
   );
 }
 
-function memberFor(viewer: Viewer): string {
-  return viewer.role === 'artist' ? artistMember(viewer.artistId!) : BMG_MEMBER;
+/**
+ * The viewer's inbox member for a conversation: their own `STAFF#<sub>` for
+ * team chats (rev 14), Blueprint's shared `BMG` for every other chat staff are
+ * in, or the artist's own.
+ */
+function memberFor(viewer: Viewer, c?: Pick<Conversation, 'type'>): string {
+  if (viewer.role === 'artist') return artistMember(viewer.artistId!);
+  return c && isStaffType(c.type) ? staffMember(viewer.sub!) : BMG_MEMBER;
 }
 
-async function markRead(viewer: Viewer, conversationId: string) {
+async function markRead(viewer: Viewer, c: Pick<Conversation, 'conversationId' | 'type'>) {
   await db.send(
     new UpdateCommand({
       TableName: table(),
-      Key: { PK: inboxPk(memberFor(viewer)), SK: inboxSk(conversationId) },
+      Key: { PK: inboxPk(memberFor(viewer, c)), SK: inboxSk(c.conversationId) },
       UpdateExpression: 'SET conversationId = :id, lastReadAt = :at',
-      ExpressionAttributeValues: { ':id': conversationId, ':at': new Date().toISOString() },
+      ExpressionAttributeValues: { ':id': c.conversationId, ':at': new Date().toISOString() },
     }),
   );
+}
+
+// ── The Blueprint team (team chats, rev 14) ───────────────────────────────
+/** Blueprint people with a working login, by sub (turned-off logins aren't listed). */
+async function activeTeam(): Promise<Map<string, Person>> {
+  const all = await people();
+  return new Map(all.filter((p) => p.role !== 'artist').map((p) => [p.sub, p]));
+}
+
+const FORMER = 'No longer at Blueprint';
+const teamName = (team: Map<string, Person>, sub: string) => team.get(sub)?.displayName ?? FORMER;
+
+/**
+ * Why nobody can post in this team chat, if they can't: a direct chat whose
+ * other person's login was turned off becomes read-only (messages are kept).
+ */
+function teamSendBlock(
+  viewer: Viewer,
+  c: Pick<Conversation, 'type' | 'staffSubs'>,
+  team: Map<string, Person>,
+): string | null {
+  if (c.type !== 'staff-direct') return null;
+  const other = (c.staffSubs ?? []).find((s) => s !== viewer.sub);
+  return other && !team.has(other) ? `${FORMER}. You can still read this chat.` : null;
+}
+
+/** What the chat list and info pane show for a team chat (rev 14). */
+function teamDetails(
+  viewer: Viewer,
+  c: Pick<Conversation, 'type' | 'staffSubs' | 'admins' | 'staffSettings'>,
+  team: Map<string, Person>,
+) {
+  return {
+    team: true,
+    members: (c.staffSubs ?? []).map((sub) => ({
+      sub,
+      displayName: teamName(team, sub),
+      jobTitle: team.get(sub)?.jobTitle ?? '',
+      admin: (c.admins ?? []).includes(sub),
+      active: team.has(sub),
+      me: sub === viewer.sub,
+    })),
+    isAdmin: isGroupAdmin(viewer, c),
+    staffSettings:
+      c.type === 'staff-group' ? { ...DEFAULT_STAFF_SETTINGS, ...c.staffSettings } : null,
+  };
 }
 
 async function inboxRow(member: string, conversationId: string): Promise<InboxRow | undefined> {
@@ -408,7 +472,18 @@ function conversationIdParam(event: APIGatewayProxyEvent): string {
 const openPayload = (key: Uint8Array, m: StoredMessage) =>
   decodePayload(open(key, m.cipher, m.conversationId, m.messageId));
 
-function titleFor(viewer: Viewer, c: Conversation, names: Record<string, string>): string {
+function titleFor(
+  viewer: Viewer,
+  c: Conversation,
+  names: Record<string, string>,
+  team: Map<string, Person> = new Map(),
+): string {
+  if (c.type === 'staff-group') return c.title ?? 'Team group';
+  if (c.type === 'staff-direct') {
+    const other = (c.staffSubs ?? []).find((s) => s !== viewer.sub);
+    // Message yourself: WhatsApp's "<name> (You)".
+    return other ? teamName(team, other) : `${teamName(team, viewer.sub!)} (You)`;
+  }
   if (c.type === 'broadcast') return 'All artists';
   if (c.type === 'group') return c.title ?? 'Group';
   if (c.type === 'announcement') return c.title ?? 'Announcement';
@@ -417,9 +492,17 @@ function titleFor(viewer: Viewer, c: Conversation, names: Record<string, string>
   return names[c.artistIds.find((id) => id !== viewer.artistId)!] ?? 'Artist';
 }
 
-async function senderNameOf(principal: Principal): Promise<string> {
+/**
+ * The name shown on a message. Artists see Blueprint as one "Blueprint" in
+ * their chats; in team chats (rev 14) each person is named.
+ */
+async function senderNameOf(principal: Principal, c?: Pick<Conversation, 'type'>): Promise<string> {
   if (principal.role === 'artist') {
     return (await artistNames([principal.artistId!]))[principal.artistId!] ?? 'Artist';
+  }
+  if (c && isStaffType(c.type)) {
+    const me = (await activeTeam().catch(() => new Map<string, Person>())).get(principal.sub);
+    return me?.displayName ?? 'Blueprint';
   }
   return 'Blueprint';
 }
@@ -434,6 +517,7 @@ async function postMessage(
   viewer: Viewer,
   payload: Payload,
   senderName: string,
+  opts: { markRead?: boolean } = {},
 ): Promise<{ messageId: string; createdAt: string }> {
   const messageId = randomUUID();
   const at = new Date().toISOString();
@@ -472,7 +556,8 @@ async function postMessage(
       ExpressionAttributeValues: { ':at': at },
     }),
   );
-  await markRead(viewer, conv.conversationId);
+  // Not for someone who has just left: that would put the chat back in their list.
+  if (opts.markRead !== false) await markRead(viewer, conv);
   await publish(channelsFor(conv), { conversationId: conv.conversationId, at });
   // Members who muted this chat get no email or push for it.
   const muted =
@@ -511,7 +596,11 @@ async function postMessage(
             senderName,
             mutedMembers: muted,
             ...(payload.system ? { system: true } : {}),
-            ...((conv.type === 'group' || conv.type === 'announcement') && conv.title
+            ...(isStaffType(conv.type) ? { staffSubs: conv.staffSubs ?? [] } : {}),
+            ...((conv.type === 'group' ||
+              conv.type === 'announcement' ||
+              conv.type === 'staff-group') &&
+            conv.title
               ? { title: conv.title }
               : {}),
           }),
@@ -549,7 +638,11 @@ async function react(
   const isGone = (e: unknown) => (e as Error).name === 'ConditionalCheckFailedException';
   try {
     if (r.emoji) {
-      const value = { e: r.emoji, n: await senderNameOf(principal), at: new Date().toISOString() };
+      const value = {
+        e: r.emoji,
+        n: await senderNameOf(principal, conv),
+        at: new Date().toISOString(),
+      };
       try {
         await db.send(
           new UpdateCommand({
@@ -710,18 +803,172 @@ export const handler = handle(async (event) => {
   const me = memberFor(viewer);
   const route = `${event.httpMethod} ${event.resource}`;
 
-  switch (route) {
-    case 'GET /conversations': {
-      await touchPresence(me);
-      const inbox = await db.send(
-        new QueryCommand({
+  // ── Team groups (rev 14) ──
+  async function updateTeamGroup(conv: Conversation) {
+    const body = parseBody(event, UpdateConversation);
+    const admin = isGroupAdmin(viewer, conv);
+    const editsInfo = body.title !== undefined || body.description !== undefined;
+    if (editsInfo && conv.staffSettings?.onlyAdminsEditInfo && !admin)
+      throw new HttpError(403, 'Only group admins can edit group info');
+    if ((body.staffSettings || body.admin) && !admin)
+      throw new HttpError(403, 'Only group admins can change this');
+    if (body.settings) throw new HttpError(400, 'Use team group settings here');
+    const team = await activeTeam();
+    const who = teamName(team, principal.sub);
+    const sets: string[] = [];
+    const values: Record<string, unknown> = {};
+    const notes: string[] = [];
+    if (body.title !== undefined && body.title !== conv.title) {
+      sets.push('title = :t');
+      values[':t'] = body.title;
+      notes.push(`${who} changed the name to “${body.title}”`);
+    }
+    if (body.description !== undefined) {
+      sets.push('descriptionCipher = :d');
+      values[':d'] = seal(
+        await conversationKey(viewer, conv),
+        body.description,
+        conv.conversationId,
+        'description',
+      );
+      notes.push(`${who} changed the description`);
+    }
+    if (body.staffSettings) {
+      sets.push('staffSettings = :ss');
+      values[':ss'] = body.staffSettings;
+    }
+    if (body.admin) {
+      const { sub, admin: makeAdmin } = body.admin;
+      if (!(conv.staffSubs ?? []).includes(sub)) throw new HttpError(404, 'Not a member');
+      const next = new Set(conv.admins ?? []);
+      if (makeAdmin) next.add(sub);
+      else next.delete(sub);
+      if (next.size === 0) throw new HttpError(409, 'A group needs at least one admin');
+      sets.push('admins = :ad');
+      values[':ad'] = [...next];
+    }
+    if (sets.length)
+      await db.send(
+        new UpdateCommand({
           TableName: table(),
-          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :c)',
-          ExpressionAttributeValues: { ':pk': inboxPk(me), ':c': 'CONV#' },
-          Limit: 200,
+          Key: { PK: convPk(conv.conversationId), SK: CONV_META },
+          UpdateExpression: `SET ${sets.join(', ')}`,
+          ExpressionAttributeValues: values,
         }),
       );
-      const rows = (inbox.Items ?? []) as InboxRow[];
+    const updated = { ...conv, ...(body.title ? { title: body.title } : {}) };
+    for (const n of notes) await postMessage(updated, principal, viewer, systemNote(n), who);
+    if (!notes.length) await publish(channelsFor(conv), { conversationId: conv.conversationId });
+    await audit(event, 'chat.update', 'success', { conversationId: conv.conversationId });
+    return json(200, { conversationId: conv.conversationId });
+  }
+
+  async function addTeamMembers(conv: Conversation) {
+    if (!canAddStaff(viewer, conv)) throw new HttpError(403, 'Only group admins can add people');
+    const { staffSubs } = parseBody(event, AddStaff);
+    const current = conv.staffSubs ?? [];
+    const adding = [...new Set(staffSubs)].filter((s) => !current.includes(s));
+    if (!adding.length) return json(200, { added: [] });
+    const team = await activeTeam();
+    // Only Blueprint people with a working login; never artists.
+    if (adding.some((s) => !team.has(s))) throw new HttpError(404, 'No such team member');
+    const next = [...current, ...adding];
+    if (next.length > MAX_STAFF_GROUP)
+      throw new HttpError(409, `A team group can have up to ${MAX_STAFF_GROUP} people`);
+    await db.send(
+      new UpdateCommand({
+        TableName: table(),
+        Key: { PK: convPk(conv.conversationId), SK: CONV_META },
+        UpdateExpression: 'SET staffSubs = :s',
+        ExpressionAttributeValues: { ':s': next },
+      }),
+    );
+    for (const s of adding)
+      await db.send(
+        new PutCommand({
+          TableName: table(),
+          Item: {
+            PK: inboxPk(staffMember(s)),
+            SK: inboxSk(conv.conversationId),
+            conversationId: conv.conversationId,
+          },
+        }),
+      );
+    const who = teamName(team, principal.sub);
+    await postMessage(
+      { ...conv, staffSubs: next },
+      principal,
+      viewer,
+      systemNote(`${who} added ${listNames(adding.map((s) => teamName(team, s)))}`),
+      who,
+    );
+    await audit(event, 'chat.addMembers', 'success', { conversationId: conv.conversationId });
+    return json(200, { added: adding });
+  }
+
+  async function removeTeamMember(conv: Conversation, sub: string | undefined) {
+    if (!sub || !SUB_PATTERN.test(sub) || !(conv.staffSubs ?? []).includes(sub))
+      throw new HttpError(404, 'Not a member');
+    if (!canRemoveStaff(viewer, conv, sub))
+      throw new HttpError(403, 'Only group admins can remove people');
+    const leaving = sub === principal.sub;
+    const { staffSubs, admins } = adminsAfterLeaving(conv, sub);
+    const team = await activeTeam();
+    const name = teamName(team, sub);
+    const who = teamName(team, principal.sub);
+    await db.send(
+      new UpdateCommand({
+        TableName: table(),
+        Key: { PK: convPk(conv.conversationId), SK: CONV_META },
+        // The last person out closes the group.
+        UpdateExpression: staffSubs.length
+          ? 'SET staffSubs = :s, admins = :a'
+          : 'SET staffSubs = :s, admins = :a, deletedAt = :at',
+        ExpressionAttributeValues: {
+          ':s': staffSubs,
+          ':a': admins,
+          ...(staffSubs.length ? {} : { ':at': new Date().toISOString() }),
+        },
+      }),
+    );
+    await db.send(
+      new DeleteCommand({
+        TableName: table(),
+        Key: { PK: inboxPk(staffMember(sub)), SK: inboxSk(conv.conversationId) },
+      }),
+    );
+    if (staffSubs.length)
+      await postMessage(
+        { ...conv, staffSubs, admins },
+        principal,
+        viewer,
+        systemNote(leaving ? `${name} left` : `${who} removed ${name}`),
+        who,
+        { markRead: !leaving },
+      );
+    await publish([staffChannel(sub)], { conversationId: conv.conversationId });
+    await audit(event, 'chat.removeMember', 'success', { conversationId: conv.conversationId });
+    return json(200, { removed: sub });
+  }
+
+  switch (route) {
+    case 'GET /conversations': {
+      // Staff read two inboxes: Blueprint's shared one, and their own for team chats (rev 14).
+      const myInboxes = viewer.role === 'artist' ? [me] : [me, staffMember(principal.sub)];
+      await Promise.all(myInboxes.map(touchPresence));
+      const inboxes = await Promise.all(
+        myInboxes.map((m) =>
+          db.send(
+            new QueryCommand({
+              TableName: table(),
+              KeyConditionExpression: 'PK = :pk AND begins_with(SK, :c)',
+              ExpressionAttributeValues: { ':pk': inboxPk(m), ':c': 'CONV#' },
+              Limit: 200,
+            }),
+          ),
+        ),
+      );
+      const rows = inboxes.flatMap((r) => (r.Items ?? []) as InboxRow[]);
       const rowOf = Object.fromEntries(rows.map((r) => [r.conversationId, r]));
       const ids = [...new Set([BROADCAST_ID, ...rows.map((r) => r.conversationId)])].slice(0, 100);
       await getConversation(BROADCAST_ID);
@@ -736,9 +983,13 @@ export const handler = handle(async (event) => {
         .map((i) => fromItem(i))
         .filter((c) => !c.deletedAt && access(viewer, c) !== 'none');
       const names = await artistNames(convs.flatMap((c) => c.artistIds));
+      const team = convs.some((c) => isStaffType(c.type))
+        ? await activeTeam()
+        : new Map<string, Person>();
       const list = await Promise.all(
         convs.map(async (c) => {
           const row = rowOf[c.conversationId];
+          const meHere = memberFor(viewer, c);
           const key = await conversationKey(viewer, c);
           const after = [row?.lastReadAt, row?.clearedAt].filter(Boolean).sort().at(-1);
           const [last] = await latestMessages(c.conversationId, 1);
@@ -746,20 +997,22 @@ export const handler = handle(async (event) => {
             last && (!row?.clearedAt || last.createdAt > row.clearedAt) ? last : undefined;
           const payload = shown ? openPayload(key, shown) : undefined;
           const mine = !!shown && shown.senderSub === principal.sub && !shown.system;
-          const direct = c.type === 'bmg-artist' || c.type === 'artist-to-artist';
-          const others = mine || direct ? await otherMembers(c, me) : [];
+          const direct =
+            c.type === 'bmg-artist' || c.type === 'artist-to-artist' || c.type === 'staff-direct';
+          const others = mine || direct ? await otherMembers(c, meHere) : [];
           return {
             conversationId: c.conversationId,
             type: publicType(c.type),
-            title: titleFor(viewer, c, names),
+            title: titleFor(viewer, c, names, team),
             description: await describe(viewer, c),
             artists: c.artistIds.map((id) => ({
               artistId: id,
               displayName: names[id] ?? 'Artist',
             })),
             access: access(viewer, c),
-            canSend: canSend(viewer, c),
+            canSend: canSend(viewer, c) && !teamSendBlock(viewer, c, team),
             settings: c.type === 'group' ? { ...DEFAULT_SETTINGS, ...c.settings } : null,
+            ...(isStaffType(c.type) ? teamDetails(viewer, c, team) : {}),
             lastMessageAt: shown ? shown.createdAt : null,
             preview: payload ? previewOf(payload) : null,
             previewSender: !shown
@@ -794,8 +1047,70 @@ export const handler = handle(async (event) => {
       const body = parseBody(event, NewConversation);
       const plan = planConversation(viewer, body, await accessRules(viewer));
       if (!plan.ok) throw new HttpError(403, plan.reason);
-      // Team chats (rev 14) are planned here; creating them arrives with the team inboxes.
-      if (isStaffType(plan.type)) throw new HttpError(501, 'Team chats are coming soon');
+      if (isStaffType(plan.type)) {
+        // Team chats (rev 14): everyone in it must be on the Blueprint team with a working login.
+        const team = await activeTeam();
+        const staffSubs = plan.staffSubs ?? [];
+        if (staffSubs.some((s) => !team.has(s))) throw new HttpError(404, 'No such team member');
+        if (plan.type === 'staff-direct') {
+          const existing = await getConversation(plan.conversationId);
+          if (existing) return json(200, { conversationId: existing.conversationId });
+        }
+        const id =
+          plan.type === 'staff-group'
+            ? `sg-${randomUUID().replace(/-/g, '').slice(0, 20)}`
+            : plan.conversationId;
+        let conv = await createConversation(
+          {
+            conversationId: id,
+            type: plan.type,
+            artistIds: [],
+            staffSubs,
+            ...(plan.type === 'staff-group'
+              ? {
+                  admins: plan.admins ?? [principal.sub],
+                  staffSettings: {
+                    ...DEFAULT_STAFF_SETTINGS,
+                    ...(body.kind === 'group' ? (body.staffSettings ?? {}) : {}),
+                  },
+                }
+              : {}),
+            ...(plan.title ? { title: plan.title } : {}),
+          },
+          principal.sub,
+        );
+        if (plan.type === 'staff-group') {
+          const description = body.kind === 'group' ? body.description : undefined;
+          if (description) {
+            const descriptionCipher = seal(
+              await conversationKey(viewer, conv),
+              description,
+              id,
+              'description',
+            );
+            await db.send(
+              new UpdateCommand({
+                TableName: table(),
+                Key: { PK: convPk(id), SK: CONV_META },
+                UpdateExpression: 'SET descriptionCipher = :d',
+                ExpressionAttributeValues: { ':d': descriptionCipher },
+              }),
+            );
+            conv = { ...conv, descriptionCipher };
+          }
+          const who = teamName(team, principal.sub);
+          const added = staffSubs.filter((s) => s !== principal.sub).map((s) => teamName(team, s));
+          await postMessage(
+            conv,
+            principal,
+            viewer,
+            systemNote(`${who} created this group and added ${listNames(added)}`),
+            who,
+          );
+        }
+        await audit(event, 'chat.create', 'success', { conversationId: id, kind: plan.type });
+        return json(201, { conversationId: conv.conversationId });
+      }
       // Every artist must exist (and, for staff, be theirs to message).
       const names = await artistNames(plan.artistIds);
       if (plan.artistIds.some((id) => !names[id])) throw new HttpError(404, 'No such artist');
@@ -870,6 +1185,7 @@ export const handler = handle(async (event) => {
 
     case 'PATCH /conversations/{conversationId}': {
       const conv = await loadReadable(viewer, conversationIdParam(event));
+      if (conv.type === 'staff-group') return updateTeamGroup(conv);
       if (viewer.role === 'artist' || (conv.type !== 'group' && conv.type !== 'announcement'))
         throw new HttpError(403, 'Only Blueprint can change this');
       if (access(viewer, conv) !== 'read-write') throw new HttpError(403, 'Not your chat');
@@ -916,7 +1232,14 @@ export const handler = handle(async (event) => {
 
     case 'DELETE /conversations/{conversationId}': {
       const conv = await loadReadable(viewer, conversationIdParam(event));
-      if (principal.role !== 'bmg-admin' || (conv.type !== 'group' && conv.type !== 'announcement'))
+      if (conv.type === 'staff-group') {
+        // Team groups (rev 14): the group's own admins delete it, not Blueprint admins.
+        if (!isGroupAdmin(viewer, conv))
+          throw new HttpError(403, 'Only a group admin can delete this group');
+      } else if (
+        principal.role !== 'bmg-admin' ||
+        (conv.type !== 'group' && conv.type !== 'announcement')
+      )
         throw new HttpError(403, 'Only an admin can delete a group');
       await db.send(
         new UpdateCommand({
@@ -941,6 +1264,7 @@ export const handler = handle(async (event) => {
 
     case 'POST /conversations/{conversationId}/members': {
       const conv = await loadReadable(viewer, conversationIdParam(event));
+      if (conv.type === 'staff-group') return addTeamMembers(conv);
       if (!canAddMembers(viewer, conv)) throw new HttpError(403, 'You can’t add people here');
       const { artistIds } = parseBody(event, AddMembers);
       const adding = [...new Set(artistIds)].filter((a) => !conv.artistIds.includes(a));
@@ -988,6 +1312,9 @@ export const handler = handle(async (event) => {
 
     case 'DELETE /conversations/{conversationId}/members/{artistId}': {
       const conv = await loadReadable(viewer, conversationIdParam(event));
+      // Team groups (rev 14) put a team member's sub in the {artistId} slot (no new route).
+      if (conv.type === 'staff-group')
+        return removeTeamMember(conv, event.pathParameters?.artistId);
       const artistId = event.pathParameters?.artistId ?? '';
       if (conv.type !== 'group' && conv.type !== 'announcement')
         throw new HttpError(403, 'Only groups have members to remove');
@@ -1042,8 +1369,9 @@ export const handler = handle(async (event) => {
         sets.push('clearedAt = :c');
         values[':c'] = new Date().toISOString();
       }
+      const meHere = memberFor(viewer, conv);
       if (body.star) {
-        const row = await inboxRow(me, conv.conversationId);
+        const row = await inboxRow(meHere, conv.conversationId);
         const starred = new Set(row?.starred ?? []);
         if (body.star.starred) starred.add(body.star.messageId);
         else starred.delete(body.star.messageId);
@@ -1058,7 +1386,7 @@ export const handler = handle(async (event) => {
       const res = await db.send(
         new UpdateCommand({
           TableName: table(),
-          Key: { PK: inboxPk(me), SK: inboxSk(conv.conversationId) },
+          Key: { PK: inboxPk(meHere), SK: inboxSk(conv.conversationId) },
           UpdateExpression: `SET ${sets.join(', ')}`,
           ExpressionAttributeValues: values,
           ReturnValues: 'ALL_NEW',
@@ -1073,13 +1401,14 @@ export const handler = handle(async (event) => {
       const before = event.queryStringParameters?.before;
       if (before && !/^[\dT:.\-Z]+#?[a-z0-9-]*$/i.test(before))
         throw new HttpError(400, 'Bad cursor');
-      const row = await inboxRow(me, conv.conversationId);
+      const meHere = memberFor(viewer, conv);
+      const row = await inboxRow(meHere, conv.conversationId);
       const items = (await latestMessages(conv.conversationId, 50, before)).filter(
         (m) => !row?.clearedAt || m.createdAt > row.clearedAt,
       );
       const key = items.length ? await conversationKey(viewer, conv) : undefined;
       const others = items.some((m) => m.senderSub === principal.sub)
-        ? (await otherMembers(conv, me)).map((o) => o.state)
+        ? (await otherMembers(conv, meHere)).map((o) => o.state)
         : [];
       const starred = new Set(row?.starred ?? []);
       const messages = items.map((m) => {
@@ -1105,15 +1434,19 @@ export const handler = handle(async (event) => {
         (m) =>
           !m.mine && m.kind === 'message' && (!row?.lastReadAt || m.createdAt > row.lastReadAt),
       );
-      await markRead(viewer, conv.conversationId);
+      await markRead(viewer, conv);
       // Senders see their ticks turn coral.
       if (firstUnread)
         await publish(channelsFor(conv), { conversationId: conv.conversationId, read: true });
+      const team = isStaffType(conv.type) ? await activeTeam() : new Map<string, Person>();
+      const blocked = teamSendBlock(viewer, conv, team);
       return json(200, {
         conversationId: conv.conversationId,
         type: publicType(conv.type),
         access: access(viewer, conv),
-        canSend: canSend(viewer, conv),
+        canSend: canSend(viewer, conv) && !blocked,
+        ...(blocked ? { readOnlyReason: blocked } : {}),
+        ...(isStaffType(conv.type) ? teamDetails(viewer, conv, team) : {}),
         firstUnreadMessageId: row?.lastReadAt ? (firstUnread?.messageId ?? null) : null,
         messages,
         nextBefore: items.length === 50 ? `${items[0]!.createdAt}#${items[0]!.messageId}` : null,
@@ -1130,7 +1463,9 @@ export const handler = handle(async (event) => {
             : 'Only admins can send messages in this group',
         );
       const body = parseBody(event, NewMessage);
-      const refused = sendRefused(viewer, conv, body.attachment?.kind, await accessRules(viewer));
+      const refused =
+        sendRefused(viewer, conv, body.attachment?.kind, await accessRules(viewer)) ??
+        (conv.type === 'staff-direct' ? teamSendBlock(viewer, conv, await activeTeam()) : null);
       if (refused) throw new HttpError(403, refused);
       if (body.attachment?.kind === 'file' && !canShareFiles(viewer, conv))
         throw new HttpError(403, 'Artists can’t share files in this group');
@@ -1147,7 +1482,7 @@ export const handler = handle(async (event) => {
           openPayload(await conversationKey(viewer, source), quoted),
         );
       }
-      const senderName = await senderNameOf(principal);
+      const senderName = await senderNameOf(principal, conv);
       const posted = await postMessage(
         conv,
         principal,
@@ -1186,7 +1521,35 @@ export const handler = handle(async (event) => {
             viewer.role !== 'bmg-staff' || viewer.assignedArtistIds?.includes(p.artistId as string),
         )
         .map((p) => ({ artistId: p.artistId as string, displayName: p.displayName as string }));
-      return json(200, { artists });
+      if (viewer.role === 'artist') return json(200, { artists });
+      // The Blueprint team, for team chats (rev 14): working logins only, with "last seen".
+      const team = [...(await activeTeam()).values()].slice(0, 100);
+      const seen = team.length
+        ? ((
+            await db.send(
+              new BatchGetCommand({
+                RequestItems: {
+                  [table()]: { Keys: team.map((p) => presenceKey(staffMember(p.sub))) },
+                },
+              }),
+            )
+          ).Responses?.[table()] ?? [])
+        : [];
+      const lastSeen = new Map(seen.map((i) => [i.PK as string, i.lastOnlineAt as string]));
+      return json(200, {
+        artists,
+        team: team
+          .map((p) => ({
+            sub: p.sub,
+            displayName: p.displayName,
+            jobTitle: p.jobTitle,
+            me: p.sub === principal.sub,
+            lastSeen: lastSeen.get(presenceKey(staffMember(p.sub)).PK) ?? null,
+          }))
+          .sort(
+            (x, y) => Number(y.me) - Number(x.me) || x.displayName.localeCompare(y.displayName),
+          ),
+      });
     }
 
     default:

@@ -84,6 +84,7 @@ export function onSubscribe(ctx) {
   const target = ctx.info.channel.segments[1] || '';
   const bmg = claims.role === 'bmg-admin' || claims.role === 'bmg-staff';
   if (target === 'bmg' && bmg) return;
+  if (bmg && ctx.identity && ctx.identity.sub && target === 'staff-' + ctx.identity.sub) return;
   if (ctx.identity && ctx.identity.sub && target === 'user-' + ctx.identity.sub) return;
   if (claims.role === 'artist' && (target === 'all-artists' || target === 'artist-' + claims.artistId)) return;
   util.unauthorized();
@@ -269,6 +270,8 @@ export class ApiStack extends BmgStack {
       DATA_ACCESS_ROLE_ARN: dataAccessRoleArn,
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
       EVENTS_HTTP_DOMAIN: this.realtime.httpDns,
+      // Team chats (rev 14): the Blueprint team's names and working logins.
+      USER_POOL_ID: props.userPool.userPoolId,
     });
     // ── Web push: the environment's VAPID key pair, generated once inside AWS ──
     const vapidSecretId = `${cfg.project}/${env}/vapid`;
@@ -747,6 +750,8 @@ export class ApiStack extends BmgStack {
     );
     // GSI1: the roster, for the artist directory.
     allow(messages, 'ArtistDirectory', ['dynamodb:Query'], [`${main}/index/GSI1`]);
+    // Team chats (rev 14): who is on the Blueprint team (names, job titles, working logins).
+    allow(messages, 'ListPeople', ['cognito-idp:ListUsersInGroup'], [props.userPool.userPoolArn]);
     // Artist-to-artist keys are wrapped under each artist's key, in an artist session.
     allow(messages, 'ArtistSessions', ['sts:AssumeRole', 'sts:TagSession'], [dataAccessRoleArn]);
     this.realtime.grantPublish(messages);

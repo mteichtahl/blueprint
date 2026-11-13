@@ -57,12 +57,21 @@ export type DomainEvent =
   | {
       type: 'message.created';
       conversationId: string;
-      conversationType: 'bmg-artist' | 'group' | 'broadcast' | 'announcement' | 'artist-to-artist';
+      conversationType:
+        | 'bmg-artist'
+        | 'group'
+        | 'broadcast'
+        | 'announcement'
+        | 'artist-to-artist'
+        | 'staff-direct'
+        | 'staff-group';
       artistIds: string[];
+      /** Team chats (rev 14): the Blueprint people in it. */
+      staffSubs?: string[];
       senderSub: string;
       senderName: string;
       title?: string;
-      /** Inbox members (`BMG`, `ARTIST#id`) who muted the chat. */
+      /** Inbox members (`BMG`, `ARTIST#id`, `STAFF#sub`) who muted the chat. */
       mutedMembers?: string[];
       system?: boolean;
     }
@@ -305,6 +314,23 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
     }
     case 'message.created': {
       const muted = new Set(e.mutedMembers ?? []);
+      // Team chats (rev 14): only the Blueprint people in it, never artists or other staff.
+      if (e.conversationType === 'staff-direct' || e.conversationType === 'staff-group') {
+        const inIt = new Set(e.staffSubs ?? []);
+        return {
+          to: everyone.filter(
+            (r) =>
+              isBmg(r) && inIt.has(r.sub) && r.sub !== e.senderSub && !muted.has(`STAFF#${r.sub}`),
+          ),
+          draft: {
+            kind: 'message',
+            title: e.title ? `New message in ${e.title}` : `New message from ${e.senderName}`,
+            body: e.title ? `From ${e.senderName}.` : 'Open the app to read it.',
+            link: `chat:${e.conversationId}`,
+            throttleKey: e.conversationId,
+          },
+        };
+      }
       const toArtists = artistsOf(e.artistIds).filter(
         (r) => r.sub !== e.senderSub && !muted.has(`ARTIST#${r.artistId}`),
       );
