@@ -7,6 +7,8 @@ import type { AppConfig } from '../src/lib/config.ts';
 import { Home } from '../src/pages/Home.tsx';
 import { SignIn } from '../src/pages/SignIn.tsx';
 import { NewsletterSignup } from '../src/pages/NewsletterSignup.tsx';
+import { ArtistTodosCard } from '../src/pages/Profile.tsx';
+import { AskOwner } from '../src/pages/Todos.tsx';
 
 /**
  * Phase 6 gate: WCAG 2.2 AA checks (axe-core) on every screen of the BMG
@@ -1416,6 +1418,71 @@ describe('WCAG 2.2 AA (axe-core): meetings (rev 11)', () => {
     expect(screen.getAllByRole('button', { name: /Record meeting/ }).length).toBeGreaterThan(0);
     await openWorkspace('Plan');
     expect(screen.getByText(/suggested changes? from/)).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+});
+
+describe('rev 15: to-dos for the plan owner', () => {
+  const owner = { to: 'Kyra', enabled: true, max: 10, open: 2, refused: null };
+  const phases = [
+    {
+      id: 'p1',
+      name: 'Album release',
+      goal: '',
+      milestones: [{ id: 'm1', title: 'Mix sign-off', done: false, measures: [] }],
+    },
+  ];
+  it('artist: Ask Kyra to do something links to a stage or milestone', async () => {
+    render(
+      <AskOwner
+        cfg={cfg}
+        token="t"
+        artistId="art_chloe00000001"
+        owner={owner}
+        phases={phases as never}
+        onClose={() => undefined}
+        onSent={() => undefined}
+      />,
+    );
+    await settle();
+    expect(screen.getByText('Ask Kyra to do something')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Album release › Mix sign-off' })).toBeTruthy();
+    expect(screen.getByText(/up to 10 open to-dos from you \(2 now\)/)).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('artist: at the maximum, says why instead of the form', async () => {
+    const refused =
+      'Kyra has 10 open to-dos from you. You can add more when one is done or sent back.';
+    render(
+      <AskOwner
+        cfg={cfg}
+        token="t"
+        artistId="art_chloe00000001"
+        owner={{ ...owner, open: 10, refused }}
+        phases={phases as never}
+        onClose={() => undefined}
+        onSent={() => undefined}
+      />,
+    );
+    await settle();
+    expect(screen.getByText(refused)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send to Kyra' })).toBeNull();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('BMG Profile: on/off, the maximum, and a different one for an artist', async () => {
+    render(
+      <ArtistTodosCard
+        cfg={cfg}
+        token="t"
+        initial={{ enabled: true, maxOpenPerArtist: 10, perArtist: { art_chloe00000001: 20 } }}
+      />,
+    );
+    await settle();
+    expect(screen.getByRole('checkbox', { name: /Allow artists to send me to-dos/ })).toBeTruthy();
+    expect(screen.getByText(/up to 10 open to-dos for you at a time/)).toBeTruthy();
+    expect(screen.getByRole('spinbutton', { name: /Maximum for/ })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 });

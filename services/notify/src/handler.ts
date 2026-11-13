@@ -145,7 +145,9 @@ export const handler = async (event: EventBridgeEvent<string, Detail>): Promise<
     }
     case 'todo.reminder': {
       const e = d as unknown as TodoReminder;
-      decision = onTodoReminder(ctx, e, await todo(e.todoId));
+      const item = await todo(e.todoId);
+      bmgOwnerSub = item?.bmgOwnerSub;
+      decision = onTodoReminder(ctx, e, item);
       break;
     }
     case 'submission.updated': {

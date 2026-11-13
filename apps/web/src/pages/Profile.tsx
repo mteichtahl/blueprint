@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, needsFreshSignIn, type Me } from '../lib/api.ts';
+import {
+  api,
+  MAX_OPEN_LIMIT,
+  needsFreshSignIn,
+  type ArtistSummary,
+  type ArtistTodosSettings,
+  type Me,
+} from '../lib/api.ts';
 import {
   setPhone as setPhoneNumber,
   setSmsMfa,
@@ -176,6 +183,9 @@ export function Profile({
         )}
         {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       </Card>
+      {me.role !== 'artist' && me.artistTodos && (
+        <ArtistTodosCard cfg={cfg} token={token} initial={me.artistTodos} />
+      )}
       <Security cfg={cfg} token={token} {...(onReauth ? { onReauth } : {})} />
       <Card className="flex-[1_1_280px] self-stretch" title="Account">
         <div className="flex flex-col gap-1 text-[15px]">
@@ -520,6 +530,152 @@ function AboutYou({
           </Button>
         </div>
       )}
+    </Card>
+  );
+}
+
+const clampMax = (n: number) => Math.min(MAX_OPEN_LIMIT, Math.max(1, Math.round(n) || 1));
+
+/**
+ * Rev 15, Blueprint only: To-dos from artists. Artists can send the person who
+ * owns their plan a to-do; this turns that on or off and caps how many each
+ * artist can have open at once (with a different cap for some artists, e.g.
+ * during a release week). It only limits: there's no minimum.
+ */
+export function ArtistTodosCard({
+  cfg,
+  token,
+  initial,
+  save: saveTo,
+  title = 'To-dos from artists',
+}: {
+  cfg: AppConfig;
+  token: string;
+  initial: ArtistTodosSettings;
+  /** Where to save (default: your own profile). Admins use it from Access & permissions. */
+  save?: (next: ArtistTodosSettings) => Promise<void>;
+  title?: string;
+}) {
+  const [s, setS] = useState(initial);
+  const [artists, setArtists] = useState<ArtistSummary[]>([]);
+  const [adding, setAdding] = useState('');
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  useEffect(() => {
+    api<{ artists: ArtistSummary[] }>(cfg, token, 'GET', '/artists')
+      .then((r) => setArtists(r.artists))
+      .catch(() => setArtists([]));
+  }, [cfg, token]);
+  const name = (id: string) => artists.find((a) => a.artistId === id)?.displayName ?? 'Artist';
+
+  async function save(next: ArtistTodosSettings) {
+    setS(next);
+    try {
+      if (saveTo) await saveTo(next);
+      else await api(cfg, token, 'PATCH', '/me', { artistTodos: next });
+      setMsg({ tone: 'success', text: 'Saved.' });
+    } catch (e) {
+      setMsg({ tone: 'error', text: (e as Error).message });
+    }
+  }
+  const setOne = (id: string, n: number | null) => {
+    const perArtist = { ...s.perArtist };
+    if (n === null) delete perArtist[id];
+    else perArtist[id] = clampMax(n);
+    void save({ ...s, perArtist });
+  };
+  const row = 'flex min-h-12 items-center gap-3 border-b border-[#EDF0F3] py-2 last:border-0';
+  const others = artists.filter((a) => !(a.artistId in s.perArtist));
+
+  return (
+    <Card className="flex-[1_1_320px] self-stretch" title={title}>
+      <div className="flex flex-col">
+        <label className={row}>
+          <span className="flex-1">
+            <b className="block">Allow artists to send me to-dos</b>
+            <span className="src">From the artists whose plans you own</span>
+          </span>
+          <input
+            className="switch"
+            type="checkbox"
+            checked={s.enabled}
+            onChange={(e) => void save({ ...s, enabled: e.target.checked })}
+          />
+        </label>
+        {s.enabled && (
+          <>
+            <label className={row}>
+              <span className="flex-1">
+                <b className="block">Maximum open to-dos per artist</b>
+                <span className="src">
+                  Artists can have up to {s.maxOpenPerArtist} open to-do
+                  {s.maxOpenPerArtist === 1 ? '' : 's'} for you at a time.
+                </span>
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={MAX_OPEN_LIMIT}
+                className="h-9 w-20 rounded-lg border border-input bg-white px-2"
+                value={s.maxOpenPerArtist}
+                onChange={(e) => setS({ ...s, maxOpenPerArtist: clampMax(Number(e.target.value)) })}
+                onBlur={() => void save(s)}
+              />
+            </label>
+            <div className="flex flex-col gap-2 pt-2">
+              <b className="text-[15px]">A different maximum for some artists</b>
+              <span className="src">For example during a release week.</span>
+              {Object.entries(s.perArtist).map(([id, n]) => (
+                <div key={id} className="flex items-center gap-2 text-[15px]">
+                  <span className="flex-1">{name(id)}</span>
+                  <input
+                    type="number"
+                    aria-label={`Maximum for ${name(id)}`}
+                    min={1}
+                    max={MAX_OPEN_LIMIT}
+                    className="h-9 w-20 rounded-lg border border-input bg-white px-2"
+                    defaultValue={n}
+                    onBlur={(e) => setOne(id, Number(e.target.value))}
+                  />
+                  <Button size="sm" variant="ghost" onClick={() => setOne(id, null)}>
+                    Remove
+                  </Button>
+                </div>
+              ))}
+              {others.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <label className="flex-1">
+                    <span className="sr-only">Artist</span>
+                    <select
+                      className="dd w-full"
+                      value={adding}
+                      onChange={(e) => setAdding(e.target.value)}
+                    >
+                      <option value="">Choose an artist</option>
+                      {others.map((a) => (
+                        <option key={a.artistId} value={a.artistId}>
+                          {a.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <Button
+                    size="sm"
+                    variant="navy"
+                    disabled={!adding}
+                    onClick={() => {
+                      setOne(adding, s.maxOpenPerArtist);
+                      setAdding('');
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
     </Card>
   );
 }

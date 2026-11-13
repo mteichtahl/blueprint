@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, needsFreshSignIn, type ArtistSummary, type Me } from '../lib/api.ts';
+import {
+  api,
+  ApiError,
+  needsFreshSignIn,
+  type ArtistSummary,
+  type ArtistTodosSettings,
+  type Me,
+} from '../lib/api.ts';
+import { ArtistTodosCard } from './Profile.tsx';
 import type { AppConfig } from '../lib/config.ts';
 import { DangerArea, EditDialog } from '../components/patterns.tsx';
 import {
@@ -44,6 +52,8 @@ interface Member {
   status: string;
   artistIds: string[];
   createdAt: string | null;
+  /** Rev 15: their limits on to-dos from artists. */
+  artistTodos?: ArtistTodosSettings;
 }
 
 const ROLE_LABEL: Record<TeamRole, string> = { 'bmg-admin': 'Admin', 'bmg-staff': 'Team member' };
@@ -388,6 +398,8 @@ export function AccessPage({
             return (
               <EditMember
                 key={m.sub}
+                cfg={cfg}
+                token={token}
                 member={m}
                 self={m.sub === me.sub}
                 artists={artists}
@@ -613,6 +625,8 @@ function accessChanges(
  * before Save (P6). Turning off their login is in the danger area (P5).
  */
 function EditMember({
+  cfg,
+  token,
   member,
   self,
   artists,
@@ -622,6 +636,8 @@ function EditMember({
   onResend,
   onCancel,
 }: {
+  cfg: AppConfig;
+  token: string;
   member: Member;
   self: boolean;
   artists: ArtistSummary[];
@@ -702,6 +718,17 @@ function EditMember({
       )}
       {role === 'bmg-staff' && (
         <ArtistPicker artists={artists} value={artistIds} onChange={setArtistIds} />
+      )}
+      {member.artistTodos && (
+        <ArtistTodosCard
+          cfg={cfg}
+          token={token}
+          title={`${first}'s to-dos from artists`}
+          initial={member.artistTodos}
+          save={async (artistTodos) => {
+            await api(cfg, token, 'PATCH', `/access/team/${member.sub}`, { artistTodos });
+          }}
+        />
       )}
       {changes.length > 0 && (
         <div

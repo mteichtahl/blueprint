@@ -12,13 +12,40 @@ import type { Gig } from './Gigs.tsx';
 /* Contract types (docs/chat-api.md)                                        */
 /* ------------------------------------------------------------------------ */
 
-export type ChatType = 'bmg-artist' | 'group' | 'announcement' | 'artist-to-artist';
+export type ChatType =
+  'bmg-artist' | 'group' | 'announcement' | 'artist-to-artist' | 'staff-direct' | 'staff-group';
 export type TickState = 'sent' | 'delivered' | 'read';
 
 export interface GroupSettings {
   onlyAdminsSend: boolean;
   artistsShareFiles: boolean;
   artistsAddMembers: boolean;
+}
+
+/** Team group settings (rev 14). */
+export interface StaffGroupSettings {
+  onlyAdminsSend: boolean;
+  onlyAdminsEditInfo: boolean;
+}
+
+/** Someone in a team chat (rev 14). */
+export interface TeamMember {
+  sub: string;
+  displayName: string;
+  jobTitle: string;
+  admin: boolean;
+  /** False once their login is turned off. */
+  active: boolean;
+  me: boolean;
+}
+
+/** Someone on the Blueprint team, from /directory (rev 14). */
+export interface TeamPerson {
+  sub: string;
+  displayName: string;
+  jobTitle: string;
+  me: boolean;
+  lastSeen: string | null;
 }
 
 export interface ConversationSummary {
@@ -40,6 +67,11 @@ export interface ConversationSummary {
   archived: boolean;
   private: boolean;
   lastSeen: string | null;
+  /** Team chats (rev 14): Blueprint staff only. */
+  team?: boolean;
+  members?: TeamMember[];
+  isAdmin?: boolean;
+  staffSettings?: StaffGroupSettings | null;
 }
 
 export interface ChatAttachment {
@@ -112,6 +144,8 @@ interface ThreadPage {
   firstUnreadMessageId: string | null;
   messages: ChatMessage[];
   nextBefore: string | null;
+  /** Why the viewer can't post, when it isn't the usual reasons (rev 14). */
+  readOnlyReason?: string;
 }
 
 interface Person {
@@ -199,7 +233,10 @@ const NAME_COLOURS = ['#B5403C', '#1F6F8B', '#7A4FA3', '#2E7D4F', '#A0611C', '#0
 const nameColour = (s: string) =>
   NAME_COLOURS[[...s].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % NAME_COLOURS.length];
 
-const isGroupish = (t: ChatType) => t === 'group' || t === 'announcement';
+const isGroupish = (t: ChatType) => t === 'group' || t === 'announcement' || t === 'staff-group';
+/** The other person in a direct team chat (or yourself, in "message yourself"). */
+const teamOther = (c: ConversationSummary) =>
+  c.members?.find((m) => !m.me) ?? c.members?.find((m) => m.me);
 const firstName = (s: string) => s.split(' ')[0];
 
 /** Where an attachment card opens: a view id Home.tsx understands. */
@@ -337,12 +374,19 @@ function ChatAvatar({ c, size = 48 }: { c: ConversationSummary; size?: number })
         <G n="megaphone" size={Math.round(size * 0.46)} />
       </span>
     );
-  if (c.type === 'group')
+  if (c.type === 'group' || c.type === 'staff-group')
     return (
-      <span className="av wa-av-grp" style={{ width: size, height: size }}>
+      <span
+        className={`av ${c.type === 'staff-group' ? 'wa-av-team' : 'wa-av-grp'}`}
+        style={{ width: size, height: size }}
+      >
         <Icon name="users" size={Math.round(size * 0.44)} />
       </span>
     );
+  if (c.type === 'staff-direct') {
+    const other = teamOther(c);
+    return <Avatar name={other?.displayName ?? c.title} userSub={other?.sub} size={size} />;
+  }
   // A direct chat is titled with the other person's name: show their picture.
   const who = c.artists.find((a) => a.displayName === c.title);
   return <Avatar name={c.title} artistId={who?.artistId} size={size} />;
@@ -390,7 +434,7 @@ export function useInbox(cfg: AppConfig, token: string, me: Me) {
 
   useEffect(() => void load(), [load, tick]);
   useEffect(() => {
-    const stops = inboxChannels(me.role, me.artistId).map((ch) =>
+    const stops = inboxChannels(me.role, me.artistId, me.sub).map((ch) =>
       subscribeInbox(
         cfg,
         () => tokenRef.current,
@@ -403,7 +447,7 @@ export function useInbox(cfg: AppConfig, token: string, me: Me) {
       stops.forEach((s) => s());
       clearInterval(poll);
     };
-  }, [cfg, me.role, me.artistId]);
+  }, [cfg, me.role, me.artistId, me.sub]);
 
   /** Chats with something unread (archived and muted ones don't count). */
   const unreadChats = (conversations ?? []).filter(
@@ -444,6 +488,22 @@ function useRoster(ctx: ChatCtx, given?: Person[]) {
     };
   }, [ctx.cfg, ctx.token, given]);
   return (given ?? fetched ?? []).filter((a) => a.artistId !== ctx.me.artistId);
+}
+
+/** The Blueprint team, for team chats (rev 14). Artists never get it. */
+function useTeam(ctx: ChatCtx): TeamPerson[] {
+  const [team, setTeam] = useState<TeamPerson[]>([]);
+  useEffect(() => {
+    if (!ctx.isBmg) return;
+    let live = true;
+    api<{ team?: TeamPerson[] }>(ctx.cfg, ctx.token, 'GET', '/directory')
+      .then((r) => live && setTeam(r.team ?? []))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [ctx.cfg, ctx.token, ctx.isBmg]);
+  return team;
 }
 
 function useThread(ctx: ChatCtx, conversationId: string, tick: number) {
@@ -529,7 +589,7 @@ function useThread(ctx: ChatCtx, conversationId: string, tick: number) {
 /* Chat list                                                                */
 /* ------------------------------------------------------------------------ */
 
-type Filter = 'all' | 'unread' | 'groups' | 'artists' | 'announcements' | 'blueprint';
+type Filter = 'all' | 'unread' | 'groups' | 'artists' | 'team' | 'announcements' | 'blueprint';
 
 function matchesFilter(c: ConversationSummary, f: Filter) {
   switch (f) {
@@ -539,6 +599,8 @@ function matchesFilter(c: ConversationSummary, f: Filter) {
       return c.type === 'group';
     case 'artists':
       return c.type === 'bmg-artist' || c.type === 'artist-to-artist';
+    case 'team':
+      return !!c.team;
     case 'announcements':
       return c.type === 'announcement';
     case 'blueprint':
@@ -585,6 +647,7 @@ function ChatRow({
           <span className="wa-name">
             {c.title}
             {c.private && <Icon name="lock" size={13} className="wa-lockicon" />}
+            {c.team && <span className="wa-teamtag">Team</span>}
           </span>
           {c.lastMessageAt && (
             <span className={`wa-time ${unread && !c.muted ? 'wa-time-new' : ''}`}>
@@ -658,6 +721,7 @@ function ChatList({
         { id: 'unread', label: unreadCount ? `Unread ${unreadCount}` : 'Unread' },
         { id: 'groups', label: 'Groups' },
         { id: 'artists', label: 'Artists' },
+        { id: 'team', label: 'Team' },
         { id: 'announcements', label: 'Announcements' },
       ]
     : [
@@ -807,6 +871,7 @@ function ChatList({
         <p className="wa-locknote">
           <Icon name="lock" size={13} /> Chats between artists are private to them. Blueprint can’t
           see them.
+          {ctx.isBmg && ' Team chats are only for the Blueprint people in them.'}
         </p>
       </div>
     </section>
@@ -854,15 +919,23 @@ function SettingSwitch({
   );
 }
 
+const DEFAULT_STAFF_SETTINGS: StaffGroupSettings = {
+  onlyAdminsSend: false,
+  onlyAdminsEditInfo: false,
+};
+
 function NewChat({
   ctx,
   roster,
+  team = [],
   phone,
   onClose,
   onCreated,
 }: {
   ctx: ChatCtx;
   roster: Person[];
+  /** The Blueprint team (rev 14), for Blueprint people only. */
+  team?: TeamPerson[];
   phone: boolean;
   onClose: () => void;
   onCreated: (conversationId: string) => void;
@@ -874,6 +947,9 @@ function NewChat({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [settings, setSettings] = useState<GroupSettings>(DEFAULT_SETTINGS);
+  // Team groups (rev 14): Blueprint people picked instead of artists.
+  const [pickedStaff, setPickedStaff] = useState<string[]>([]);
+  const [staffSettings, setStaffSettings] = useState<StaffGroupSettings>(DEFAULT_STAFF_SETTINGS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Access & permissions: what artists may start (Blueprint is never limited).
@@ -896,6 +972,13 @@ function NewChat({
   const matches = roster.filter((a) => !q || a.displayName.toLowerCase().includes(q));
   const contacts = ctx.isBmg || rules.artistDirectChats ? matches : [];
   const name = (id: string) => roster.find((a) => a.artistId === id)?.displayName ?? id;
+  const teamMatches = ctx.isBmg
+    ? team.filter((p) => !q || p.displayName.toLowerCase().includes(q))
+    : [];
+  const staffName = (sub: string) => team.find((p) => p.sub === sub)?.displayName ?? 'Team member';
+  // A group of only Blueprint people is a team group; artists and team can't be mixed
+  // (Blueprint is already in every artist group as one member).
+  const teamGroup = kind === 'group' && pickedStaff.length > 0 && picked.length === 0;
 
   async function create(body: Record<string, unknown>) {
     setBusy(true);
@@ -925,9 +1008,11 @@ function NewChat({
         ? kind === 'group'
           ? 'Add group members'
           : 'Choose who hears it'
-        : kind === 'group'
-          ? 'New group'
-          : 'New announcement';
+        : teamGroup
+          ? 'New team group'
+          : kind === 'group'
+            ? 'New group'
+            : 'New announcement';
 
   return (
     <section className="wa-list" aria-label={heading}>
@@ -948,6 +1033,24 @@ function NewChat({
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
+        </div>
+      )}
+      {step === 'pick' && pickedStaff.length > 0 && (
+        <div className="wa-chips" aria-label="Selected team members">
+          {pickedStaff.map((sub) => (
+            <span key={sub} className="wa-chipsel">
+              <Avatar name={staffName(sub)} userSub={sub} size={24} />
+              {firstName(staffName(sub))}
+              <button
+                type="button"
+                className="wa-chipx"
+                aria-label={`Remove ${staffName(sub)}`}
+                onClick={() => setPickedStaff((p) => p.filter((x) => x !== sub))}
+              >
+                <G n="x" size={12} />
+              </button>
+            </span>
+          ))}
         </div>
       )}
       {step === 'pick' && picked.length > 0 && (
@@ -1015,7 +1118,35 @@ function NewChat({
                 </span>
               </button>
             )}
-            <div className="wa-sechd">Contacts</div>
+            {teamMatches.length > 0 && (
+              <>
+                <div className="wa-sechd">Blueprint team</div>
+                {teamMatches.map((p) => (
+                  <button
+                    key={p.sub}
+                    type="button"
+                    className="wa-row"
+                    disabled={busy}
+                    onClick={() => create({ kind: 'direct', staffSub: p.sub })}
+                  >
+                    <Avatar name={p.displayName} userSub={p.sub} size={48} />
+                    <span className="wa-row-body wa-row-solo">
+                      <span className="wa-name">
+                        {p.displayName}
+                        {p.me ? ' (You)' : ''}
+                      </span>
+                      <span className="wa-sub">
+                        {p.me
+                          ? 'Message yourself'
+                          : [p.jobTitle, lastSeenText(p.lastSeen)].filter(Boolean).join(' · ') ||
+                            'Blueprint team'}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
+            <div className="wa-sechd">{ctx.isBmg ? 'Artists' : 'Contacts'}</div>
             {!ctx.isBmg && (!q || 'blueprint'.includes(q)) && (
               <button
                 type="button"
@@ -1053,6 +1184,49 @@ function NewChat({
         )}
         {step === 'pick' && (
           <>
+            {kind === 'group' && ctx.isBmg && (
+              <>
+                <div className="wa-sechd">Blueprint team</div>
+                {picked.length > 0 && (
+                  <p className="wa-sub wa-pad">
+                    Blueprint is already in every group with artists. To make a team-only group,
+                    don’t pick any artists.
+                  </p>
+                )}
+                {teamMatches
+                  .filter((p) => !p.me)
+                  .map((p) => {
+                    const on = pickedStaff.includes(p.sub);
+                    return (
+                      <label key={p.sub} className="wa-row wa-row-check">
+                        <Avatar name={p.displayName} userSub={p.sub} size={48} />
+                        <span className="wa-row-body wa-row-solo">
+                          <span className="wa-name">{p.displayName}</span>
+                          {p.jobTitle && <span className="wa-sub">{p.jobTitle}</span>}
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="chk"
+                          checked={on}
+                          disabled={picked.length > 0}
+                          aria-label={p.displayName}
+                          onChange={() =>
+                            setPickedStaff((x) =>
+                              on ? x.filter((s2) => s2 !== p.sub) : [...x, p.sub],
+                            )
+                          }
+                        />
+                      </label>
+                    );
+                  })}
+                <div className="wa-sechd">Artists</div>
+                {pickedStaff.length > 0 && (
+                  <p className="wa-sub wa-pad">
+                    This is a team group. Artists can’t be added to it.
+                  </p>
+                )}
+              </>
+            )}
             {matches.map((a) => {
               const on = picked.includes(a.artistId);
               return (
@@ -1065,6 +1239,7 @@ function NewChat({
                     type="checkbox"
                     className="chk"
                     checked={on}
+                    disabled={kind === 'group' && pickedStaff.length > 0}
                     aria-label={a.displayName}
                     onChange={() =>
                       setPicked((p) =>
@@ -1082,7 +1257,7 @@ function NewChat({
           <div className="wa-form">
             <div className="wa-form-top">
               <span
-                className={`av ${kind === 'group' ? 'wa-av-grp' : 'wa-av-ann'}`}
+                className={`av ${teamGroup ? 'wa-av-team' : kind === 'group' ? 'wa-av-grp' : 'wa-av-ann'}`}
                 style={{ width: 64, height: 64 }}
               >
                 {kind === 'group' ? <Icon name="users" size={28} /> : <G n="megaphone" size={28} />}
@@ -1097,7 +1272,11 @@ function NewChat({
                   maxLength={100}
                   autoFocus
                   placeholder={
-                    kind === 'group' ? 'e.g. Mixer Night performers' : 'e.g. Studio news'
+                    teamGroup
+                      ? 'e.g. Mixer crew'
+                      : kind === 'group'
+                        ? 'e.g. Mixer Night performers'
+                        : 'e.g. Studio news'
                   }
                   onChange={(e) => setTitle(e.target.value)}
                 />
@@ -1113,7 +1292,28 @@ function NewChat({
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
-            {kind === 'group' && ctx.isBmg && (
+            {teamGroup && (
+              <>
+                <p className="wa-sub">
+                  <Icon name="lock" size={12} /> Only the Blueprint team can see this group.
+                </p>
+                <div className="wa-sec wa-sec-flat">
+                  <div className="wa-sechd">Group settings</div>
+                  <SettingSwitch
+                    label="Only admins can send messages"
+                    checked={staffSettings.onlyAdminsSend}
+                    onChange={(v) => setStaffSettings((s) => ({ ...s, onlyAdminsSend: v }))}
+                  />
+                  <SettingSwitch
+                    label="Only admins can edit group info"
+                    hint="Name, description and who's in it"
+                    checked={staffSettings.onlyAdminsEditInfo}
+                    onChange={(v) => setStaffSettings((s) => ({ ...s, onlyAdminsEditInfo: v }))}
+                  />
+                </div>
+              </>
+            )}
+            {kind === 'group' && ctx.isBmg && !teamGroup && (
               <div className="wa-sec wa-sec-flat">
                 <div className="wa-sechd">Group settings</div>
                 <SettingSwitch
@@ -1134,8 +1334,14 @@ function NewChat({
               </div>
             )}
             <p className="wa-sub">
-              {kind === 'group' ? 'Members' : 'Goes to'}: Blueprint, {!ctx.isBmg && 'you, '}
-              {picked.map((id) => name(id)).join(', ')}
+              {teamGroup ? (
+                <>Members: You, {pickedStaff.map((sub) => staffName(sub)).join(', ')}</>
+              ) : (
+                <>
+                  {kind === 'group' ? 'Members' : 'Goes to'}: Blueprint, {!ctx.isBmg && 'you, '}
+                  {picked.map((id) => name(id)).join(', ')}
+                </>
+              )}
             </p>
           </div>
         )}
@@ -1146,7 +1352,7 @@ function NewChat({
             type="button"
             className="wa-send"
             aria-label="Next"
-            disabled={picked.length === 0}
+            disabled={picked.length === 0 && pickedStaff.length === 0}
             onClick={() => setStep('details')}
           >
             <G n="arrowR" size={22} />
@@ -1161,13 +1367,23 @@ function NewChat({
             aria-label={kind === 'group' ? 'Create group' : 'Create announcement'}
             disabled={!title.trim() || busy}
             onClick={() =>
-              create({
-                kind,
-                title: title.trim(),
-                description: description.trim(),
-                artistIds: picked,
-                ...(kind === 'group' && ctx.isBmg ? { settings } : {}),
-              })
+              create(
+                teamGroup
+                  ? {
+                      kind: 'group',
+                      title: title.trim(),
+                      description: description.trim(),
+                      staffSubs: pickedStaff,
+                      staffSettings,
+                    }
+                  : {
+                      kind,
+                      title: title.trim(),
+                      description: description.trim(),
+                      artistIds: picked,
+                      ...(kind === 'group' && ctx.isBmg ? { settings } : {}),
+                    },
+              )
             }
           >
             <G n="check" size={22} />
@@ -1747,9 +1963,16 @@ function Conversation({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  const subtitle = isGroupish(conv.type)
-    ? ['Blueprint', ...conv.artists.map((a) => firstName(a.displayName))].join(', ')
-    : lastSeenText(conv.lastSeen) || (conv.private ? 'Private chat' : '');
+  const subtitle =
+    conv.type === 'staff-group'
+      ? (conv.members ?? []).map((m) => (m.me ? 'You' : firstName(m.displayName))).join(', ')
+      : conv.type === 'staff-direct'
+        ? teamOther(conv)?.me
+          ? 'Message yourself'
+          : lastSeenText(conv.lastSeen) || teamOther(conv)?.jobTitle || 'Blueprint team'
+        : isGroupish(conv.type)
+          ? ['Blueprint', ...conv.artists.map((a) => firstName(a.displayName))].join(', ')
+          : lastSeenText(conv.lastSeen) || (conv.private ? 'Private chat' : '');
 
   const q = (search ?? '').trim().toLowerCase();
   const visible = q
@@ -1829,14 +2052,17 @@ function Conversation({
     );
   }
 
-  const readOnlyNote =
-    conv.type === 'announcement'
-      ? ctx.isBmg
-        ? 'Only Blueprint can send to this announcement.'
-        : 'Only Blueprint can send messages here. Use “Reply privately” on a message to answer in your Blueprint chat.'
-      : conv.settings?.onlyAdminsSend
-        ? 'Only admins can send messages to this group.'
-        : 'You can’t send messages to this chat.';
+  const readOnlyNote = thread.page?.readOnlyReason
+    ? thread.page.readOnlyReason
+    : conv.type === 'staff-group'
+      ? 'Only group admins can send messages to this group.'
+      : conv.type === 'announcement'
+        ? ctx.isBmg
+          ? 'Only Blueprint can send to this announcement.'
+          : 'Only Blueprint can send messages here. Use “Reply privately” on a message to answer in your Blueprint chat.'
+        : conv.settings?.onlyAdminsSend
+          ? 'Only admins can send messages to this group.'
+          : 'You can’t send messages to this chat.';
 
   return (
     <section className="wa-pane" aria-label={`Chat with ${conv.title}`}>
@@ -1852,17 +2078,13 @@ function Conversation({
             {!!backCount && <span className="wa-backcount">{backCount}</span>}
           </button>
         )}
-        <button
-          type="button"
-          className="wa-hd-who"
-          onClick={onInfo}
-          aria-label={`${conv.title} info`}
-          aria-expanded={infoOpen}
-        >
+        <button type="button" className="wa-hd-who" onClick={onInfo} aria-expanded={infoOpen}>
           <ChatAvatar c={conv} size={40} />
+          {/* Named by its visible text (WCAG 2.5.3), so the subtitle stays inside the name. */}
           <span className="min-w-0">
             <span className="wa-name block truncate">{conv.title}</span>
             {subtitle && <span className="wa-sub block truncate">{subtitle}</span>}
+            <span className="sr-only">, chat info</span>
           </span>
         </button>
         <span className="ml-auto flex">
@@ -2016,6 +2238,14 @@ function Conversation({
             <span className="wa-sys">
               <Icon name="lock" size={12} /> Chats between artists are private to them. Blueprint
               can’t see them.
+            </span>
+          </div>
+        )}
+        {conv.team && (
+          <div className="wa-dayrow">
+            <span className="wa-sys">
+              <Icon name="lock" size={12} /> Team chat. Only the Blueprint people in it can see
+              these messages.
             </span>
           </div>
         )}
@@ -2650,6 +2880,366 @@ function GroupInfo({
   );
 }
 
+/**
+ * Group info for a team group (rev 14): Blueprint people only. Members can
+ * edit the name and description and add people unless "only admins can edit
+ * group info" is on; group admins change settings, make admins, remove
+ * people and delete the group. Anyone can exit.
+ */
+function TeamGroupInfo({
+  ctx,
+  conv,
+  inbox,
+  team,
+  onClose,
+  onSearch,
+  onGone,
+}: {
+  ctx: ChatCtx;
+  conv: ConversationSummary;
+  inbox: Inbox;
+  team: TeamPerson[];
+  onClose: () => void;
+  onSearch: () => void;
+  onGone: () => void;
+}) {
+  const extras = useThreadExtras(ctx, conv.conversationId, inbox.tick);
+  const [editing, setEditing] = useState<'name' | 'description' | null>(null);
+  const [draft, setDraft] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addPick, setAddPick] = useState<string[]>([]);
+  const [confirm, setConfirm] = useState<'delete' | 'exit' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const path = `/conversations/${encodeURIComponent(conv.conversationId)}`;
+  const members = conv.members ?? [];
+  const settings = conv.staffSettings ?? DEFAULT_STAFF_SETTINGS;
+  const isAdmin = !!conv.isAdmin;
+  const canEditInfo = isAdmin || !settings.onlyAdminsEditInfo;
+  const inGroup = new Set(members.map((m) => m.sub));
+  const addable = team.filter((p) => !inGroup.has(p.sub));
+  // Admins first, then by name, with you at the top (like WhatsApp).
+  const sorted = [...members].sort(
+    (a, b) =>
+      Number(b.me) - Number(a.me) ||
+      Number(b.admin) - Number(a.admin) ||
+      a.displayName.localeCompare(b.displayName),
+  );
+
+  async function call(method: 'PATCH' | 'POST' | 'DELETE', p: string, body?: unknown) {
+    setError(null);
+    try {
+      await api(ctx.cfg, ctx.token, method, p, body);
+      await inbox.reload();
+      return true;
+    } catch (e) {
+      setError((e as Error).message);
+      return false;
+    }
+  }
+  const me = members.find((m) => m.me);
+
+  return (
+    <InfoShell title="Group info" onClose={onClose}>
+      <div className="wa-sec wa-sec-hero">
+        <ChatAvatar c={conv} size={96} />
+        {editing === 'name' ? (
+          <span className="flex w-full gap-2">
+            <input
+              className="wa-line flex-1"
+              value={draft}
+              maxLength={80}
+              aria-label="Group name"
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <button
+              type="button"
+              className="wa-pill"
+              aria-pressed="true"
+              disabled={!draft.trim()}
+              onClick={async () => {
+                if (await call('PATCH', path, { title: draft.trim() })) setEditing(null);
+              }}
+            >
+              Save
+            </button>
+            <button type="button" className="wa-pill" onClick={() => setEditing(null)}>
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <h3 className="wa-hero-name">
+            {conv.title}
+            {canEditInfo && (
+              <button
+                type="button"
+                className="ibtn"
+                aria-label="Edit group name"
+                onClick={() => {
+                  setDraft(conv.title);
+                  setEditing('name');
+                }}
+              >
+                <Icon name="pencil" size={18} />
+              </button>
+            )}
+          </h3>
+        )}
+        <span className="wa-sub">
+          <span className="wa-teamtag">Team</span> Team group · {members.length} member
+          {members.length === 1 ? '' : 's'}
+        </span>
+        <span className="wa-sub">
+          <Icon name="lock" size={12} /> Only the Blueprint people in it can see this group.
+        </span>
+        <div className="wa-acts-row">
+          <button type="button" className="wa-act" onClick={onSearch}>
+            <Icon name="search" size={20} />
+            Search
+          </button>
+          <button
+            type="button"
+            className="wa-act"
+            aria-pressed={conv.muted}
+            onClick={() => void call('PATCH', `${path}/me`, { muted: !conv.muted })}
+          >
+            <G n="muted" />
+            {conv.muted ? 'Unmute' : 'Mute'}
+          </button>
+          {canEditInfo && (
+            <button type="button" className="wa-act" onClick={() => setAdding(true)}>
+              <G n="userplus" />
+              Add
+            </button>
+          )}
+        </div>
+      </div>
+      {error && (
+        <p className="wa-err" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="wa-sec">
+        <div className="wa-sechd">Description</div>
+        {editing === 'description' ? (
+          <>
+            <textarea
+              className="wa-line"
+              rows={3}
+              maxLength={500}
+              value={draft}
+              aria-label="Description"
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                className="wa-pill"
+                aria-pressed="true"
+                onClick={async () => {
+                  if (await call('PATCH', path, { description: draft.trim() })) setEditing(null);
+                }}
+              >
+                Save
+              </button>
+              <button type="button" className="wa-pill" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-start gap-2">
+            <p className="m-0 flex-1 whitespace-pre-wrap">
+              {conv.description || <i className="wa-sub">No description</i>}
+            </p>
+            {canEditInfo && (
+              <button
+                type="button"
+                className="ibtn"
+                aria-label="Edit description"
+                onClick={() => {
+                  setDraft(conv.description ?? '');
+                  setEditing('description');
+                }}
+              >
+                <Icon name="pencil" size={18} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="wa-sec">
+        <div className="wa-sechd">
+          Media, links and docs <span className="wa-sub">{extras.attachments.length || ''}</span>
+        </div>
+        <MediaGrid ctx={ctx} items={extras.attachments} />
+      </div>
+      <div className="wa-sec wa-sec-flush">
+        <div className="wa-sechd wa-pad">
+          {members.length} member{members.length === 1 ? '' : 's'}
+        </div>
+        {canEditInfo && !adding && (
+          <button type="button" className="wa-mem" onClick={() => setAdding(true)}>
+            <span className="av wa-av-act">
+              <G n="userplus" />
+            </span>
+            <span className="flex-1 text-left font-bold">Add member</span>
+          </button>
+        )}
+        {adding && (
+          <div className="wa-addbox">
+            {addable.length === 0 && <p className="wa-sub">Everyone on the team is here.</p>}
+            {addable.map((p) => (
+              <label key={p.sub} className="wa-mem">
+                <Avatar name={p.displayName} userSub={p.sub} size={40} />
+                <span className="flex-1">
+                  <b className="block">{p.displayName}</b>
+                  {p.jobTitle && <span className="wa-sub">{p.jobTitle}</span>}
+                </span>
+                <input
+                  type="checkbox"
+                  className="chk"
+                  checked={addPick.includes(p.sub)}
+                  aria-label={p.displayName}
+                  onChange={(e) =>
+                    setAddPick((x) =>
+                      e.target.checked ? [...x, p.sub] : x.filter((y) => y !== p.sub),
+                    )
+                  }
+                />
+              </label>
+            ))}
+            <div className="flex gap-2 px-4 py-2">
+              <button
+                type="button"
+                className="wa-pill"
+                aria-pressed="true"
+                disabled={!addPick.length}
+                onClick={async () => {
+                  if (await call('POST', `${path}/members`, { staffSubs: addPick })) {
+                    setAddPick([]);
+                    setAdding(false);
+                  }
+                }}
+              >
+                Add {addPick.length || ''}
+              </button>
+              <button
+                type="button"
+                className="wa-pill"
+                onClick={() => {
+                  setAdding(false);
+                  setAddPick([]);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {sorted.map((m) => (
+          <div key={m.sub} className="wa-mem">
+            <Avatar name={m.displayName} userSub={m.sub} size={40} />
+            <span className="min-w-0 flex-1">
+              <b className="block truncate">
+                {m.displayName}
+                {m.me ? ' (You)' : ''}
+              </b>
+              <span className="wa-sub">
+                {m.active ? m.jobTitle || 'Blueprint team' : 'Left Blueprint'}
+              </span>
+            </span>
+            {m.admin && <span className="wa-badge">Group admin</span>}
+            {isAdmin && !m.me && (
+              <>
+                <button
+                  type="button"
+                  className="wa-pill"
+                  onClick={() =>
+                    void call('PATCH', path, { admin: { sub: m.sub, admin: !m.admin } })
+                  }
+                >
+                  {m.admin ? 'Dismiss as admin' : 'Make group admin'}
+                </button>
+                <button
+                  type="button"
+                  className="ibtn"
+                  aria-label={`Remove ${m.displayName}`}
+                  title="Remove from group"
+                  onClick={() =>
+                    void call('DELETE', `${path}/members/${encodeURIComponent(m.sub)}`)
+                  }
+                >
+                  <G n="x" size={18} />
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      {isAdmin && (
+        <div className="wa-sec">
+          <div className="wa-sechd">Group settings</div>
+          {(
+            [
+              ['onlyAdminsSend', 'Only admins can send messages', undefined],
+              [
+                'onlyAdminsEditInfo',
+                'Only admins can edit group info',
+                "Name, description and who's in it",
+              ],
+            ] as const
+          ).map(([k, label, hint]) => (
+            <SettingSwitch
+              key={k}
+              label={label}
+              hint={hint}
+              checked={settings[k]}
+              onChange={(v) => void call('PATCH', path, { staffSettings: { ...settings, [k]: v } })}
+            />
+          ))}
+        </div>
+      )}
+      <div className="wa-sec wa-sec-flush">
+        <button
+          type="button"
+          className="wa-mem wa-danger"
+          onClick={async () => {
+            if (await call('PATCH', `${path}/me`, { archived: !conv.archived })) onGone();
+          }}
+        >
+          <G n="archive" /> {conv.archived ? 'Unarchive' : 'Archive'} group
+        </button>
+        {me && (
+          <button
+            type="button"
+            className="wa-mem wa-danger"
+            onClick={async () => {
+              if (confirm !== 'exit') return setConfirm('exit');
+              if (await call('DELETE', `${path}/members/${encodeURIComponent(me.sub)}`)) onGone();
+            }}
+          >
+            <G n="exit" /> {confirm === 'exit' ? 'Click again to leave' : 'Exit group'}
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            className="wa-mem wa-danger"
+            onClick={async () => {
+              if (confirm !== 'delete') return setConfirm('delete');
+              if (await call('DELETE', path)) onGone();
+            }}
+          >
+            <Icon name="trash" />{' '}
+            {confirm === 'delete' ? 'Click again to delete for everyone' : 'Delete group'}
+          </button>
+        )}
+      </div>
+    </InfoShell>
+  );
+}
+
 function ContactInfo({
   ctx,
   conv,
@@ -2667,24 +3257,47 @@ function ContactInfo({
   const other = ctx.isBmg
     ? conv.artists[0]
     : conv.artists.find((a) => a.artistId !== ctx.me.artistId);
+  // Team direct chats (rev 14): the other Blueprint person.
+  const teammate = conv.type === 'staff-direct' ? teamOther(conv) : undefined;
   // Groups in common: for BMG, groups with this artist; for an artist, groups with
-  // the other artist (or every group, when the other side is Blueprint).
-  const common = (inbox.conversations ?? []).filter(
-    (c) => c.type === 'group' && (!other || c.artists.some((a) => a.artistId === other.artistId)),
+  // the other artist (or every group, when the other side is Blueprint); for a
+  // teammate, the team groups you're both in.
+  const common = (inbox.conversations ?? []).filter((c) =>
+    teammate
+      ? c.type === 'staff-group' && !!c.members?.some((m) => m.sub === teammate.sub)
+      : c.type === 'group' && (!other || c.artists.some((a) => a.artistId === other.artistId)),
   );
   const path = `/conversations/${encodeURIComponent(conv.conversationId)}/me`;
   return (
     <InfoShell title="Contact info" onClose={onClose}>
       <div className="wa-sec wa-sec-hero">
-        <Avatar
-          name={conv.title}
-          artistId={conv.artists.find((a) => a.displayName === conv.title)?.artistId}
-          size={96}
-        />
+        {teammate ? (
+          <Avatar name={teammate.displayName} userSub={teammate.sub} size={96} />
+        ) : (
+          <Avatar
+            name={conv.title}
+            artistId={conv.artists.find((a) => a.displayName === conv.title)?.artistId}
+            size={96}
+          />
+        )}
         <h3 className="wa-hero-name">{conv.title}</h3>
-        <span className="wa-sub">
-          {lastSeenText(conv.lastSeen) || (other ? 'Artist' : 'Blueprint Music Group')}
-        </span>
+        {teammate ? (
+          <>
+            <span className="wa-sub">
+              {teammate.active ? teammate.jobTitle || 'Blueprint team' : 'No longer at Blueprint'}
+            </span>
+            {!teammate.me && lastSeenText(conv.lastSeen) && (
+              <span className="wa-sub">{lastSeenText(conv.lastSeen)}</span>
+            )}
+            <span className="wa-sub">
+              <Icon name="lock" size={12} /> Team chat: only the two of you can see it
+            </span>
+          </>
+        ) : (
+          <span className="wa-sub">
+            {lastSeenText(conv.lastSeen) || (other ? 'Artist' : 'Blueprint Music Group')}
+          </span>
+        )}
         {conv.private && (
           <span className="wa-sub">
             <Icon name="lock" size={12} /> Private between artists
@@ -2737,7 +3350,11 @@ function ContactInfo({
             <span className="min-w-0 flex-1 text-left">
               <b className="block truncate">{g.title}</b>
               <span className="wa-sub block truncate">
-                {['Blueprint', ...g.artists.map((a) => firstName(a.displayName))].join(', ')}
+                {g.team
+                  ? (g.members ?? [])
+                      .map((m) => (m.me ? 'You' : firstName(m.displayName)))
+                      .join(', ')
+                  : ['Blueprint', ...g.artists.map((a) => firstName(a.displayName))].join(', ')}
               </span>
             </span>
           </button>
@@ -2788,6 +3405,7 @@ function Chat({
     [artists],
   );
   const roster = useRoster(ctx, rosterInput);
+  const team = useTeam(ctx);
   const [activeId, setActiveId] = useState<string | null>(initialConversationId ?? null);
   const [mode, setMode] = useState<'list' | 'new'>('list');
   const [info, setInfo] = useState(false);
@@ -2848,6 +3466,7 @@ function Chat({
       <NewChat
         ctx={ctx}
         roster={roster}
+        team={team}
         phone={phone}
         onClose={() => setMode('list')}
         onCreated={async (id) => {
@@ -2868,7 +3487,23 @@ function Chat({
 
   const infoPane =
     active && info ? (
-      isGroupish(active.type) ? (
+      active.type === 'staff-group' ? (
+        <TeamGroupInfo
+          ctx={ctx}
+          conv={active}
+          inbox={inbox}
+          team={team}
+          onClose={() => setInfo(false)}
+          onSearch={() => {
+            setSearchSignal((n) => n + 1);
+            if (phone) setInfo(false);
+          }}
+          onGone={() => {
+            setInfo(false);
+            setActiveId(null);
+          }}
+        />
+      ) : isGroupish(active.type) ? (
         <GroupInfo
           ctx={ctx}
           conv={active}
