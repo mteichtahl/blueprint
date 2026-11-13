@@ -38,6 +38,14 @@ Plus invitation tracking, finished reviews, and a smarter library.
 - **New-version emails:** a document's owner and editors hear when a new
   version is added or an old one brought back, and new editors hear they
   were added.
+- **Ask your plan owner:** artists can send a to-do to the Blueprint person
+  who owns their plan, from New to-do (**For: Kyra**) or **Ask Kyra to do
+  something** on My plan. The owner can **Send back** a to-do with a
+  reason, and the artist can send it again or keep it.
+- **To-dos from artists** in Profile: Blueprint people turn this on or off
+  and set how many open to-dos each artist can send them (a different number
+  for one artist in a release week, say). Admins can change it for anyone
+  in Access & permissions.
 
 ### Improved
 
