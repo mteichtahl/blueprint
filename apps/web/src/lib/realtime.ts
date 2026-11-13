@@ -61,9 +61,11 @@ export function subscribeInbox(
   };
 }
 
-/** The viewer's own channel: Blueprint's shared inbox, or the artist's. */
-export function inboxChannels(role: string, artistId: string | null): string[] {
-  return role === 'artist' && artistId
-    ? [`/inbox/artist-${artistId}`, '/inbox/all-artists']
-    : ['/inbox/bmg'];
+/**
+ * The viewer's own channels: the artist's, or Blueprint's shared inbox plus
+ * the person's own channel for team chats (rev 14).
+ */
+export function inboxChannels(role: string, artistId: string | null, sub?: string): string[] {
+  if (role === 'artist') return artistId ? [`/inbox/artist-${artistId}`, '/inbox/all-artists'] : [];
+  return sub ? ['/inbox/bmg', `/inbox/staff-${sub}`] : ['/inbox/bmg'];
 }
