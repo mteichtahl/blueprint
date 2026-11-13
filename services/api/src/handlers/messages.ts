@@ -47,6 +47,7 @@ import {
   previewOf,
   publicType,
   quoteOf,
+  reactionSummary,
   seal,
   ticks,
   UpdateConversation,
@@ -56,6 +57,7 @@ import {
   type Conversation,
   type MemberState,
   type Payload,
+  type StoredReactions,
   type Viewer,
 } from '../messages/model.ts';
 import { chatUseSk, fileUsePk } from '../files/model.ts';
@@ -89,6 +91,8 @@ interface StoredMessage {
   createdAt: string;
   /** System notes ("Kyra created this group"). */
   system?: boolean;
+  /** Quick reactions (rev 14), keyed by the reactor's sub. */
+  reactions?: StoredReactions;
 }
 
 interface InboxRow {
@@ -525,6 +529,93 @@ function listNames(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
+/**
+ * Sets or clears the caller's quick reaction on a message (rev 14). Anyone who
+ * can read the chat can react, including in announcements and admin-only
+ * groups, like WhatsApp. System notes can't be reacted to. No new route: this
+ * rides on PATCH …/me because the API stack is at its resource limit.
+ */
+async function react(
+  conv: Conversation,
+  principal: Principal,
+  r: { messageId: string; createdAt: string; emoji: StoredReactions[string]['e'] | null },
+) {
+  const Key = { PK: convPk(conv.conversationId), SK: messageSk(r.createdAt, r.messageId) };
+  const guard = 'messageId = :mid AND attribute_not_exists(#sys)';
+  const names = { '#r': 'reactions', '#who': principal.sub, '#sys': 'system' };
+  const isMissingMap = (e: unknown) =>
+    (e as Error).name === 'ValidationException' &&
+    /document path/i.test((e as Error).message ?? '');
+  const isGone = (e: unknown) => (e as Error).name === 'ConditionalCheckFailedException';
+  try {
+    if (r.emoji) {
+      const value = { e: r.emoji, n: await senderNameOf(principal), at: new Date().toISOString() };
+      try {
+        await db.send(
+          new UpdateCommand({
+            TableName: table(),
+            Key,
+            UpdateExpression: 'SET #r.#who = :v',
+            ConditionExpression: `${guard} AND attribute_exists(#r)`,
+            ExpressionAttributeNames: names,
+            ExpressionAttributeValues: { ':mid': r.messageId, ':v': value },
+          }),
+        );
+      } catch (e) {
+        if (!isGone(e) && !isMissingMap(e)) throw e;
+        // First reaction on this message: create the map. If someone beat us
+        // to it, the map now exists, so set our entry inside it.
+        try {
+          await db.send(
+            new UpdateCommand({
+              TableName: table(),
+              Key,
+              UpdateExpression: 'SET #r = :m',
+              ConditionExpression: `${guard} AND attribute_not_exists(#r)`,
+              ExpressionAttributeNames: { '#r': 'reactions', '#sys': 'system' },
+              ExpressionAttributeValues: { ':mid': r.messageId, ':m': { [principal.sub]: value } },
+            }),
+          );
+        } catch (e2) {
+          if (!isGone(e2)) throw e2;
+          await db.send(
+            new UpdateCommand({
+              TableName: table(),
+              Key,
+              UpdateExpression: 'SET #r.#who = :v',
+              ConditionExpression: `${guard} AND attribute_exists(#r)`,
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: { ':mid': r.messageId, ':v': value },
+            }),
+          );
+        }
+      }
+    } else {
+      await db
+        .send(
+          new UpdateCommand({
+            TableName: table(),
+            Key,
+            UpdateExpression: 'REMOVE #r.#who',
+            ConditionExpression: guard,
+            ExpressionAttributeNames: names,
+            ExpressionAttributeValues: { ':mid': r.messageId },
+          }),
+        )
+        .catch((e: unknown) => {
+          // Nothing to take off.
+          if (!isMissingMap(e)) throw e;
+        });
+    }
+  } catch (e) {
+    if (isGone(e)) throw new HttpError(404, 'That message is gone');
+    throw e;
+  }
+  const res = await db.send(new GetCommand({ TableName: table(), Key }));
+  await publish(channelsFor(conv), { conversationId: conv.conversationId });
+  return reactionSummary((res.Item as StoredMessage | undefined)?.reactions, principal.sub);
+}
+
 /** Finds a message by id in a conversation (newest first, a few pages at most). */
 async function findMessage(conversationId: string, messageId: string) {
   let start: Record<string, unknown> | undefined;
@@ -959,6 +1050,11 @@ export const handler = handle(async (event) => {
         sets.push('starred = :st');
         values[':st'] = [...starred].slice(-500);
       }
+      if (body.react) {
+        const reactions = await react(conv, principal, body.react);
+        // Only a reaction: leave the inbox row alone.
+        if (Object.keys(body).length === 1) return json(200, { reactions });
+      }
       const res = await db.send(
         new UpdateCommand({
           TableName: table(),
@@ -1000,6 +1096,7 @@ export const handler = handle(async (event) => {
           mine,
           ...(mine ? { ticks: ticks(m.createdAt, others) } : {}),
           starred: starred.has(m.messageId),
+          reactions: m.system ? [] : reactionSummary(m.reactions, principal.sub),
           replyTo: p.replyTo ?? null,
           attachment: p.attachment ?? null,
         };

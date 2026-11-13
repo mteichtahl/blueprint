@@ -717,3 +717,26 @@ Plan: the project's `BMG_Rev14_Staff_Chat.md`. Built in steps; this is step 1 (m
 - Team group settings: only admins can send; only admins can edit group info (which also covers adding people). Anyone can leave; admins remove others; when the last admin leaves, the longest-standing member becomes admin.
 - Team keys are wrapped with encryption context `purpose=staff-conversation`, so one can't be unwrapped as an artist chat's key.
 - Until the inboxes ship (step 2), creating a team chat answers `501`, and artist sessions get `404` for `sd-`/`sg-` ids before any lookup.
+
+## Chat quick reactions (13 Nov 2026)
+
+Marc asked for quick reactions in Chat on the phone and the web: 👍 👎 😊 😢.
+This reverses the rev 7 call ("no reactions").
+
+- **Where:** the four emoji lead the hover bar on a message (desktop) and the
+  bar that opens when a message is tapped (phone), before Reply and Star.
+  Reactions show as chips under the bubble with a count; hovering (or a screen
+  reader) names who reacted. Tapping a chip toggles yours.
+- **One reaction per person per message**, like WhatsApp: tapping the same one
+  again takes it off, a different one swaps it. Each Blueprint person counts
+  separately (keyed by Cognito sub, not the shared Blueprint member).
+- **Who can react:** anyone who can read the chat, including announcements and
+  "only admins can send" groups. System notes can't be reacted to.
+- **Storage:** a `reactions` map on the message item (`sub → { e, n, at }`), so
+  reading a page needs no extra query. Reactions are not sealed: they are one of
+  four fixed emoji plus a name, like `senderName` already is. Access is the same
+  as the chat's, so artist-to-artist reactions stay private from Blueprint.
+- **No new route:** the API stack is at its resource limit, so reactions ride on
+  `PATCH /conversations/{id}/me` as `react: { messageId, createdAt, emoji | null }`.
+  The response is the message's updated reaction list; members get a realtime
+  refresh. No push or email notification for reactions.

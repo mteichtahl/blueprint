@@ -1537,6 +1537,75 @@ html {
   .wa-actbtn[aria-pressed='true'] {
     color: #b5403c;
   }
+  /* Quick reactions (rev 14): 👍 👎 😊 😢 in the hover/tap bar, chips under the bubble. */
+  .wa-quickreacts {
+    display: flex;
+    gap: 2px;
+    padding-right: 4px;
+    margin-right: 2px;
+    border-right: 1px solid var(--color-border);
+  }
+  .wa-reactbtn {
+    font-size: 18px;
+    line-height: 1;
+    transition: transform 0.12s;
+  }
+  .wa-reactbtn:hover {
+    transform: scale(1.18);
+  }
+  .wa-reactbtn[aria-pressed='true'] {
+    background: #dce6f2;
+  }
+  .wa-msgrow-reacted {
+    margin-bottom: 14px;
+  }
+  .wa-reactions {
+    position: absolute;
+    bottom: -14px;
+    left: 8px;
+    display: flex;
+    gap: 3px;
+    z-index: 1;
+  }
+  .wa-out .wa-reactions {
+    left: auto;
+    right: 8px;
+  }
+  .wa-reaction {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 28px;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(1, 25, 53, 0.12);
+    font-size: 14px;
+    line-height: 1;
+  }
+  .wa-reaction-mine {
+    border-color: #011935;
+    background: #dce6f2;
+  }
+  .wa-reaction-n {
+    font: 600 12px var(--font-sans);
+    color: #5c6775;
+  }
+  .wa-phone .wa-reactbtn,
+  .wa-phone .wa-actbtn {
+    min-width: 40px;
+    height: 40px;
+  }
+  .wa-phone .wa-acts {
+    top: -22px;
+  }
+  /* With the reactions the bar is wider: open it toward the middle of the chat. */
+  .wa-msgrow:not(.wa-msgrow-out) .wa-acts {
+    right: auto;
+    left: 6px;
+  }
   .wa-composewrap {
     position: relative;
     flex: none;
@@ -1938,6 +2007,7 @@ html {
 .dark .wa-menu,
 .dark .wa-share,
 .dark .wa-acts,
+.dark .wa-reaction,
 .dark .wa-sec {
   background: #0b2847;
   border-color: #24405f;
@@ -2133,6 +2203,11 @@ textarea,
   .drawer,
   .drawer-scrim {
     animation: none;
+  }
+  .wa-reactbtn,
+  .wa-reactbtn:hover {
+    transition: none;
+    transform: none;
   }
 }
 
