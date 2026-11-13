@@ -542,7 +542,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             <PageHeader
               eyebrow="Artist workspaces"
               title="Artist gigs"
-              sub="Gigs artists share with Blueprint, with help requests first."
+              sub="Gigs artists share with Blueprint."
             />
             <AllGigs
               key={gigTarget?.n ?? 0}

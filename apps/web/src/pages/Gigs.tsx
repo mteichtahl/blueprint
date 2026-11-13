@@ -443,6 +443,9 @@ const FILTERS = [
   { id: 'past', label: 'Past' },
   { id: 'help', label: 'Help wanted' },
 ] as const;
+/** BMG Artist gigs adds All (every shared gig, by date); it opens on Upcoming. */
+type AllGigsFilter = Filter | 'all';
+const ALL_GIGS_FILTERS = [{ id: 'all', label: 'All' }, ...FILTERS] as const;
 const matches = (g: Gig, f: Filter) =>
   f === 'help' ? g.help?.status === 'open' : f === 'past' ? isPast(g) : !isPast(g);
 
@@ -813,7 +816,7 @@ function GigTable({
   );
 }
 
-/** BMG "Artist gigs": every shared gig across artists, with help requests first. */
+/** BMG "Artist gigs": every shared gig across artists; opens on Upcoming, with All, Past and Help wanted. */
 export function AllGigs({
   cfg,
   token,
@@ -828,7 +831,7 @@ export function AllGigs({
   /** Open this gig's page straight away (a row on Studio HQ's Tickets card). */
   initialGig?: Gig | null;
 }) {
-  const [filter, setFilter] = useState<Filter>(initialGig ? 'upcoming' : 'help');
+  const [filter, setFilter] = useState<AllGigsFilter>('upcoming');
   const { gigs, error, load, patch } = useGigs(cfg, token, `/gigs?filter=${filter}`);
   // Keep the last copy: a change (help done) can move the gig out of this filter.
   const [openGig, setOpenGig] = useState<Gig | null>(initialGig ?? null);
@@ -860,7 +863,9 @@ export function AllGigs({
   return (
     <Card
       title="Artist gigs"
-      action={<Chips label="Filter gigs" value={filter} onChange={setFilter} options={FILTERS} />}
+      action={
+        <Chips label="Filter gigs" value={filter} onChange={setFilter} options={ALL_GIGS_FILTERS} />
+      }
     >
       {error && <Notice tone="error">{error}</Notice>}
       {gigs === null ? (
@@ -873,7 +878,7 @@ export function AllGigs({
           empty={
             filter === 'help'
               ? 'No artist is asking for help right now.'
-              : `No ${filter} gigs shared with Blueprint.`
+              : `No ${filter === 'all' ? '' : `${filter} `}gigs shared with Blueprint.`
           }
         />
       )}
