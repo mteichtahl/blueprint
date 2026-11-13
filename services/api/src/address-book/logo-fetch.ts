@@ -14,6 +14,7 @@ import {
   type LogoCandidate,
   type SniffedType,
 } from './logo.ts';
+import { addressPages, embeddable, findAddress, findSiteName, type FoundAddress } from './site.ts';
 
 /**
  * Looks on a venue's website for its logo ("Automatically get logo").
@@ -62,6 +63,7 @@ export interface Fetched {
   url: string;
   contentType: string;
   body: Buffer;
+  headers: IncomingMessage['headers'];
 }
 
 function decoded(res: IncomingMessage): NodeJS.ReadableStream {
@@ -155,7 +157,12 @@ export async function fetchLimited(
         reject(e);
       });
     });
-    return { url: u.toString(), contentType: String(res.headers['content-type'] ?? ''), body };
+    return {
+      url: u.toString(),
+      contentType: String(res.headers['content-type'] ?? ''),
+      body,
+      headers: res.headers,
+    };
   }
   throw new Error('Too many redirects');
 }
@@ -224,4 +231,62 @@ export async function findVenueLogo(website: string, budgetMs = 8000): Promise<F
     }
   }
   return null;
+}
+
+export interface SiteInfo {
+  /** Where the website ended up after redirects (what the venue page frames). */
+  url: string;
+  /** The street address and suburb, when the site says where the venue is. */
+  address: FoundAddress | null;
+  /** A name for the venue (og:site_name or the page title), or ''. */
+  name: string;
+  /** Whether the site lets itself be shown in an iframe on our page. */
+  embeddable: boolean;
+}
+
+const HTML_ACCEPT = 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5';
+const htmlOf = (r: Fetched) =>
+  /html|xml|text\/plain/i.test(r.contentType) || !r.contentType ? r.body.toString('utf8') : '';
+
+/**
+ * Looks at a venue's website for its address and name, and whether it can be
+ * shown beside the map. If the home page doesn't give an address, tries up to
+ * two "contact" / "find us" pages on the same site. Same SSRF guards and limits
+ * as the logo finder; null if the site can't be reached at all.
+ */
+export async function inspectVenueSite(website: string, budgetMs = 8000): Promise<SiteInfo | null> {
+  const u = siteUrl(website);
+  if (!u) return null;
+  const deadline = Date.now() + budgetMs;
+  let home: Fetched;
+  try {
+    home = await fetchLimited(u.toString(), {
+      accept: HTML_ACCEPT,
+      maxBytes: PAGE_MAX_BYTES,
+      deadline,
+    });
+  } catch {
+    return null;
+  }
+  const html = htmlOf(home);
+  let address = findAddress(html);
+  for (const page of address ? [] : addressPages(html, home.url)) {
+    if (Date.now() >= deadline) break;
+    try {
+      address = findAddress(
+        htmlOf(
+          await fetchLimited(page, { accept: HTML_ACCEPT, maxBytes: PAGE_MAX_BYTES, deadline }),
+        ),
+      );
+      if (address) break;
+    } catch {
+      // Try the next page.
+    }
+  }
+  return {
+    url: home.url,
+    address,
+    name: findSiteName(html),
+    embeddable: embeddable(home.url, home.headers),
+  };
 }

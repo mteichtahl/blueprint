@@ -31,7 +31,8 @@ import {
   type VenuePatchInput,
 } from '../address-book/model.ts';
 import { allContacts, saveContact } from '../address-book/store.ts';
-import { findVenueLogo } from '../address-book/logo-fetch.ts';
+import { findVenueLogo, inspectVenueSite } from '../address-book/logo-fetch.ts';
+import { SiteLookup } from '../address-book/site.ts';
 import {
   LogoLookup,
   LogoUpload,
@@ -244,6 +245,36 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       found
         ? { found: true, dataUrl: found.dataUrl, sourceUrl: found.sourceUrl }
         : { found: false },
+    );
+  }
+
+  // Paste a website when adding a venue: look there for its address (and a
+  // name), and say whether the site can be shown beside the map. Nothing is saved.
+  if (route === 'POST /venues/:id' && id === 'site-lookup') {
+    ensure(principal, 'read');
+    const { url } = parseBody(event, SiteLookup);
+    const info = await inspectVenueSite(url);
+    await audit(event, 'venue.siteLookup', info ? 'success' : 'failed', {
+      host: (() => {
+        try {
+          return new URL(/^https?:/i.test(url) ? url : `https://${url}`).hostname;
+        } catch {
+          return '';
+        }
+      })(),
+      ...(info ? { address: !!info.address, embeddable: info.embeddable } : {}),
+    });
+    return json(
+      200,
+      info
+        ? {
+            found: true,
+            url: info.url,
+            embeddable: info.embeddable,
+            name: info.name,
+            ...(info.address ?? {}),
+          }
+        : { found: false, embeddable: false },
     );
   }
 

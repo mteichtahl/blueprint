@@ -136,8 +136,9 @@ export class WebStack extends BmgStack {
             `media-src 'self' blob: ${props.downloadOrigins.join(' ')}`,
             // Download origins: the app reads images itself (brand kit PDF, profile pictures).
             `connect-src 'self' ${cognitoIdp}${social.length ? ` https://${loginHost}` : ''} ${props.uploadOrigin} ${props.downloadOrigins.join(' ')} wss://${props.realtime.realtimeDns}`,
-            // Venue details show the address on an embedded Google map.
-            'frame-src https://www.google.com',
+            // Venue details show the address on an embedded Google map, and the
+            // venue's own website beside it (sandboxed; https sites only).
+            'frame-src https:',
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "form-action 'self'",
