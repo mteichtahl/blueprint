@@ -2033,7 +2033,13 @@ function Conversation({
         ctx={ctx}
         m={m}
         first={first}
-        showName={first && !m.mine && isGroupish(conv.type)}
+        // Groups name every sender; in an artist's chat with Blueprint, each
+        // Blueprint person is named too ("Kyra · Blueprint", decided 13 Nov 2026).
+        showName={
+          first &&
+          !m.mine &&
+          (isGroupish(conv.type) || (conv.type === 'bmg-artist' && m.senderRole !== 'artist'))
+        }
         canReply={canSend}
         replyPrivately={artistInAnnouncement && !m.mine}
         onReply={() => {
