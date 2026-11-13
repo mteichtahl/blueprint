@@ -103,7 +103,8 @@ const artistParam = (event: APIGatewayProxyEvent) => {
 
 function filterParam(event: APIGatewayProxyEvent): GigFilter {
   const f = event.queryStringParameters?.filter ?? 'upcoming';
-  if (f !== 'upcoming' && f !== 'past' && f !== 'help') throw new HttpError(400, 'Unknown filter');
+  if (f !== 'all' && f !== 'upcoming' && f !== 'past' && f !== 'help')
+    throw new HttpError(400, 'Unknown filter');
   return f;
 }
 

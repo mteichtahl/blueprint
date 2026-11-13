@@ -755,3 +755,11 @@ This reverses the rev 7 call ("no reactions").
   The response is the message's updated reaction list; members get a realtime
   refresh. No push or email notification for reactions.
 - **Step 2 (API):** team chats are live in the API on the existing routes (the stack is at its route limit; see `chat-api.md`). Staff read two inboxes (shared `BMG` for artist chats, their own `STAFF#<sub>` for team chats) and have presence in both, so "last seen" in team chats is per person. Names and job titles come from the same Cognito + profile list the documents use (`files/people.ts`, cached a minute); a turned-off login drops out of it, so their direct chats turn read-only and they can't be added to groups. Leaving a team group removes it from your list (as for artists leaving a group), rather than keeping a read-only copy as the plan suggested. The notifier sends team messages only to the chat's members, minus the sender and anyone who muted it. The realtime rule lets Blueprint people subscribe to `/inbox/staff-<their sub>` only. The messages function can now list the Cognito groups (`ListUsersInGroup`).
+
+## Artist gigs: All filter, opens on Upcoming (13 Nov 2026)
+
+- **Asked for:** the BMG **Artist gigs** page gets an **All** option and opens on **Upcoming**.
+- **Chips:** **All · Upcoming · Past · Help wanted** (All first, as on the Studio HQ Tickets card). The page always opens on Upcoming; before, it opened on Help wanted unless a gig was opened from Studio HQ.
+- **All** lists every gig the artists share with Blueprint, by date (Idea and Cancelled included), from `GET /gigs?filter=all`. The API's default stays `upcoming`, so existing callers are unchanged.
+- Help requests are still counted on the sidebar badge ("N need help") and one tap away on Help wanted. The page subtitle no longer says "with help requests first".
+- The workspace Work → Gigs list keeps Upcoming · Past · Help wanted.
