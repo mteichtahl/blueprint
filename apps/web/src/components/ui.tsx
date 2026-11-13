@@ -26,12 +26,16 @@ export function Button({
     default: 'border-foreground bg-card text-foreground hover:bg-[#F6F8FA] dark:hover:bg-secondary',
     ghost: 'border-input bg-card text-foreground hover:bg-[#F6F8FA] dark:hover:bg-secondary',
     navy: 'border-primary bg-primary text-primary-foreground hover:opacity-90',
-    cta: 'border-cta bg-cta text-white hover:bg-cta-hover shadow-[0_1px_2px_rgba(181,64,60,.28),inset_0_1px_0_rgba(255,255,255,.14)]',
+    // Headliner: light coral with navy text and a solid navy offset shadow.
+    cta: 'border-[#011935] bg-pop text-pop-foreground hover:bg-pop-hover shadow-[3px_3px_0_#011935] dark:border-pop dark:shadow-none',
   }[variant];
-  const sizes = { md: 'min-h-11 px-[18px] text-[15px]', sm: 'min-h-[38px] px-3.5 text-sm' }[size];
+  const sizes = {
+    md: 'min-h-11 px-5 text-[15px]',
+    sm: 'min-h-[38px] px-3.5 text-sm whitespace-nowrap',
+  }[size];
   return (
     <button
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border font-bold tracking-[.02em] shadow-2xs transition disabled:cursor-not-allowed disabled:opacity-50 ${styles} ${sizes} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-full border-2 font-title font-extrabold transition ${size === 'md' ? 'tracking-[.03em] uppercase' : 'tracking-[.01em]'} disabled:cursor-not-allowed disabled:opacity-50 ${styles} ${sizes} ${className}`}
       {...props}
     />
   );
@@ -56,7 +60,11 @@ export function Card({
     <section className={`card ${className}`}>
       {(title || action) && (
         <div className="card-hd">
-          {typeof title === 'string' ? <h2 className="t text-[19px]">{title}</h2> : title}
+          {typeof title === 'string' ? (
+            <h2 className="poster text-[20px] leading-none">{title}</h2>
+          ) : (
+            title
+          )}
           {action && <div className="ml-auto flex items-center gap-2">{action}</div>}
         </div>
       )}
@@ -67,7 +75,7 @@ export function Card({
 }
 
 const control =
-  'min-h-11 w-full rounded-lg border border-input bg-white px-3 text-base shadow-xs outline-none focus:ring-[3px] focus:ring-[rgba(1,25,53,0.22)]';
+  'min-h-12 w-full rounded-[14px] border-2 border-input bg-white px-3.5 text-base outline-none focus:ring-[3px] focus:ring-[rgba(1,25,53,0.22)]';
 
 export function Field({
   label,
@@ -236,7 +244,7 @@ export function PageHeader({
     <div className="page-head flex flex-wrap items-end gap-3">
       <div className="flex min-w-[min(280px,100%)] flex-1 flex-col gap-1.5">
         <span className="eyebrow">{eyebrow}</span>
-        <h1 className="t m-0 text-[34px] leading-tight">{title}</h1>
+        <h1 className="poster m-0 text-[48px] max-sm:text-[36px]">{title}</h1>
         {sub && <p className="m-0 text-base text-muted-foreground">{sub}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -244,38 +252,36 @@ export function PageHeader({
   );
 }
 
-/** The waveform logo with the BLUEPRINT / MUSIC GROUP wordmark (stand-in until the real files arrive). */
+/**
+ * The official Blueprint Music Group logo (white on navy, the brand kit's
+ * square file), cropped to its artwork. On light surfaces it shows as a navy
+ * tile until the navy-on-white file is added to /brand.
+ */
 export function Logo({ light = true, compact = false }: { light?: boolean; compact?: boolean }) {
-  const ink = light ? '#F1F4F7' : '#011935';
+  const w = compact ? 96 : 150;
+  const img = Math.round(w * 1.4267);
   return (
-    <span className="flex items-center gap-3">
-      <svg
-        width={compact ? 36 : 48}
-        height={compact ? 25 : 33}
-        viewBox="0 0 88 60"
-        aria-hidden="true"
-      >
-        <g stroke="#5C6775" strokeWidth="1" fill="none">
-          <line x1="0" y1="30" x2="88" y2="30" />
-          <circle cx="44" cy="30" r="25" strokeDasharray="3 3" />
-        </g>
-        <g stroke={ink} strokeWidth="4" strokeLinecap="round">
-          <path d="M12 27v6M20 21v18M28 13v34M36 22v16M44 7v46M52 17v26M60 24v12M68 19v22M76 27v6" />
-        </g>
-      </svg>
-      {!compact && (
-        <span className="flex flex-col gap-[3px]">
-          <span className="logo text-[15px]" style={{ color: ink }}>
-            BLUEPRINT
-          </span>
-          <span
-            className="logo text-[8px] tracking-[.32em]"
-            style={{ color: light ? '#D3D8DE' : '#5C6775' }}
-          >
-            MUSIC GROUP
-          </span>
-        </span>
-      )}
+    <span
+      className={`relative block flex-none overflow-hidden ${light ? '' : 'rounded-xl bg-[#011935]'}`}
+      style={{ width: w, height: Math.round(w * 0.653) }}
+    >
+      <img
+        src="/brand/bmg-logo-white-on-navy.png"
+        alt="Blueprint Music Group"
+        width={img}
+        height={img}
+        className="absolute max-w-none mix-blend-lighten"
+        style={{ left: -Math.round(w * 0.2067), top: -Math.round(w * 0.4133) }}
+      />
+    </span>
+  );
+}
+
+/** The Headliner wristband ribbon: decoration, hidden from screen readers. */
+export function Ribbon({ text, className = '' }: { text: string; className?: string }) {
+  return (
+    <span aria-hidden="true" className={`ribbon ${className}`}>
+      {` ${text} ★ `.repeat(4)}
     </span>
   );
 }

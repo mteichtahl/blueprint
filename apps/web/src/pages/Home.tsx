@@ -1208,7 +1208,7 @@ type ArtistView =
   | 'contacts';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
-  const [theme, setTheme] = useTheme();
+  const [theme, setTheme] = useTheme('dark');
   const [avatar, setAvatar] = useState(me.avatar ?? null);
   useOwnAvatar(me.sub, me.artistId, avatar);
   const [asking, setAsking] = useState(false);
@@ -1588,7 +1588,9 @@ function ArtistHome({
         <Notice key={s.submissionId}>Blueprint changed the priority or date of “{s.title}”.</Notice>
       ))}
       {plan?.exists && (
-        <section className="card gap-2.5">
+        <section className="paper-card tilt-l mt-3 mb-1 flex flex-col gap-2.5">
+          <span className="tape" aria-hidden="true" />
+          <span className="tape tape-r" aria-hidden="true" />
           <div className="flex items-center gap-2">
             <span className="eyebrow">My plan</span>
             <button

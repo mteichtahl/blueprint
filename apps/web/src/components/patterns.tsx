@@ -60,7 +60,7 @@ function ItemPage({
 }: ItemPageProps & { editLabel: string; pattern: 'record' | 'work' }) {
   return (
     <Card
-      title={<h2 className="t text-[19px]">{kind}</h2>}
+      title={<h2 className="poster text-[20px] leading-none">{kind}</h2>}
       action={<BackLink to={back.to} onClick={back.onClick} />}
       className="flex flex-col gap-4"
     >
@@ -153,7 +153,7 @@ export function EditScreen({
 }) {
   return (
     <Card
-      title={<h2 className="t text-[19px]">{title}</h2>}
+      title={<h2 className="poster text-[20px] leading-none">{title}</h2>}
       action={<BackLink to={back.to} onClick={back.onClick} />}
     >
       <form

@@ -3,14 +3,19 @@
 @import '@fontsource/archivo-narrow/600.css';
 @import '@fontsource/archivo-narrow/700.css';
 @import '@fontsource/league-spartan/700.css';
+@import '@fontsource/league-spartan/800.css';
+@import '@fontsource/league-spartan/900.css';
 @import '@fontsource/lexend-exa/400.css';
+@import '@fontsource/lexend-exa/700.css';
 
 /* Dark mode follows the .dark class set by the appearance switch (Light / Dark / System). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* BMG tokens on shadcn variable names (design: BMG_UI_shadcn_Tailwind). */
+/* BMG tokens on shadcn variable names (design: BMG_UI_shadcn_Tailwind),
+   restyled for the Headliner look (claude/BMG_Headliner_Look.md): paper page,
+   navy outlines, pill controls, light-coral "pop" buttons. */
 @theme {
-  --color-background: #f1f4f7;
+  --color-background: #ede9e1;
   --color-foreground: #011935;
   --color-card: #ffffff;
   --color-primary: #011935;
@@ -20,16 +25,29 @@
   --color-muted-foreground: #5c6775;
   --color-accent: #d9534f;
   --color-destructive: #b5403c;
-  --color-border: #dde2e8;
+  --color-border: #d6cfc2;
   --color-input: #d3d8de;
   --color-cta: #b5403c;
   --color-cta-hover: #9c3532;
+  /* Headliner: the light coral of the big buttons and the second colour. */
+  --color-pop: #e8726e;
+  --color-pop-hover: #f08b87;
+  --color-pop-foreground: #011935;
+  /* Headliner's second colour (lilac, approved 13 Nov 2026): ribbon and Ask BMG. */
+  --color-lilac: #c9b8ff;
+  --color-lilac-hover: #d8cbff;
+  --color-raised: #0b2847;
+  --color-paper: #ede9e1;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 22px;
   --font-logo: 'Lexend Exa', sans-serif;
   --font-title: 'League Spartan', sans-serif;
   --font-sans: 'Archivo Narrow', sans-serif;
   --shadow-2xs: 0 1px 0 rgba(1, 25, 53, 0.05);
   --shadow-xs: 0 1px 2px rgba(1, 25, 53, 0.05);
   --shadow-md: 0 4px 10px -2px rgba(1, 25, 53, 0.08), 0 2px 4px -2px rgba(1, 25, 53, 0.05);
+  --shadow-pop: 4px 4px 0 #011935;
 }
 
 html,
@@ -63,16 +81,12 @@ main {
   /* Blueprint grid on navy: sidebar, phone headers, sign-in panel. */
   .bp {
     background-color: #011935;
-    background-image:
-      linear-gradient(rgba(92, 103, 117, 0.16) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(92, 103, 117, 0.16) 1px, transparent 1px),
-      linear-gradient(rgba(92, 103, 117, 0.07) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(92, 103, 117, 0.07) 1px, transparent 1px);
-    background-size:
-      96px 96px,
-      96px 96px,
-      16px 16px,
-      16px 16px;
+    /* Headliner: a coral spotlight on the navy stage. */
+    background-image: radial-gradient(
+      circle at 100% 0%,
+      rgba(217, 83, 79, 0.3) 0%,
+      rgba(217, 83, 79, 0) 55%
+    );
     color: #f1f4f7;
   }
   .logo {
@@ -82,16 +96,18 @@ main {
   .eyebrow {
     font-family: var(--font-logo);
     font-size: 11px;
-    letter-spacing: 0.16em;
+    font-weight: 700;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: #b5403c;
   }
   .navlabel {
     font-family: var(--font-logo);
     font-size: 10px;
-    letter-spacing: 0.18em;
+    font-weight: 700;
+    letter-spacing: 0.22em;
     color: #e8726e;
-    padding: 18px 10px 6px;
+    padding: 18px 14px 6px;
   }
   /* Phone menu: a heading that folds its section away. */
   .navgroup {
@@ -116,11 +132,11 @@ main {
     color: var(--color-muted-foreground);
   }
   .card {
-    background-image: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
+    background: #ffffff;
+    border: 2px solid #011935;
+    border-radius: 22px;
     padding: 20px;
-    box-shadow: 0 1px 2px rgba(1, 25, 53, 0.05);
+    box-shadow: 4px 4px 0 #011935;
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -135,17 +151,17 @@ main {
   .card-ft {
     margin: 4px -20px -20px;
     padding: 14px 20px;
-    border-top: 1px solid var(--color-border);
+    border-top: 2px dashed var(--color-border);
     text-align: center;
     font-weight: 700;
-    border-radius: 0 0 12px 12px;
+    border-radius: 0 0 20px 20px;
   }
   .card-ft:hover {
     color: #b5403c;
   }
   .tile {
     background: #f1f4f7;
-    border-radius: 10px;
+    border-radius: 16px;
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
@@ -156,14 +172,14 @@ main {
     display: inline-flex;
     align-items: center;
     font-size: 13px;
-    font-weight: 600;
-    padding: 3px 10px;
-    border-radius: 6px;
+    font-weight: 800;
+    padding: 3px 11px;
+    border-radius: 999px;
     white-space: nowrap;
   }
   .tc {
-    background: #fbe3e2;
-    color: #8e2f2c;
+    background: #e8726e;
+    color: #011935;
   }
   .ts {
     background: #e6e9ed;
@@ -186,9 +202,9 @@ main {
     align-items: center;
     gap: 5px;
     font-size: 13px;
-    font-weight: 600;
-    padding: 3px 9px;
-    border: 1px solid var(--color-input);
+    font-weight: 700;
+    padding: 3px 11px;
+    border: 2px solid #011935;
     border-radius: 999px;
     background: #fff;
     white-space: nowrap;
@@ -199,19 +215,19 @@ main {
     color: #f1f4f7;
   }
   .bar {
-    height: 6px;
+    height: 10px;
     background: #e6e9ed;
     border-radius: 999px;
     overflow: hidden;
   }
   .bar > div {
-    height: 6px;
+    height: 10px;
     border-radius: 999px;
   }
   .av {
     width: 40px;
     height: 40px;
-    border-radius: 50%;
+    border-radius: 30%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -221,7 +237,7 @@ main {
   .appsq {
     width: 26px;
     height: 26px;
-    border-radius: 7px;
+    border-radius: 9px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -238,21 +254,21 @@ main {
     align-items: center;
     gap: 10px;
     min-height: 42px;
-    padding: 0 10px;
+    padding: 0 14px;
     color: #d3d8de;
-    font-size: 16px;
-    border-radius: 8px;
+    font: 700 16px var(--font-title);
+    border-radius: 999px;
     width: 100%;
     text-align: left;
   }
   .nav:hover {
     color: #fff;
-    background: rgba(241, 244, 247, 0.06);
+    background: rgba(241, 244, 247, 0.08);
   }
   .nav[aria-current='page'] {
-    color: #fff;
-    background: rgba(241, 244, 247, 0.1);
-    box-shadow: inset 3px 0 0 #d9534f;
+    color: #011935;
+    background: #e8726e;
+    box-shadow: none;
   }
   .nav[aria-disabled='true'] {
     opacity: 0.45;
@@ -269,14 +285,14 @@ main {
     gap: 4px;
     margin: 2px 0 6px;
     padding: 6px;
-    border-radius: 10px;
+    border-radius: 18px;
     background: rgba(241, 244, 247, 0.06);
   }
   .navpicker input {
     min-height: 40px;
     width: 100%;
-    padding: 0 10px;
-    border-radius: 8px;
+    padding: 0 14px;
+    border-radius: 999px;
     border: 1px solid rgba(241, 244, 247, 0.28);
     background: rgba(1, 25, 53, 0.6);
     color: #fff;
@@ -304,8 +320,8 @@ main {
     align-items: center;
     gap: 10px;
     min-height: 42px;
-    padding: 0 8px;
-    border-radius: 8px;
+    padding: 0 10px;
+    border-radius: 999px;
     color: #d3d8de;
     cursor: pointer;
   }
@@ -329,7 +345,7 @@ main {
     gap: 10px;
     padding: 10px;
     border: 1px solid rgba(241, 244, 247, 0.16);
-    border-radius: 10px;
+    border-radius: 18px;
     background: rgba(241, 244, 247, 0.05);
     color: #f1f4f7;
   }
@@ -340,22 +356,21 @@ main {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 64px;
+    min-height: 68px;
     padding: 0 32px;
-    background: rgba(241, 244, 247, 0.88);
+    background: rgba(237, 233, 225, 0.9);
     backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 2px solid #011935;
   }
   .search {
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 40px;
-    padding: 0 10px 0 12px;
+    min-height: 44px;
+    padding: 0 14px 0 16px;
     background: #fff;
-    border: 1px solid var(--color-input);
-    border-radius: 8px;
-    box-shadow: 0 1px 0 rgba(1, 25, 53, 0.04);
+    border: 2px solid #011935;
+    border-radius: 999px;
   }
   .search input {
     border: 0;
@@ -384,25 +399,28 @@ main {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 40px;
-    padding: 0 12px;
-    border-radius: 8px;
-    background: #011935;
-    color: #f1f4f7;
-    font: 700 15px var(--font-sans);
+    min-height: 44px;
+    padding: 0 16px;
+    border: 2px solid #011935;
+    border-radius: 999px;
+    background: #c9b8ff;
+    color: #011935;
+    font: 800 15px var(--font-title);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     white-space: nowrap;
-    box-shadow: 0 1px 0 rgba(1, 25, 53, 0.05);
+    box-shadow: 3px 3px 0 #011935;
   }
   .askbtn:hover {
-    background: #0b2747;
+    background: #d8cbff;
   }
   .askbtn:disabled {
     opacity: 0.6;
   }
   .askbtn .kbd {
-    color: #d3d8de;
-    border-color: rgba(241, 244, 247, 0.25);
-    background: rgba(241, 244, 247, 0.1);
+    color: #011935;
+    border-color: rgba(1, 25, 53, 0.35);
+    background: rgba(255, 255, 255, 0.4);
   }
   .ibtn {
     position: relative;
@@ -411,17 +429,17 @@ main {
     justify-content: center;
     width: 44px;
     height: 44px;
-    border-radius: 8px;
+    border-radius: 999px;
     color: #011935;
   }
   .ibtn:hover {
     background: rgba(1, 25, 53, 0.06);
   }
   .ibtn-o {
-    border: 1px solid var(--color-input);
+    border: 2px solid #011935;
     background: #fff;
-    width: 38px;
-    height: 38px;
+    width: 40px;
+    height: 40px;
   }
   .dot {
     position: absolute;
@@ -441,17 +459,16 @@ main {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 38px;
-    padding: 0 12px;
-    border: 1px solid var(--color-input);
-    border-radius: 8px;
+    min-height: 40px;
+    padding: 0 14px;
+    border: 2px solid #011935;
+    border-radius: 999px;
     background: #fff;
-    box-shadow: 0 1px 0 rgba(1, 25, 53, 0.05);
-    font: 600 14px var(--font-sans);
+    font: 700 14px var(--font-sans);
   }
   .big {
     font-family: var(--font-title);
-    font-weight: 700;
+    font-weight: 900;
     font-size: 48px;
     line-height: 1;
     letter-spacing: -0.02em;
@@ -487,7 +504,7 @@ main {
     transition: left 0.15s;
   }
   .switch:checked {
-    background: #011935;
+    background: #b5403c;
   }
   .switch:checked::after {
     left: 19px;
@@ -495,7 +512,7 @@ main {
   .chk {
     width: 20px;
     height: 20px;
-    accent-color: #011935;
+    accent-color: #b5403c;
     flex: none;
   }
   /* Data table (Preline project table). */
@@ -505,26 +522,27 @@ main {
     font-size: 15px;
   }
   .dt th {
-    font: 600 13px var(--font-sans);
+    font: 700 10px var(--font-logo);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
     text-align: left;
-    color: #5c6775;
+    color: #011935;
     padding: 10px 12px;
-    border-bottom: 1px solid var(--color-border);
-    border-top: 1px solid var(--color-border);
-    background: #f8fafb;
+    border-bottom: 2px solid #011935;
+    background: transparent;
     white-space: nowrap;
   }
   .dt td {
     padding: 12px;
-    border-bottom: 1px solid #edf0f3;
+    border-bottom: 2px dashed var(--color-border);
     vertical-align: middle;
   }
   .dt th + th,
   .dt td + td {
-    border-left: 1px solid #edf0f3;
+    border-left: 0;
   }
   .dt tr:hover td {
-    background: #fafbfc;
+    background: #faf7f2;
   }
   .dt th:first-child,
   .dt td:first-child {
@@ -540,7 +558,7 @@ main {
     gap: 12px;
     min-height: 48px;
     padding: 8px 0;
-    border-bottom: 1px solid #edf0f3;
+    border-bottom: 2px dashed var(--color-border);
   }
   .li:last-child {
     border-bottom: 0;
@@ -551,8 +569,7 @@ main {
     padding: 11px 15px;
     font-size: 16px;
     line-height: 1.45;
-    border-radius: 16px;
-    box-shadow: 0 1px 2px rgba(1, 25, 53, 0.05);
+    border-radius: 20px;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -575,15 +592,18 @@ main {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    min-height: 58px;
-    font-size: 13px;
-    font-weight: 700;
-    color: #5c6775;
+    gap: 2px;
+    min-height: 52px;
+    border-radius: 999px;
+    font: 800 12px var(--font-title);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #011935;
   }
   .ptab[aria-current='page'] {
-    color: #011935;
-    box-shadow: inset 0 3px 0 #d9534f;
+    color: #f1f4f7;
+    background: #011935;
+    box-shadow: none;
   }
   .ptab[aria-disabled='true'] {
     opacity: 0.4;
@@ -593,14 +613,17 @@ main {
     min-height: 46px;
     display: flex;
     align-items: center;
-    padding: 0 14px;
-    font-size: 16px;
-    font-weight: 700;
+    padding: 0 16px;
+    font: 800 16px var(--font-title);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     color: #5c6775;
+    border-radius: 16px 16px 0 0;
     border-bottom: 3px solid transparent;
   }
   .wtab[aria-selected='true'] {
-    color: #011935;
+    color: #f1f4f7;
+    background: #011935;
     border-bottom-color: #d9534f;
   }
   .wtab:disabled {
@@ -617,24 +640,25 @@ main {
     align-self: flex-start;
     gap: 4px;
     padding: 4px;
-    background: #e6e9ed;
-    border-radius: 6px;
+    background: #fff;
+    border: 2px solid #011935;
+    border-radius: 999px;
   }
   .seg > button {
     min-height: 36px;
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 0 14px;
-    border-radius: 4px;
+    padding: 0 16px;
+    border-radius: 999px;
     font-size: 15px;
-    font-weight: 700;
+    font-weight: 800;
     color: #5c6775;
   }
   .seg > button[aria-selected='true'] {
-    background: #fff;
-    color: #011935;
-    box-shadow: 0 0 0 1px #d3d8de;
+    background: #011935;
+    color: #f1f4f7;
+    box-shadow: none;
   }
   /* A section that can't be opened (an opted-out meeting's Transcript): greyed, no hover. */
   .seg > button[aria-disabled='true'] {
@@ -648,7 +672,7 @@ main {
     min-width: 20px;
     height: 20px;
     padding: 0 6px;
-    border-radius: 10px;
+    border-radius: 999px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -678,21 +702,24 @@ main {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 0 12px;
-    font-size: 15px;
-    font-weight: 700;
+    padding: 0 14px;
+    font: 800 15px var(--font-title);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     color: #5c6775;
+    border-radius: 14px 14px 0 0;
     border-bottom: 3px solid transparent;
     white-space: nowrap;
   }
   .stab[aria-selected='true'] {
-    color: #011935;
+    color: #f1f4f7;
+    background: #011935;
     border-bottom-color: #d9534f;
   }
   /* Markdown: editor frame, toolbar and rendered text (Tiptap). */
   .md-frame {
-    border: 1px solid var(--color-input);
-    border-radius: 0.5rem;
+    border: 2px solid var(--color-input);
+    border-radius: 16px;
     background: #fff;
     box-shadow: 0 1px 2px rgba(1, 25, 53, 0.05);
     overflow: hidden;
@@ -803,28 +830,32 @@ html {
 
 /* Dark mode (design: Studio HQ dark, My gigs dark). Tokens only; components follow. */
 .dark {
-  --color-background: #0b1626;
+  /* Headliner: the navy stage (artist app default). */
+  --color-background: #011935;
   --color-foreground: #f1f4f7;
-  --color-card: #13233a;
-  --color-secondary: #1c2e47;
-  --color-muted: #1c2e47;
-  --color-muted-foreground: #a9b3bf;
-  --color-border: #24364f;
-  --color-input: #2c405c;
+  --color-card: #0b2847;
+  --color-secondary: #16365c;
+  --color-muted: #16365c;
+  --color-muted-foreground: #b7c2cf;
+  --color-border: #24405f;
+  --color-input: #6a7e9b;
+  --color-primary: #f1f4f7;
+  --color-primary-foreground: #011935;
   color-scheme: dark;
 }
 .dark .card {
   background-image: none;
-  background-color: #13233a;
-  border-color: #24364f;
+  background-color: #0b2847;
+  border: 1px solid #24405f;
+  box-shadow: none;
 }
 .dark .b-in {
-  background: #1c2e47;
+  background: #16365c;
   color: #f1f4f7;
 }
 .dark .tile,
 .dark .search-fill {
-  background: #1c2e47;
+  background: #16365c;
 }
 .dark .ts,
 .dark .bar,
@@ -832,9 +863,9 @@ html {
 .dark .dd,
 .dark .search,
 .dark .ibtn-o {
-  background: #1c2e47;
+  background: #16365c;
   color: #f1f4f7;
-  border-color: #2c405c;
+  border-color: #2e4a6e;
 }
 .dark .tn {
   background: #f1f4f7;
@@ -842,16 +873,16 @@ html {
 }
 .dark .seg,
 .dark .cnt {
-  background: #1c2e47;
+  background: #16365c;
   color: #f1f4f7;
 }
 .dark .seg > button {
   color: #a9b3bf;
 }
 .dark .seg > button[aria-selected='true'] {
-  background: #13233a;
+  background: #0b2847;
   color: #f1f4f7;
-  box-shadow: 0 0 0 1px #2c405c;
+  box-shadow: 0 0 0 1px #2e4a6e;
 }
 .dark .seg > button[aria-disabled='true'] {
   color: #5d6d82;
@@ -863,20 +894,20 @@ html {
   color: #fff;
 }
 .dark .dt th {
-  background: #1c2e47;
+  background: #16365c;
   color: #a9b3bf;
-  border-color: #24364f;
+  border-color: #24405f;
 }
 .dark .dt td,
 .dark .li {
-  border-color: #24364f;
+  border-color: #24405f;
 }
 .dark .dt tr:hover td {
-  background: #172a43;
+  background: #103257;
 }
 .dark .topbar {
-  background: rgba(11, 22, 38, 0.88);
-  border-color: #24364f;
+  background: rgba(1, 25, 53, 0.9);
+  border-color: #24405f;
 }
 .dark .ibtn {
   color: #f1f4f7;
@@ -884,7 +915,7 @@ html {
 /* Progress bars: the default navy fill turns light on dark cards. (React writes
    the inline colour as rgb(), so match a data attribute, not the style text.) */
 .dark .bar {
-  background: #2a3d57;
+  background: #24405f;
 }
 .dark .bar > div[data-ink] {
   background: #f1f4f7 !important;
@@ -892,7 +923,7 @@ html {
 .dark input,
 .dark select,
 .dark textarea {
-  background-color: #13233a;
+  background-color: #0b2847;
   color: #f1f4f7;
 }
 
@@ -917,8 +948,9 @@ html {
     height: calc(100vh - 230px);
     min-height: 600px;
     background: #fff;
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
+    border: 2px solid #011935;
+    border-radius: 22px;
+    box-shadow: 4px 4px 0 #011935;
     overflow: hidden;
   }
   .wa-tab {
@@ -1907,8 +1939,8 @@ html {
 .dark .wa-share,
 .dark .wa-acts,
 .dark .wa-sec {
-  background: #13233a;
-  border-color: #24364f;
+  background: #0b2847;
+  border-color: #24405f;
   color: #f1f4f7;
 }
 .dark .wa-hd,
@@ -1918,12 +1950,12 @@ html {
 .dark .wa-tray,
 .dark .wa-pane-empty,
 .dark .wa-addbox {
-  background: #172a43;
-  border-color: #24364f;
+  background: #103257;
+  border-color: #24405f;
 }
 .dark .wa-info {
-  background: #0b1626;
-  border-color: #24364f;
+  background: #011935;
+  border-color: #24405f;
 }
 .dark .wa-list,
 .dark .wa-row-body,
@@ -1931,7 +1963,7 @@ html {
 .dark .wa-act,
 .dark .wa-share-hd,
 .dark .wa-next {
-  border-color: #24364f;
+  border-color: #24405f;
 }
 .dark .wa-row:hover,
 .dark .wa-arch:hover,
@@ -1941,14 +1973,14 @@ html {
 .dark .wa-share-item:hover,
 .dark .wa-actbtn:hover,
 .dark .wa-act:hover {
-  background: #1c2e47;
+  background: #16365c;
 }
 .dark .wa-row[aria-current='true'],
 .dark .wa-pill,
 .dark .wa-chipsel,
 .dark .wa-backcount,
 .dark .wa-tile {
-  background: #24364f;
+  background: #24405f;
   color: #f1f4f7;
 }
 .dark .wa-pill[aria-pressed='true'] {
@@ -1956,14 +1988,14 @@ html {
   color: #011935;
 }
 .dark .wa-wall {
-  background-color: #0b1626;
+  background-color: #011935;
   background-image:
     linear-gradient(rgba(241, 244, 247, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(241, 244, 247, 0.03) 1px, transparent 1px);
 }
 .dark .wa-msg,
 .dark .wa-day {
-  background: #1c2e47;
+  background: #16365c;
   color: #f1f4f7;
 }
 .dark .wa-out {
@@ -1983,8 +2015,8 @@ html {
   color: #a9b3bf;
 }
 .dark .wa-input {
-  background: #13233a;
-  border-color: #2c405c;
+  background: #0b2847;
+  border-color: #2e4a6e;
   color: #f1f4f7;
 }
 .dark .wa-sub,
@@ -2012,7 +2044,7 @@ html {
   color: #f1f4f7;
 }
 .dark .wa-badge {
-  background: #24364f;
+  background: #24405f;
   color: #f1f4f7;
 }
 .dark .wa-from,
@@ -2059,7 +2091,7 @@ input:not([type='checkbox'], [type='radio'], [type='color'], [type='range']),
 select,
 textarea,
 .md-frame {
-  border-color: #7d8794;
+  border-color: #6f7987;
 }
 ::placeholder,
 .md .is-editor-empty:first-child::before {
@@ -2077,7 +2109,7 @@ textarea,
   color: #9aa5b3;
 }
 .dark .eyebrow {
-  color: #e8726e;
+  color: #f2a3a0;
 }
 
 /* Phone menu: slides in over a dimmed page. */
@@ -2385,4 +2417,170 @@ nav,
     transition: none;
     transform: none;
   }
+}
+
+/* ───── Headliner look (claude/BMG_Headliner_Look.md) ─────
+   Backstage Pass + Gig Poster + Festival Wristband: a paper page with navy
+   outlines for Blueprint, the navy stage for artists (dark mode), poster
+   headings, masking tape and a wristband ribbon. */
+@layer components {
+  /* Poster headings: heavy, upper case, tight. */
+  .poster {
+    font-family: var(--font-title);
+    font-weight: 900;
+    text-transform: uppercase;
+    line-height: 0.9;
+    letter-spacing: -0.01em;
+  }
+  /* The wristband ribbon: decoration only (aria-hidden), tilted across the top. */
+  .ribbon {
+    display: block;
+    background: #c9b8ff;
+    color: #011935;
+    transform: rotate(-3deg);
+    padding: 6px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    font: 700 10px var(--font-logo);
+    letter-spacing: 0.22em;
+    pointer-events: none;
+    user-select: none;
+  }
+  /* Torn masking tape on a featured card (the card needs position: relative). */
+  .tape {
+    position: absolute;
+    top: -10px;
+    left: 28px;
+    width: 78px;
+    height: 20px;
+    background: rgba(231, 214, 170, 0.9);
+    transform: rotate(-5deg);
+    clip-path: polygon(3% 0, 97% 4%, 100% 50%, 96% 100%, 2% 94%, 0 50%);
+    z-index: 2;
+    pointer-events: none;
+  }
+  .tape-r {
+    left: auto;
+    right: 28px;
+    width: 62px;
+    transform: rotate(5deg);
+  }
+  /* A paper card: the featured card on the navy stage. */
+  .paper-card {
+    position: relative;
+    background-color: #f1f4f7;
+    background-image: repeating-linear-gradient(
+      0deg,
+      rgba(1, 25, 53, 0.03) 0 1px,
+      transparent 1px 4px
+    );
+    color: #011935;
+    border-radius: 22px;
+    padding: 16px 18px;
+    box-shadow: 5px 5px 0 #e8726e;
+  }
+  .tilt-l {
+    transform: rotate(-1.2deg);
+  }
+  .tilt-r {
+    transform: rotate(1.2deg);
+  }
+  /* Artist phone tab bar: a floating off-white pill on the stage. */
+  .tabbar {
+    gap: 4px;
+    margin: 0 12px calc(10px + env(safe-area-inset-bottom));
+    padding: 6px;
+    border-radius: 999px;
+    background: #f1f4f7;
+    border: 2px solid #011935;
+  }
+}
+
+/* The page itself: faint paper lines on light; a coral spotlight on the navy stage. */
+html:not(.dark) {
+  background-image:
+    repeating-linear-gradient(0deg, rgba(1, 25, 53, 0.025) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(1, 25, 53, 0.02) 0 1px, transparent 1px 6px);
+}
+html.dark {
+  background-image: radial-gradient(
+    circle at 100% 0%,
+    rgba(217, 83, 79, 0.22) 0%,
+    rgba(217, 83, 79, 0) 45%
+  );
+  background-attachment: fixed;
+}
+
+/* Headliner in dark mode (the navy stage). */
+.dark .card-ft {
+  border-top-color: #24405f;
+}
+.dark .chip,
+.dark .dd,
+.dark .search,
+.dark .ibtn-o {
+  border-width: 2px;
+  border-color: #6a7e9b;
+}
+.dark .chip[aria-pressed='true'] {
+  background: #f1f4f7;
+  border-color: #f1f4f7;
+  color: #011935;
+}
+.dark .seg {
+  background: #0b2847;
+  border-color: #6a7e9b;
+}
+.dark .seg > button[aria-selected='true'] {
+  background: #e8726e;
+  color: #011935;
+  box-shadow: none;
+}
+.dark .wtab,
+.dark .stab {
+  color: #b7c2cf;
+}
+.dark .wtab[aria-selected='true'],
+.dark .stab[aria-selected='true'] {
+  background: #f1f4f7;
+  color: #011935;
+}
+.dark .dt th {
+  background: transparent;
+  color: #b7c2cf;
+  border-bottom: 2px solid #6a7e9b;
+}
+.dark .topbar {
+  border-bottom-color: #24405f;
+}
+.dark .switch:checked {
+  background: #e8726e;
+}
+.dark .chk {
+  accent-color: #e8726e;
+}
+.dark .ribbon {
+  background: #c9b8ff;
+}
+/* A paper card stays light on the navy stage. */
+.paper-card .eyebrow {
+  color: #b5403c;
+}
+.dark .paper-card .bar {
+  background: #d8dde3;
+}
+/* The phone chat fills the screen, and the dark frame needs no offset shadow. */
+.wa-phone,
+.dark .wa {
+  box-shadow: none;
+}
+/* Search fields: the input sits on its pill, not in a box of its own. */
+.dark .search input,
+.dark .wa-searchrow input {
+  background-color: transparent;
+}
+/* Deep-coral text written into pages reads pale coral on the navy stage (4.5:1). */
+.dark .text-\[\#8E2F2C\],
+.dark .text-\[\#B5403C\] {
+  color: #f2a3a0;
 }

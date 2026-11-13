@@ -1,22 +1,26 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { RELEASE, openWhatsNew } from '../lib/release.ts';
-import { Avatar, Icon, initials, Logo, type IconName } from './ui.tsx';
+import { Avatar, Icon, initials, Logo, Ribbon, type IconName } from './ui.tsx';
 
 // ── Appearance (Light / Dark / System), from the sidebar or Profile ──────────
 export type Theme = 'light' | 'dark' | 'system';
 const THEME_KEY = 'bmg-theme';
 
-function readTheme(): Theme {
+function readTheme(fallback: Theme): Theme {
   try {
     const v = window.localStorage.getItem(THEME_KEY);
-    return v === 'light' || v === 'dark' ? v : 'system';
+    return v === 'light' || v === 'dark' || v === 'system' ? v : fallback;
   } catch {
-    return 'system';
+    return fallback;
   }
 }
 
-export function useTheme(): [Theme, (t: Theme) => void] {
-  const [theme, setTheme] = useState<Theme>(readTheme);
+/**
+ * The appearance choice, saved on this device. `fallback` applies until the
+ * person picks one: Headliner puts artists on the navy stage (dark) by default.
+ */
+export function useTheme(fallback: Theme = 'system'): [Theme, (t: Theme) => void] {
+  const [theme, setTheme] = useState<Theme>(() => readTheme(fallback));
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () =>
@@ -566,8 +570,12 @@ export function BmgShell({
   );
 
   const sidebar = (phone: boolean) => (
-    <nav aria-label="Main" className="bp flex min-h-full flex-col gap-0.5 px-3.5 pt-[22px] pb-3.5">
-      <button type="button" className="mb-[18px] px-2 text-left" onClick={() => go('overview')}>
+    <nav
+      aria-label="Main"
+      className="bp flex min-h-full flex-col gap-0.5 overflow-x-hidden px-3.5 pt-[18px] pb-3.5"
+    >
+      <Ribbon text="STUDIO ★ ALL ACCESS" className="-mx-8 mt-2 mb-3" />
+      <button type="button" className="mb-[14px] px-2 text-left" onClick={() => go('overview')}>
         <Logo />
       </button>
       {phone ? (
@@ -792,7 +800,8 @@ export function ArtistShell({
   return (
     <div className="app-frame mx-auto flex w-full max-w-[480px] flex-col overflow-hidden bg-background text-foreground shadow-md">
       <SkipLink />
-      <header className="bp flex flex-none flex-col gap-1.5 px-5 pt-[calc(14px+env(safe-area-inset-top))] pr-[max(20px,env(safe-area-inset-right))] pb-3.5 pl-[max(20px,env(safe-area-inset-left))]">
+      <header className="bp flex flex-none flex-col gap-1.5 overflow-hidden px-5 pt-[calc(10px+env(safe-area-inset-top))] pr-[max(20px,env(safe-area-inset-right))] pb-3.5 pl-[max(20px,env(safe-area-inset-left))]">
+        <Ribbon text="ARTIST ★ ALL ACCESS" className="-mx-8 mb-1.5" />
         {header}
       </header>
       <main
@@ -803,16 +812,13 @@ export function ArtistShell({
       >
         {children}
       </main>
-      <nav
-        aria-label="Tabs"
-        className="tabbar relative flex flex-none border-t border-input bg-card pb-[max(6px,env(safe-area-inset-bottom))]"
-      >
+      <nav aria-label="Tabs" className="tabbar relative flex flex-none">
         {onAsk && current !== 'chat' && (
           <button
             type="button"
             aria-label="Ask BMG"
             onClick={onAsk}
-            className="absolute -top-[70px] right-4 flex size-14 items-center justify-center rounded-full bg-cta text-white shadow-[0_6px_16px_rgba(1,25,53,.28)]"
+            className="absolute -top-[70px] right-4 flex size-14 items-center justify-center rounded-full border-2 border-[#011935] bg-lilac text-[#011935] shadow-[3px_3px_0_#011935] hover:bg-lilac-hover"
           >
             <Icon name="assistant" size={24} />
           </button>
@@ -854,7 +860,7 @@ export function PhoneHeader({
         <span className="eyebrow flex-1 !text-[#E8726E]">{eyebrow}</span>
         {right}
       </div>
-      <h1 className="t m-0 truncate text-[24px] leading-tight text-white">{title}</h1>
+      <h1 className="poster m-0 truncate pt-0.5 text-[30px] text-white">{title}</h1>
       {children}
     </>
   );
@@ -877,11 +883,14 @@ export function AuthFrame({
 }) {
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row">
-      <aside className="bp flex flex-col gap-3 px-6 pt-[calc(28px+env(safe-area-inset-top))] pb-6 md:w-[44%] md:justify-between md:p-12">
-        <Logo />
+      <aside className="bp flex flex-col gap-3 overflow-hidden px-6 pt-[calc(20px+env(safe-area-inset-top))] pb-6 md:w-[44%] md:justify-between md:p-12">
+        <div className="flex flex-col gap-4">
+          <Ribbon text="ARTISTS ONLY ★ ALL ACCESS" className="-mx-12 md:-mx-16" />
+          <Logo />
+        </div>
         <div className="flex flex-col gap-2 md:mb-16">
           <span className="eyebrow !text-[#E8726E]">{eyebrow}</span>
-          <h1 className="t m-0 text-[28px] text-white md:text-[44px] md:leading-[1.05]">{title}</h1>
+          <h1 className="poster m-0 text-[34px] text-white md:text-[60px]">{title}</h1>
           {sub && <p className="m-0 text-[15px] text-[#D3D8DE] md:text-[17px]">{sub}</p>}
         </div>
         <p className="m-0 hidden text-[13px] text-[#D3D8DE] md:block">

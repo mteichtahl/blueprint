@@ -262,7 +262,9 @@ export function ArtistWorkspace({
         <div className="flex min-w-[min(300px,100%)] flex-1 flex-col gap-1">
           <span className="eyebrow">Artist workspace</span>
           <div className="flex items-center gap-3">
-            <h1 className="t m-0 min-w-0 flex-1 text-[38px] leading-tight">{artist.displayName}</h1>
+            <h1 className="poster m-0 min-w-0 flex-1 text-[48px] max-sm:text-[36px]">
+              {artist.displayName}
+            </h1>
             {onRecordMeeting && (
               <Button size="sm" className="shrink-0" onClick={onRecordMeeting}>
                 <Icon name="record" size={16} /> Record meeting

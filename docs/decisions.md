@@ -692,3 +692,16 @@ Spec: the project doc `BMG_Plan_Owner.md`. Built in three stacked PRs (API, noti
 - **Reviews waiting** show on each artist in the list, and the closed dropdown shows the total.
 - **Accessible:** the search box is a combobox over a listbox (↑/↓ to move, Enter to open, Esc to close and return to the row). `NavSection.picker` in `components/Shell.tsx`; tests in `test/artist-picker.test.tsx`.
 - The rest of the section (Artist gigs, Artists & applications, Invite artist, Plan templates) is unchanged.
+
+## Headliner look (13 Nov 2026)
+
+The app moves from the corporate canvas look to **Headliner** (project doc `claude/BMG_Headliner_Look.md`; design canvas https://claude.ai/artifact/1DHAd1W8fyQE6AqT2DKuRd, page "Headliner · screens"). It is a theme change: flows, screens and behaviour are unchanged.
+
+- **Where it lives:** the tokens and component classes in `apps/web/src/index.css` (restyled in place, plus a "Headliner look" section at the end), `Button`, `Card`, `PageHeader`, `Logo` and the new `Ribbon` in `components/ui.tsx`, and the shells in `components/Shell.tsx`.
+- **Light mode (Blueprint's default):** a paper page (#EDE9E1) with faint lines, white cards with a 2px navy edge and a solid navy offset shadow, pill buttons, chips, search and tabs, poster headings (League Spartan 900, upper case), a navy sidebar with a coral spotlight and the wristband ribbon.
+- **Dark mode (the navy stage):** navy page (#011935) with a coral spotlight, raised navy cards (#0B2847). **Artists start in dark mode** until they pick an appearance (`useTheme('dark')`); Blueprint still follows the system.
+- **Buttons:** the main button is light coral (#E8726E) with navy text (5.7:1) and a navy offset shadow; small buttons keep normal case. The deep coral `cta` token (#B5403C) stays for text, dots and avatars, so `text-cta` keeps 4.5:1.
+- **Second colour:** lilac (#C9B8FF, approved 13 Nov 2026) for the wristband ribbon, Ask BMG and the artist's floating assistant button, always with navy text. It sits outside the brand kit's four colours by decision; everything else stays in the kit.
+- **Logo:** the official white-on-navy file, cropped to its artwork and blended into the navy (`mix-blend-mode: lighten`). It replaces the waveform stand-in in the sidebar and on sign-in. On a light surface it shows as a navy tile until the navy-on-white file is added.
+- **Contrast:** `contrast.test.ts` gains the pop button, its hover, the current sidebar item, the phone tab bar, the selected workspace tab and Ask BMG. The field border on paper is #6F7987 (3.6:1). Deep-coral text written into pages turns pale coral (#F2A3A0) in dark mode.
+- **Not changed:** email templates and the PDFs keep their current branded layout.

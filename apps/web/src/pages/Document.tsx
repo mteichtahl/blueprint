@@ -237,7 +237,7 @@ function DocumentDetail({
         : '…';
   return (
     <Card
-      title={<h2 className="t text-[19px]">Document</h2>}
+      title={<h2 className="poster text-[20px] leading-none">Document</h2>}
       action={<BackLink to="Library" onClick={onBack} />}
     >
       <div className="flex flex-wrap items-start gap-4">
@@ -937,7 +937,7 @@ function EditDocument({
 
   return (
     <Card
-      title={<h2 className="t text-[19px]">Edit document</h2>}
+      title={<h2 className="poster text-[20px] leading-none">Edit document</h2>}
       action={
         // P8: back to the document this edits, by name.
         <BackLink to={f.displayName} onClick={() => !busy && onDone()} />

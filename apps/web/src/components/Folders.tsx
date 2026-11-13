@@ -110,7 +110,7 @@ export function Dialog({
         }}
       >
         <div className="card-hd">
-          <h2 className="t text-[19px]">{title}</h2>
+          <h2 className="poster text-[20px] leading-none">{title}</h2>
           <button
             type="button"
             className="ml-auto flex size-9 items-center justify-center rounded-lg hover:bg-secondary"

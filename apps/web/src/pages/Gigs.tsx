@@ -486,7 +486,7 @@ function GigPage({
   if (editing) {
     return (
       <Card
-        title={<h2 className="t text-[19px]">Edit gig</h2>}
+        title={<h2 className="poster text-[20px] leading-none">Edit gig</h2>}
         action={<BackLink to={gig.title} onClick={() => setEditing(false)} />}
       >
         <GigForm
@@ -600,7 +600,7 @@ function NewGig({
 } & Parameters<typeof GigForm>[0]) {
   return (
     <Card
-      title={<h2 className="t text-[19px]">{title}</h2>}
+      title={<h2 className="poster text-[20px] leading-none">{title}</h2>}
       action={<BackLink to={back.to} onClick={back.onClick} />}
     >
       <GigForm {...form} />
