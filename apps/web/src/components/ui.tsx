@@ -256,6 +256,10 @@ export function PageHeader({
  * The official Blueprint Music Group logo (white on navy, the brand kit's
  * square file), cropped to its artwork. On light surfaces it shows as a navy
  * tile until the navy-on-white file is added to /brand.
+ *
+ * Screens use a 640px lossless WebP made from the official 2000px PNG (same
+ * artwork and colours, a third of the download and a tenth of the memory).
+ * Emails and PDFs keep the PNG.
  */
 export function Logo({ light = true, compact = false }: { light?: boolean; compact?: boolean }) {
   const w = compact ? 96 : 150;
@@ -266,7 +270,7 @@ export function Logo({ light = true, compact = false }: { light?: boolean; compa
       style={{ width: w, height: Math.round(w * 0.653) }}
     >
       <img
-        src="/brand/bmg-logo-white-on-navy.png"
+        src="/brand/bmg-logo-white-on-navy-640.webp"
         alt="Blueprint Music Group"
         width={img}
         height={img}
