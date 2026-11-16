@@ -28,13 +28,11 @@ import {
   WaveLoader,
 } from '../components/ui.tsx';
 
+import { PRIORITY_TAG } from '../lib/labels.ts';
+
+export { PRIORITY_TAG } from '../lib/labels.ts';
+
 const PRIORITY_LABEL: Record<Priority, string> = { high: 'High', medium: 'Medium', low: 'Low' };
-/** Canvas badge colours: High deep coral, Medium coral tint, Low slate. */
-export const PRIORITY_TAG: Record<Priority, readonly ['k' | 'c' | 's', string]> = {
-  high: ['k', 'High'],
-  medium: ['c', 'Medium'],
-  low: ['s', 'Low'],
-};
 const TYPE_LABEL = Object.fromEntries(SUBMISSION_TYPES.map((t) => [t.id, t.label]));
 
 const date = shortDate;
