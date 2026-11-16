@@ -659,6 +659,12 @@ function answer(method: string, path: string): [number, unknown] {
   return [404, { detail: 'Not found in the test fixtures' }];
 }
 
+// Screens load on first use (pages/lazy.tsx). Load them all up front so each
+// one is ready within a settle().
+beforeAll(async () => {
+  await Promise.all(Object.values(import.meta.glob('../src/pages/*.tsx')).map((load) => load()));
+});
+
 beforeAll(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const [status, body] = answer(init?.method ?? 'GET', String(input));
@@ -681,7 +687,12 @@ beforeAll(() => {
 });
 afterEach(cleanup);
 
-const settle = () => act(() => new Promise((r) => setTimeout(r, 50)));
+const pause = () => act(() => new Promise((r) => setTimeout(r, 50)));
+/** Waits for the screen, and a little longer while it still shows a loader. */
+const settle = async () => {
+  await pause();
+  for (let i = 0; i < 10 && document.querySelector('[role="status"]'); i += 1) await pause();
+};
 
 async function violations(): Promise<string[]> {
   if (process.env.A11Y_DEBUG)
