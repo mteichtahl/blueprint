@@ -45,7 +45,7 @@ The full design is in the [solution design document](https://claude.ai/artifact/
 - **One origin for app and API:** CloudFront serves the web app from a private S3 bucket and forwards `/v1/*` to API Gateway, so the browser never makes cross-origin calls. The CSP allows only this origin and Cognito.
 - **Web client in the web stack:** its callback URL is the CloudFront address, which only exists after the API. The authorizer reads the client id from SSM (`/bmg/<env>/web/client-id`) instead of a stack reference, so there is no cycle. The old client in the identity stack has since been removed.
 - **Sign-in in the browser:** oidc-client-ts runs the authorization code flow with PKCE. Tokens are kept in session storage, so closing the tab signs you out.
-- **Fonts are self-hosted** (@fontsource), so no request goes to Google.
+- **Fonts are self-hosted** (@fontsource), so no request goes to Google. Archivo Narrow and League Spartan are variable fonts (one file each for every weight, `apps/web/src/fonts.css`); Lexend Exa stays as two fixed weights because its variable file is larger (16 Nov 2026).
 - **Until DNS for blueprintmusic.group is on AWS**, the app uses its `*.cloudfront.net` address with CloudFront's default certificate, and there's no edge WAF. The API behind `/v1` keeps its regional WAF.
 - **Files (upload, scan, share):**
   - Browsers upload straight to the quarantine bucket with a **presigned POST** (5 minutes, pinned to one key, the exact size and the content type). A POST policy can enforce the size; a presigned PUT can't do that reliably from a browser.
