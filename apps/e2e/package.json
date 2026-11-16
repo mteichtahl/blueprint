@@ -11,7 +11,7 @@
     "browsers": "playwright install chromium"
   },
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.1164.0",
+    "@aws-sdk/client-secrets-manager": "^3.1168.0",
     "@bmg/config": "*",
     "otpauth": "^9.6.0"
   },
