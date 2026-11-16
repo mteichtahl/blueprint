@@ -46,16 +46,9 @@ function typeLabel(f: FileItem): string {
   return f.asset ? `${f.fileType.label} · ${CATEGORY_ONE[f.asset.category]}` : f.fileType.label;
 }
 
-/**
- * Library type filter (rev 9): assets are artist files with extra details, so
- * Library and Assets are one place, told apart by type.
- */
-export type LibraryKind = 'all' | 'documents' | 'assets';
-export const LIBRARY_KIND_OPTIONS: readonly { id: LibraryKind; label: string }[] = [
-  { id: 'all', label: 'All files' },
-  { id: 'documents', label: 'Documents' },
-  { id: 'assets', label: 'Assets' },
-];
+import type { LibraryKind } from '../lib/labels.ts';
+
+export { LIBRARY_KIND_OPTIONS, type LibraryKind } from '../lib/labels.ts';
 
 function useFiles(cfg: AppConfig, token: string, collection: string) {
   const [files, setFiles] = useState<FileItem[] | null>(null);

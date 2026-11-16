@@ -66,6 +66,9 @@ Plus invitation tracking, finished reviews, and a smarter library.
 - **Artist workspaces** in the side menu are one dropdown: type an
   artist's name to find and open their workspace, however many artists
   there are.
+- **The app opens faster:** each screen now loads the first time you open
+  it, so there's about half as much to download before the home screen
+  appears.
 
 ### Fixed
 
