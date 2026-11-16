@@ -13,10 +13,6 @@ import type { AppConfig } from '../lib/config.ts';
 import type { FileItem } from '../lib/files.ts';
 import { overallProgress, phaseProgress } from '../lib/plan.ts';
 import { hasPendingCallback } from '../lib/connectors.ts';
-import { BmgConnectors, MyConnectors } from './Connectors.tsx';
-import { Contacts } from './Contacts.tsx';
-import { Venues } from './Venues.tsx';
-import { ArtistStats, Insights } from './Insights.tsx';
 import {
   ArtistShell,
   BmgShell,
@@ -43,31 +39,46 @@ import { Assistant } from '../components/Assistant.tsx';
 import { Bell } from '../components/Bell.tsx';
 import { useNotifications, type AppNotification } from '../lib/notifications.ts';
 import { useDeepLink } from '../lib/push.ts';
-import { AssetLibrary } from './Assets.tsx';
-import { BrandKit } from './BrandKit.tsx';
-import { AccessPage } from './Access.tsx';
-import { Invitations } from './Invitations.tsx';
-import { ArtistFiles, Library, LIBRARY_KIND_OPTIONS, type LibraryKind } from './Library.tsx';
-import { Profile } from './Profile.tsx';
+import { RecorderProvider, RecordingBar } from '../components/Recorder.tsx';
+import { directUnread, useInbox } from '../lib/inbox.ts';
+import { LIBRARY_KIND_OPTIONS, PRIORITY_TAG, type LibraryKind } from '../lib/labels.ts';
+import type { Gig } from './Gigs.tsx';
+import type { MeetingsTarget } from './Meetings.tsx';
+import type { ConversationSummary } from './Messages.tsx';
+import type { WorkspaceTarget } from './Workspace.tsx';
 import {
+  AccessPage,
+  AllGigs,
+  AllTodos,
   ArtistChats,
+  ArtistFiles,
+  ArtistGigs,
+  ArtistStats,
+  ArtistSubmissions,
+  ArtistTodos,
+  ArtistWorkspace,
+  AssetLibrary,
   BmgChat,
-  directUnread,
-  useInbox,
-  type ConversationSummary,
-} from './Messages.tsx';
+  BmgConnectors,
+  BrandKit,
+  Contacts,
+  Events,
+  Insights,
+  Invitations,
+  Library,
+  MeetingsPage,
+  MyConnectors,
+  Newsroom,
+  PlanStages,
+  PlanTab,
+  Profile,
+  Prompts,
+  ReviewQueue,
+  Venues,
+} from './lazy.tsx';
 import { markdownToText } from '../lib/markdown.ts';
-import { PlanStages, PlanTab } from './PlanLazy.tsx';
-import { ArtistSubmissions, PRIORITY_TAG, ReviewQueue } from './Review.tsx';
-import { AllTodos, ArtistTodos } from './Todos.tsx';
-import { Events } from './Events.tsx';
-import { Prompts } from './Prompts.tsx';
-import { Newsroom } from './Newsroom.tsx';
-import { AllGigs, ArtistGigs, type Gig } from './Gigs.tsx';
 import { TicketTracker } from '../components/TicketTracker.tsx';
 import type { TicketGig } from '../lib/tickets.ts';
-import { ArtistWorkspace, type WorkspaceTarget } from './Workspace.tsx';
-import { MeetingsPage, RecorderProvider, RecordingBar, type MeetingsTarget } from './Meetings.tsx';
 import { FileThumb } from '../components/FileThumb.tsx';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
