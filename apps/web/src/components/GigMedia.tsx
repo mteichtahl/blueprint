@@ -12,6 +12,7 @@ import {
 import { makeThumbnail, THUMB_MAX_BYTES } from '../lib/thumbnail.ts';
 import { FileThumb } from './FileThumb.tsx';
 import { Button, Icon, Notice, WaveLoader } from './ui.tsx';
+import { useLive } from '../lib/live.ts';
 
 /**
  * Gig media: photos and videos of a gig, on the gig's page. Several can be
@@ -97,7 +98,8 @@ export function GigMedia({
       setError(e instanceof Error ? e.message : 'Couldn’t load the photos and videos');
     }
   }, [cfg, token, files, gigId]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['files']);
+  useEffect(() => void load(), [load, live]);
 
   // While anything is still being checked for malware, look again every few seconds.
   const scanning = data?.files.some((f) => f.status === 'pending') ?? false;

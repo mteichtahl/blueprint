@@ -82,6 +82,7 @@ import { markdownToText } from '../lib/markdown.ts';
 import { TicketTracker } from '../components/TicketTracker.tsx';
 import type { TicketGig } from '../lib/tickets.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
+import { useLive } from '../lib/live.ts';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
   'bmg-admin': 'BMG admin',
@@ -171,7 +172,9 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     const today = new Date().toISOString().slice(0, 10);
     setTodosOverdue(openTodos.todos.filter((t) => !t.done && !!t.due && t.due < today).length);
   }, [cfg, token]);
-  useEffect(() => void load().catch(() => undefined), [load]);
+  // Live updates (rev 17): the roster (an artist signing in), reviews, gigs and to-dos.
+  const live = useLive(['artists', 'reviews', 'gigs', 'todos', 'plan']);
+  useEffect(() => void load().catch(() => undefined), [load, live]);
 
   const inbox = useInbox(cfg, token, me);
   const notes = useNotifications(cfg, token, me.sub);
@@ -708,6 +711,7 @@ function StudioHq({
   const [files, setFiles] = useState<FileItem[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
   const names = Object.fromEntries(artists.map((a) => [a.artistId, a.displayName]));
+  const live = useLive(['files', 'todos']);
 
   useEffect(() => {
     void Promise.all(
@@ -727,7 +731,7 @@ function StudioHq({
     api<{ todos: Todo[] }>(cfg, token, 'GET', '/todos')
       .then((r) => setTodos(r.todos))
       .catch(() => setTodos([]));
-  }, [cfg, token]);
+  }, [cfg, token, live]);
 
   const today = new Date().toISOString().slice(0, 10);
   const week = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
@@ -1717,6 +1721,8 @@ function ArtistHome({
   const [todos, setTodos] = useState<Todo[]>([]);
   const [shared, setShared] = useState<FileItem[]>([]);
   const [subs, setSubs] = useState<SubmissionSummary[]>([]);
+  // Live updates (rev 17): new to-dos, plan changes, shared files and reviews appear by themselves.
+  const live = useLive(['plan', 'todos', 'files', 'reviews'], artistId);
   useEffect(() => {
     api<PlanResponse>(cfg, token, 'GET', `/artists/${artistId}/plan`)
       .then(setPlan)
@@ -1730,7 +1736,7 @@ function ArtistHome({
     api<{ submissions: SubmissionSummary[] }>(cfg, token, 'GET', `/artists/${artistId}/submissions`)
       .then((r) => setSubs(r.submissions))
       .catch(() => setSubs([]));
-  }, [cfg, token, artistId]);
+  }, [cfg, token, artistId, live]);
   const changed = subs.filter((s) => s.status === 'open' && s.changedByBmgAt);
   const reviewed = subs.filter((s) => s.status === 'reviewed').slice(0, 2);
 

@@ -3,6 +3,7 @@ import { DangerArea, RecordPage, SectionSwitch } from '../components/patterns.ts
 import { Button, Card, Notice, RowCard, Tag, WaveLoader } from '../components/ui.tsx';
 import { api, ApiError, needsFreshSignIn } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
+import { useLive } from '../lib/live.ts';
 
 /** One artist invitation and where it stands (GET /access/invitations). */
 export interface Invitation {
@@ -94,7 +95,8 @@ export function Invitations({
       setError((e as Error).message);
     }
   }, [cfg, token]);
-  useEffect(() => void load(), [load, refreshKey]);
+  const live = useLive(['artists']);
+  useEffect(() => void load(), [load, refreshKey, live]);
 
   const open = list?.find((i) => i.artistId === openId);
   if (open) {

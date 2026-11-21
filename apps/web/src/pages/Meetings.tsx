@@ -54,6 +54,7 @@ import {
 } from '../components/ui.tsx';
 
 import { useRecorder } from '../components/Recorder.tsx';
+import { useLive } from '../lib/live.ts';
 
 export { RecorderProvider, RecordingBar, useRecorder } from '../components/Recorder.tsx';
 
@@ -172,6 +173,10 @@ function MeetingsList({
       .then(setMeetings)
       .catch((e) => setError(problemText(e)));
   }, [cfg, token]);
+  const live = useLive(['meetings']);
+  useEffect(() => {
+    if (live) load();
+  }, [live]);
   useEffect(() => {
     load();
     const recording = recorder?.state.kind !== 'idle' ? recorder?.state : undefined;
@@ -781,7 +786,8 @@ export function MeetingView({
         .catch((e) => setError(problemText(e))),
     [cfg, token, space, meetingId],
   );
-  useEffect(() => void load(), [load]);
+  const live = useLive(['meetings']);
+  useEffect(() => void load(), [load, live]);
   // While something is on its way, look again every few seconds.
   const waiting =
     !!data &&

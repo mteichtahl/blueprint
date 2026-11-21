@@ -39,6 +39,7 @@ import {
   usePhone,
   WaveLoader,
 } from '../components/ui.tsx';
+import { useLive } from '../lib/live.ts';
 
 const SOURCE_LABEL: Record<Todo['source'], string> = {
   bmg: 'From Blueprint',
@@ -70,7 +71,8 @@ function useTodos(cfg: AppConfig, token: string, path: (filter: string) => strin
       setError((e as Error).message);
     }
   }, [cfg, token, path, filter]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['todos']);
+  useEffect(() => void load(), [load, live]);
   async function toggle(t: Todo) {
     try {
       await api(cfg, token, 'PATCH', `/artists/${t.artistId}/todos/${t.todoId}`, {
@@ -455,7 +457,8 @@ function TodoThread({
       setError((e as Error).message);
     }
   }, [cfg, token, base]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['todos'], todo.artistId);
+  useEffect(() => void load(), [load, live]);
 
   async function remove(c: ThreadComment) {
     try {
@@ -878,12 +881,13 @@ function useSentBack(
   trigger: unknown,
 ) {
   const [items, setItems] = useState<Todo[]>([]);
+  const live = useLive(['todos'], artistId);
   useEffect(() => {
     if (!on) return;
     api<{ todos: Todo[] }>(cfg, token, 'GET', `/artists/${artistId}/todos?filter=sent-back`)
       .then((r) => setItems(r.todos.filter((t) => !!t.sentBack)))
       .catch(() => setItems([]));
-  }, [cfg, token, artistId, on, trigger]);
+  }, [cfg, token, artistId, on, trigger, live]);
   return items;
 }
 
@@ -896,18 +900,20 @@ export function useOwnerTodos(
   on = true,
 ) {
   const [state, setState] = useState<OwnerTodos | null>(null);
+  const live = useLive(['todos', 'plan'], artistId);
   useEffect(() => {
     if (!on) return;
     api<PlanResponse>(cfg, token, 'GET', `/artists/${artistId}/plan`)
       .then((r) => setState(r.ownerTodos ?? null))
       .catch(() => setState(null));
-  }, [cfg, token, artistId, trigger, on]);
+  }, [cfg, token, artistId, trigger, on, live]);
   return state;
 }
 
 /** Done / total across every to-do for the progress bar (the list itself may be filtered). */
 function useAllCounts(cfg: AppConfig, token: string, artistId: string, trigger: unknown) {
   const [counts, setCounts] = useState<{ done: number; total: number } | null>(null);
+  const live = useLive(['todos'], artistId);
   useEffect(() => {
     Promise.all([
       api<{ todos: Todo[] }>(cfg, token, 'GET', `/artists/${artistId}/todos`),
@@ -917,7 +923,7 @@ function useAllCounts(cfg: AppConfig, token: string, artistId: string, trigger: 
         setCounts({ done: done.todos.length, total: open.todos.length + done.todos.length }),
       )
       .catch(() => setCounts(null));
-  }, [cfg, token, artistId, trigger]);
+  }, [cfg, token, artistId, trigger, live]);
   return counts;
 }
 

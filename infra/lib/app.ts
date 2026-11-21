@@ -196,7 +196,8 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       userPool: identity.userPool,
       bus: audit.bus,
       alarmTopic: foundation.alarmTopic,
-      description: `BMG ${envName} notifications: branded email for workspace events`,
+      realtime: api.realtime,
+      description: `BMG ${envName} notifications: branded email for workspace events, live updates`,
     });
     const web = new WebStack(app, `${cfg.project}-${envName}-web`, {
       config: cfg,

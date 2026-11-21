@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Me } from './api.ts';
 import type { AppConfig } from './config.ts';
+import { emitLive, useLiveCatchUp, type LiveTopic } from './live.ts';
 import { inboxChannels, subscribeInbox } from './realtime.ts';
 import type { ConversationSummary } from '../pages/Messages.tsx';
 
@@ -11,7 +12,8 @@ import type { ConversationSummary } from '../pages/Messages.tsx';
 
 /**
  * Live inbox: loads conversations and reloads whenever AppSync Events nudges
- * this user's channel, with a slow poll as a fallback.
+ * this user's channel, with a slow poll as a fallback. Live-update nudges
+ * (rev 17) arrive on the same channels and are handed to `useLive` screens.
  */
 export function useInbox(cfg: AppConfig, token: string, me: Me) {
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
@@ -33,13 +35,27 @@ export function useInbox(cfg: AppConfig, token: string, me: Me) {
   }, [cfg, token]);
 
   useEffect(() => void load(), [load, tick]);
+  useLiveCatchUp();
   useEffect(() => {
     const stops = inboxChannels(me.role, me.artistId, me.sub).map((ch) =>
       subscribeInbox(
         cfg,
         () => tokenRef.current,
         ch,
-        () => setTick((t) => t + 1),
+        (payload) => {
+          // Live updates (rev 17) share these channels: pass them on to the
+          // screens, and leave the chat list alone.
+          if (payload.live) {
+            emitLive({
+              live: payload.live as LiveTopic,
+              ...(payload.artistId ? { artistId: payload.artistId } : {}),
+            });
+          } else setTick((t) => t + 1);
+        },
+        () => {
+          setTick((t) => t + 1);
+          emitLive({ live: '*' });
+        },
       ),
     );
     const poll = setInterval(() => setTick((t) => t + 1), 30_000);

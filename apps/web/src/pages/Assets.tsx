@@ -26,6 +26,7 @@ import {
 import { useFolders } from '../components/Folders.tsx';
 import { DangerArea, EditScreen } from '../components/patterns.tsx';
 import { pickerLevel } from '../lib/folders.ts';
+import { useLive } from '../lib/live.ts';
 
 /**
  * Asset library (screens doc "Assets"): an artist's press photos, artwork,
@@ -127,7 +128,8 @@ export function useArtistFiles(cfg: AppConfig, token: string, artistId: string) 
       setError((e as Error).message);
     }
   }, [cfg, token, artistId]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['files'], artistId);
+  useEffect(() => void load(), [load, live]);
   return { files, error, setError, load };
 }
 

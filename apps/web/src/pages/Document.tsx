@@ -37,6 +37,7 @@ import {
   Tag,
   WaveLoader,
 } from '../components/ui.tsx';
+import { useLive } from '../lib/live.ts';
 
 /**
  * A document's own pages (rev 8): tapping a document anywhere opens its
@@ -129,7 +130,8 @@ function useDocument(cfg: AppConfig, token: string, path: string, initial?: File
       setError((e as Error).message);
     }
   }, [cfg, token, path]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['files']);
+  useEffect(() => void load(), [load, live]);
   return { file, setFile, error, setError, load };
 }
 

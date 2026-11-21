@@ -20,6 +20,7 @@ import {
 import { aud, PRESET_COSTS } from '../components/Money.tsx';
 import { VenuePicker, type Venue } from './Venues.tsx';
 import { ContactPicker } from './Contacts.tsx';
+import { useLive } from '../lib/live.ts';
 
 /** BMG-only events (screen: Events · Industry Mixer Night). */
 
@@ -120,7 +121,8 @@ export function Events({
       setError((e as Error).message);
     }
   }, [cfg, token]);
-  useEffect(() => void loadList(), [loadList]);
+  const live = useLive(['events']);
+  useEffect(() => void loadList(), [loadList, live]);
   const openEvent = events?.find((e) => e.eventId === openId);
 
   const actions = (
@@ -495,7 +497,8 @@ function EventDetail({
       setError((e as Error).message);
     }
   }, [cfg, token, base]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['events']);
+  useEffect(() => void load(), [load, live]);
 
   async function run(fn: () => Promise<unknown>) {
     try {

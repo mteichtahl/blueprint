@@ -48,6 +48,12 @@ Plus invitation tracking, finished reviews, and a smarter library.
   who owns their plan, from New to-do (**For: Kyra**) or **Ask Kyra to do
   something** on My plan. The owner can **Send back** a to-do with a
   reason, and the artist can send it again or keep it.
+- **Live updates, no reloading:** when Blueprint adds a gig, a to-do or a
+  plan change, it appears on the artist's screen within a second or two —
+  and the same the other way, when an artist changes something. This covers
+  gigs, to-dos (and their threads), plans, files and folders, submissions,
+  events, meetings, contacts, venues and the artist list. Coming back to the
+  app after a while catches up straight away.
 - **To-dos from artists** in Profile: Blueprint people turn this on or off
   and set how many open to-dos each artist can send them (a different number
   for one artist in a release week, say). Admins can change it for anyone
@@ -91,6 +97,9 @@ Plus invitation tracking, finished reviews, and a smarter library.
 - **Chat for artists** now fills the phone screen: the header slims down to
   one row on the Chat tab, and tablets in the phone layout no longer squeeze
   three panes into it (the desktop layout keeps its three panes).
+- **Artists & applications** shows an artist as active as soon as they have
+  accepted their invitation and signed in (it could stay on "invited" until
+  someone opened the invitations list).
 - **Notifications** open on top of everything, instead of behind the chat.
 - **Blueprint Assistant answers** show headings, lists, bold, tables and
   links properly instead of Markdown symbols.

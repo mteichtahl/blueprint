@@ -47,6 +47,7 @@ function typeLabel(f: FileItem): string {
 }
 
 import type { LibraryKind } from '../lib/labels.ts';
+import { useLive } from '../lib/live.ts';
 
 export { LIBRARY_KIND_OPTIONS, type LibraryKind } from '../lib/labels.ts';
 
@@ -61,7 +62,8 @@ function useFiles(cfg: AppConfig, token: string, collection: string) {
       setError((e as Error).message);
     }
   }, [cfg, token, collection]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['files']);
+  useEffect(() => void load(), [load, live]);
   return { files, error, setError, load };
 }
 

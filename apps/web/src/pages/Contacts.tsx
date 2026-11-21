@@ -24,6 +24,7 @@ import {
   TextArea,
   WaveLoader,
 } from '../components/ui.tsx';
+import { useLive } from '../lib/live.ts';
 
 /**
  * Contacts (rev 7): one shared list. Blueprint manages it (BMG desktop
@@ -116,10 +117,11 @@ export function useContacts(
       setError((e as Error).message);
     }
   }, [cfg, token, q, tag, archived, enabled]);
+  const live = useLive(['contacts']);
   useEffect(() => {
     const t = setTimeout(() => void load(), q ? 250 : 0);
     return () => clearTimeout(t);
-  }, [load, q]);
+  }, [load, q, live]);
   return { contacts, tags, error, reload: load };
 }
 

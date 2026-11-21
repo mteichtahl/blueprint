@@ -11,13 +11,16 @@ export function subscribeInbox(
   cfg: AppConfig,
   getToken: () => string,
   channel: string,
-  onEvent: (payload: { conversationId?: string }) => void,
+  onEvent: (payload: { conversationId?: string; live?: string; artistId?: string }) => void,
+  /** Called when a dropped connection is back, so the caller can catch up on missed events. */
+  onReconnect?: () => void,
 ): () => void {
   const rt = cfg.realtime;
   if (!rt) return () => {};
   let ws: WebSocket | undefined;
   let closed = false;
   let attempt = 0;
+  let connected = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const connect = () => {
@@ -31,6 +34,8 @@ export function subscribeInbox(
       const data = JSON.parse(String(msg.data)) as { type: string; event?: string };
       if (data.type === 'connection_ack') {
         attempt = 0;
+        if (connected) onReconnect?.();
+        connected = true;
         ws?.send(
           JSON.stringify({
             type: 'subscribe',

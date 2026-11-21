@@ -179,6 +179,10 @@ export const handler = handle(async (event) => {
       : db.send(new GetCommand({ TableName: env('MAIN_TABLE'), Key: settingsKey(ctx.sub) })),
   ]);
   const consent = latest.Items?.[0];
+  // An artist who has signed in has accepted their invitation: show them as
+  // active on Artists & applications straight away (rev 17), not only once an
+  // admin opens the invitations list.
+  if (ctx.artistId) await markArtistActive(ctx.artistId);
   const avatar = typeof profile.Item?.avatar === 'string' ? profile.Item.avatar : null;
   // Pictures saved before artists' copies existed are copied the next time the artist opens the app.
   if (ctx.artistId && avatar) await mirrorArtistAvatar(ctx.artistId, avatar, true);
@@ -210,6 +214,39 @@ export const handler = handle(async (event) => {
       : null,
   });
 });
+
+/**
+ * Moves the artist's roster entry from invited to active. Only an `invited`
+ * entry changes, so a revoked artist stays revoked and later calls write nothing.
+ */
+export async function markArtistActive(artistId: string): Promise<void> {
+  try {
+    await db.send(
+      new UpdateCommand({
+        TableName: env('MAIN_TABLE'),
+        Key: { PK: `ARTIST#${artistId}`, SK: 'PROFILE' },
+        UpdateExpression: 'SET #s = :active, activeAt = :at',
+        ConditionExpression: '#s = :invited',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: {
+          ':active': 'active',
+          ':invited': 'invited',
+          ':at': new Date().toISOString(),
+        },
+      }),
+    );
+  } catch (err) {
+    if ((err as Error).name !== 'ConditionalCheckFailedException') {
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          event: 'me.markActiveFailed',
+          error: (err as Error).name,
+        }),
+      );
+    }
+  }
+}
 
 /**
  * Keeps ARTIST#<id> / AVATAR in step with the artist's own picture (null removes it).

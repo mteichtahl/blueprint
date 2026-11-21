@@ -1,12 +1,15 @@
 import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
 import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
+import type { EventApi } from 'aws-cdk-lib/aws-appsync';
 import type { IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
 import { Rule, type IEventBus } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
 import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key, type IKey } from 'aws-cdk-lib/aws-kms';
+import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda';
+import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import type { ITopic } from 'aws-cdk-lib/aws-sns';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
@@ -22,7 +25,12 @@ export interface NotifyStackProps extends Omit<BmgStackProps, 'envTag' | 'qualif
   readonly userPool: IUserPool;
   readonly bus: IEventBus;
   readonly alarmTopic: ITopic;
+  /** The API's AppSync Events API, for live-update nudges (rev 17). */
+  readonly realtime: EventApi;
 }
+
+/** Partition-key prefixes that can change what a screen shows (services/api/src/live/model.ts). */
+export const LIVE_PK_PREFIXES = ['ARTIST#', 'ORG#', 'EVENT#', 'INVITE#', 'REVIEW#'];
 
 /** To-do events that become branded emails (services/notify). */
 export const NOTIFY_DETAIL_TYPES = [
@@ -147,5 +155,39 @@ export class NotifyStack extends BmgStack {
       evaluationPeriods: 1,
       treatMissingData: TreatMissingData.NOT_BREACHING,
     }).addAlarmAction(new SnsAction(props.alarmTopic));
+
+    // ── Live updates (rev 17): table changes → realtime nudges, so open screens refresh ──
+    const live = new BmgFunction(this, 'Live', {
+      entry: 'services/api/src/handlers/live.ts',
+      description: `BMG ${env}: live-update nudges (topic and artist id only) from main-table changes`,
+      prod,
+      timeout: Duration.seconds(15),
+      memorySize: 256,
+      environment: { EVENTS_HTTP_DOMAIN: props.realtime.httpDns },
+    });
+    // Reading the stream needs the table's key; the handler reads keys only, never item content.
+    live.addEventSource(
+      new DynamoEventSource(props.mainTable, {
+        startingPosition: StartingPosition.LATEST,
+        batchSize: 100,
+        retryAttempts: 2,
+        filters: [
+          FilterCriteria.filter({
+            dynamodb: {
+              Keys: { PK: { S: LIVE_PK_PREFIXES.map((p) => FilterRule.beginsWith(p)) } },
+            },
+          }),
+        ],
+      }),
+    );
+    props.platformKey.grant(live, 'kms:Decrypt');
+    // Publish only, and only to the inbox namespace (the per-person channels).
+    live.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'PublishLiveNudges',
+        actions: ['appsync:EventPublish'],
+        resources: [`${props.realtime.apiArn}/channelNamespace/inbox`],
+      }),
+    );
   }
 }
