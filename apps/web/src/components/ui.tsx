@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useAvatarSrc } from './avatars.tsx';
 import type {
   ButtonHTMLAttributes,
@@ -99,14 +99,22 @@ export function Field({
 export function PasswordField({
   label,
   hint,
+  id,
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }) {
   const [shown, setShown] = useState(false);
+  const auto = useId();
+  const inputId = id ?? auto;
+  // The eye button sits beside the <label>, not inside it, so the box's
+  // accessible name stays just the label ("Password").
   return (
-    <label className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-[15px] font-bold">{label}</span>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label htmlFor={inputId} className="text-[15px] font-bold">
+        {label}
+      </label>
       <span className="relative flex min-w-0">
         <input
+          id={inputId}
           className={`${control} pr-12`}
           {...props}
           type={shown ? 'text' : 'password'}
@@ -117,7 +125,9 @@ export function PasswordField({
         <button
           type="button"
           className="absolute inset-y-0 right-1 my-auto flex size-10 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
-          aria-label={shown ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          // A toggle keeps one name; aria-pressed says whether it's showing.
+          aria-label={`Show ${label.toLowerCase()}`}
+          aria-controls={inputId}
           aria-pressed={shown}
           title={shown ? 'Hide' : 'Show'}
           // Keep focus (and the mobile keyboard) in the box.
@@ -128,7 +138,7 @@ export function PasswordField({
         </button>
       </span>
       {hint && <span className="src">{hint}</span>}
-    </label>
+    </div>
   );
 }
 
