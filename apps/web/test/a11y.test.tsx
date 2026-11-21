@@ -599,6 +599,26 @@ function answer(method: string, path: string): [number, unknown] {
     ],
     [/^\/artists\/[^/]+\/submissions$/, { submissions: [] }],
     [/^\/gigs$/, { gigs: [] }],
+    // Rev 19: the Humanitix events offered on the gig form.
+    [
+      /^\/connectors\/humanitix\/events$/,
+      {
+        connected: true,
+        syncedAt: now,
+        events: [
+          {
+            id: 'hxLaunch',
+            name: 'Launch night',
+            startDate: '2026-12-05T08:30:00.000Z',
+            endDate: '2026-12-05T12:00:00.000Z',
+            venue: 'Corner Hotel',
+            url: 'https://events.humanitix.com/launch-night',
+          },
+          { id: 'hxTote', name: 'Summer at the Tote', startDate: '2027-01-20T09:00:00.000Z' },
+          { id: 'hxPast', name: 'Spring show', startDate: '2026-10-01T09:00:00.000Z' },
+        ],
+      },
+    ],
     [
       /^\/artists\/[^/]+\/gigs$/,
       {
@@ -1700,6 +1720,35 @@ describe('rev 16: the artist desktop layout', () => {
     expect(screen.getByRole('option', { name: /The Tote .*\(same day\)/ })).toBeTruthy();
     expect(screen.getByText('Linked to Corner Hotel')).toBeTruthy();
     expect(await violations()).toEqual([]);
+  });
+
+  it('rev 19: the gig form picks a Humanitix event, same-day first', async () => {
+    const { HumanitixPicker } = await import('../src/components/HumanitixPicker.tsx');
+    const picked: (string | null)[] = [];
+    render(
+      <main>
+        <HumanitixPicker
+          cfg={cfg}
+          token="t"
+          artistId={ARTIST}
+          isArtist
+          gigDate="2026-12-05"
+          value={null}
+          onPick={(e) => picked.push(e?.id ?? null)}
+        />
+      </main>,
+    );
+    await settle();
+    fireEvent.focus(screen.getByRole('searchbox', { name: 'Humanitix event' }));
+    const options = within(screen.getByRole('list', { name: 'Humanitix events' })).getAllByRole(
+      'button',
+    );
+    expect(options[0]!.textContent).toBe('None');
+    expect(options[1]!.textContent).toMatch(/Launch night.*Same day/);
+    expect(screen.getByRole('button', { name: /Past events \(1\)/ })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(options[1]!);
+    expect(picked).toEqual(['hxLaunch']);
   });
 
   it('rev 18: My meetings lists the meeting, and a contact shows it is only theirs', async () => {

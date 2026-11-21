@@ -40,6 +40,8 @@ import {
   type GigFilter,
 } from '../events/model.ts';
 import { artistPk, newId } from '../workspace/model.ts';
+import { checkHumanitixLink, HUMANITIX_EVENTS_SK } from '../connectors/humanitix-link.ts';
+import type { HumanitixEvent } from '../connectors/vendors.ts';
 import { allContacts, upsertPerson } from '../address-book/store.ts';
 import { contactVisible } from '../address-book/model.ts';
 import {
@@ -121,6 +123,49 @@ function publicGig(g: Gig) {
   // Set duration was removed from gigs (rev 7); old values stay stored but hidden.
   delete rest.setLength;
   return strip({ ...rest, ...(rest.startTime || !time ? {} : { startTime: time }) });
+}
+
+/**
+ * Rev 19: checks a Humanitix pick on the gig form against the picker's own
+ * account (the artist's, or Blueprint's) and the artist's other gigs. Returns
+ * which account the link belongs to.
+ */
+async function checkLink(
+  principal: Principal,
+  artistId: string,
+  gig: Gig | undefined,
+  eventId: string | null,
+): Promise<'bmg' | undefined> {
+  const isArtist = principal.role === 'artist';
+  const [listed, gigs] = await Promise.all([
+    eventId === null
+      ? Promise.resolve(undefined)
+      : db.send(
+          new GetCommand({
+            TableName: table(),
+            Key: { PK: isArtist ? artistPk(artistId) : EVENTS_PK, SK: HUMANITIX_EVENTS_SK },
+          }),
+        ),
+    eventId === null
+      ? Promise.resolve(undefined)
+      : db.send(
+          new QueryCommand({
+            TableName: table(),
+            KeyConditionExpression: 'PK = :pk AND begins_with(SK, :g)',
+            ExpressionAttributeValues: { ':pk': artistPk(artistId), ':g': 'GIG#' },
+            Limit: 300,
+          }),
+        ),
+  ]);
+  const refused = checkHumanitixLink({
+    isArtist,
+    ...(gig ? { gig } : {}),
+    eventId,
+    ownEvents: listed?.Item ? ((listed.Item.events ?? []) as HumanitixEvent[]) : undefined,
+    gigs: (gigs?.Items ?? []) as Gig[],
+  });
+  if (refused) throw new HttpError(409, refused);
+  return isArtist ? undefined : 'bmg';
 }
 
 async function loadGig(artistId: string, gigId: string): Promise<Gig> {
@@ -254,6 +299,9 @@ export const handler = handle(async (event) => {
       const timeError = checkTimes(body.startTime, body.endTime);
       if (timeError) throw new HttpError(400, timeError);
       const isArtist = principal.role === 'artist';
+      const linkAccount = body.humanitixEventId
+        ? await checkLink(principal, artistId, undefined, body.humanitixEventId)
+        : undefined;
       const gig: Gig = {
         gigId: newId(),
         artistId,
@@ -271,6 +319,7 @@ export const handler = handle(async (event) => {
           : {}),
         ...(body.ticketUrl ? { ticketUrl: body.ticketUrl } : {}),
         ...(body.humanitixEventId ? { humanitixEventId: body.humanitixEventId } : {}),
+        ...(linkAccount ? { humanitixAccount: linkAccount } : {}),
         checklist: DEFAULT_CHECKLIST.map((title, i) => ({ id: `c${i + 1}`, title, done: false })),
         plannedBy: isArtist ? 'artist' : 'bmg',
         // Gigs Blueprint adds are always shared.
@@ -292,10 +341,16 @@ export const handler = handle(async (event) => {
       const { askHelp, helpDone, startTime, endTime, venueId, humanitixEventId, ...fields } = patch;
       const next: Gig = { ...gig, ...fields, updatedAt: now };
       // Rev 18: linking to another Humanitix event (or unlinking) drops the old count.
-      if (humanitixEventId !== undefined && humanitixEventId !== gig.humanitixEventId) {
+      // Rev 19: the pick is checked against the picker's own account.
+      if (humanitixEventId !== undefined && humanitixEventId !== (gig.humanitixEventId ?? null)) {
+        const linkAccount = await checkLink(principal, artistId, gig, humanitixEventId);
         delete next.humanitix;
+        delete next.humanitixAccount;
         if (humanitixEventId === null) delete next.humanitixEventId;
-        else next.humanitixEventId = humanitixEventId;
+        else {
+          next.humanitixEventId = humanitixEventId;
+          if (linkAccount) next.humanitixAccount = linkAccount;
+        }
       }
       if (venueId === null || (fields.venue !== undefined && !fields.venue)) delete next.venueId;
       else if (venueId !== undefined) next.venueId = venueId;

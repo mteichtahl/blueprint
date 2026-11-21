@@ -51,6 +51,7 @@ import {
   gigHumanitixId,
   HUMANITIX_AFTER_DAYS,
   HUMANITIX_EVENTS_SK,
+  saveHumanitixEvents,
   syncConnection,
 } from '../connectors/sync.ts';
 import { humanitixView } from '../connectors/humanitix.ts';
@@ -435,15 +436,41 @@ export const handler = handle(async (event) => {
     }
 
     case 'GET /connectors/humanitix/events': {
+      // Rev 19: ?artistId= gives the artist their own list (kept by the sync,
+      // refreshed with Sync). Blueprint gets its own list, fetched live and kept
+      // so the gig form's pick can be checked against it.
+      const artistId = event.queryStringParameters?.artistId;
+      if (artistId !== undefined) {
+        if (!isArtistId(artistId)) throw new HttpError(404, 'No such artist');
+        ensureSelf(principal, artistId);
+        const [c, listed] = await Promise.all([
+          loadConnection(artistId, 'humanitix'),
+          db.send(
+            new GetCommand({
+              TableName: table(),
+              Key: { PK: artistPk(artistId), SK: HUMANITIX_EVENTS_SK },
+            }),
+          ),
+        ]);
+        if (!c) return json(200, { connected: false, events: [] });
+        return json(200, {
+          connected: true,
+          events: (listed.Item?.events ?? []) as HumanitixEvent[],
+          syncedAt: listed.Item?.syncedAt ?? null,
+        });
+      }
       ensureBmg(principal);
       const c = await loadConnection('bmg', 'humanitix');
-      if (!c) return json(200, { events: [] });
+      if (!c) return json(200, { connected: false, events: [] });
       const t = await open('bmg', 'humanitix', c.sealed, principal.role);
+      let events: HumanitixEvent[];
       try {
-        return json(200, { events: await humanitixEvents(t.apiKey!) });
+        events = await humanitixEvents(t.apiKey!);
       } catch {
         throw new HttpError(502, 'Humanitix could not be reached. Try again shortly');
       }
+      const syncedAt = await saveHumanitixEvents('bmg', events);
+      return json(200, { connected: true, events, syncedAt });
     }
 
     case 'PUT /events/{eventId}/humanitix': {
