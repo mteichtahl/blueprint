@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { names, parseConfig } from '@bmg/config';
 import { buildApp } from '../lib/app.ts';
 import { REPO_ROOT } from '../lib/function.ts';
+import { LIVE_PK_PREFIXES } from '../lib/notify-stack.ts';
 
 const cfg = parseConfig(
   JSON.parse(readFileSync(resolve(import.meta.dirname, '../../bmg.config.example.json'), 'utf8')),
@@ -683,6 +684,17 @@ describe('environment notifications and branded email', () => {
     const json = JSON.stringify(prod!.toJSON());
     expect(json).toContain(`secret:${names.smtpSecret(cfg, 'prod')}-*`);
     expect(json).not.toContain(names.smtpSecret(cfg, 'staging'));
+  });
+
+  it('filters the live-update stream with a flat list of PK prefix rules', () => {
+    // Lambda rejects nested arrays ("Invalid filter pattern definition").
+    const pattern = JSON.parse(
+      Object.values(staging!.findResources('AWS::Lambda::EventSourceMapping'))[0]!.Properties
+        .FilterCriteria.Filters[0].Pattern,
+    );
+    expect(pattern).toEqual({
+      dynamodb: { Keys: { PK: { S: LIVE_PK_PREFIXES.map((prefix) => ({ prefix })) } } },
+    });
   });
 
   it('brands every Cognito email with a custom message trigger', () => {
