@@ -515,11 +515,14 @@ export function ArtistFiles({
   onOpenChange,
   openFileId,
   openFolderId,
+  compact = true,
 }: {
   cfg: AppConfig;
   token: string;
   artistId: string;
   isBmg: boolean;
+  /** Artist app: the phone list (default), or the desktop table beside the upload card (rev 16). */
+  compact?: boolean;
   isAdmin?: boolean;
   /** Open this document's page straight away (a notification or "Where it's used" link). */
   openFileId?: string | null;
@@ -620,9 +623,10 @@ export function ArtistFiles({
   }
   if (phone && uploading) return upload;
   if (!isBmg) {
-    return (
-      <div className="flex flex-col gap-3">
-        {phone ? <UploadDocumentButton onClick={() => setUploading(true)} /> : upload}
+    const desk = !compact && !phone;
+    const list = (
+      <div className={`flex flex-col gap-3 ${desk ? 'min-w-0 flex-[2_1_560px]' : ''}`}>
+        {!desk && (phone ? <UploadDocumentButton onClick={() => setUploading(true)} /> : upload)}
         {error && <Notice tone="error">{error}</Notice>}
         <div className="eyebrow pt-2 text-muted-foreground">My uploads and files</div>
         <Chips label="Show" value={mine} onChange={setMine} options={MINE_FILTER_OPTIONS} />
@@ -644,11 +648,20 @@ export function ArtistFiles({
                 { label: 'Who', cell: (f) => VISIBILITY_LABEL[f.visibility ?? 'normal'] },
                 { label: 'Owner', cell: (f) => <OwnerCell f={f} /> },
               ]}
-              compact
+              compact={!desk}
               selection={o.selection}
+              {...(desk ? { onDragStart: o.onDragStart } : {})}
             />
           )}
         />
+      </div>
+    );
+    if (!desk) return list;
+    // Desktop (rev 16): the files beside the upload card, as in Blueprint's library.
+    return (
+      <div className="flex flex-wrap items-start gap-5">
+        {list}
+        <div className="flex-[1_1_300px]">{upload}</div>
       </div>
     );
   }
@@ -760,12 +773,15 @@ export function Library({
   openFolderId,
   onClosed,
   onOpenChange,
+  compact = true,
 }: {
   cfg: AppConfig;
   token: string;
   isBmg: boolean;
   isAdmin?: boolean;
   artists: ArtistSummary[];
+  /** Artist app: the phone list (default), or the desktop table (rev 16). */
+  compact?: boolean;
   /** Open this document's page straight away (from a Studio HQ card). */
   openFileId?: string | null;
   /** Open this folder straight away (a "shared with you" notification, rev 10). */
@@ -839,7 +855,7 @@ export function Library({
               }
               onOpen={setOpened}
               columns={[]}
-              compact
+              compact={compact}
             />
           )}
         />

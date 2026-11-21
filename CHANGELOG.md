@@ -24,6 +24,12 @@ Plus invitation tracking, finished reviews, and a smarter library.
 
 ### New
 
+- **Artists get a desktop layout** on computers and on iPads held sideways:
+  a menu down the side, Ask BMG at the top, a dashboard Home, the full
+  three-pane Chat, the library table with its folder tree, a gigs table and
+  to-dos that open beside the list. Phones (and iPads held upright) keep
+  the phone layout. Artists can pick **Automatic**, **Phone** or
+  **Desktop** in Profile › Layout.
 - **Quick reactions in Chat:** tap or hover a message to react with 👍 👎 😊
   or 😢. Tap the same one again to take it off.
 - **Invitations** are listed under Invite artist, showing whether each is
@@ -82,9 +88,9 @@ Plus invitation tracking, finished reviews, and a smarter library.
   "admin actions need a fresh step-up".
 - On phones, the chat message box stays at the bottom when the keyboard
   opens, instead of being pushed off screen.
-- **Chat for artists** now fills the screen: the header slims down to one
-  row on the Chat tab, and on tablets and computers it no longer squeezes
-  three panes into the phone-width frame.
+- **Chat for artists** now fills the phone screen: the header slims down to
+  one row on the Chat tab, and tablets in the phone layout no longer squeeze
+  three panes into it (the desktop layout keeps its three panes).
 - **Notifications** open on top of everything, instead of behind the chat.
 - **Blueprint Assistant answers** show headings, lists, bold, tables and
   links properly instead of Markdown symbols.

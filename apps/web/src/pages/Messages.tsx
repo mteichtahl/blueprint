@@ -3521,7 +3521,9 @@ function Chat({
         <section className="wa-pane wa-pane-empty">
           <div className="wa-emptyhero">
             <G n="newchat" size={48} />
-            <p className="wa-name">Chat with your artists</p>
+            <p className="wa-name">
+              {ctx.isBmg ? 'Chat with your artists' : 'Chat with Blueprint and other artists'}
+            </p>
             <p className="wa-sub">Pick a chat on the left, or start a new one.</p>
             <p className="wa-sub">
               <Icon name="lock" size={12} /> Chats between artists are private to them. Blueprint
@@ -3544,12 +3546,12 @@ export function BmgChat(props: Omit<ChatProps, 'artists'> & { artists: ArtistSum
 export const BmgMessages = BmgChat;
 
 /**
- * The artist's Chat screen. The artist app is a phone-width frame on every
- * screen (480px at most), so Chat always uses the phone layout: one pane at a
- * time. Three panes squeezed into that frame on tablets and computers.
+ * The artist's Chat screen: three panes in the desktop layout (rev 16), the
+ * phone layout (one pane at a time) in the phone-width frame on any screen.
+ * Going by screen width squeezed three panes into that frame on tablets.
  */
-export function ArtistChats(props: ChatProps) {
-  return <Chat {...props} phone />;
+export function ArtistChats({ wide = false, ...props }: ChatProps & { wide?: boolean }) {
+  return <Chat {...props} phone={!wide} />;
 }
 
 /** Workspace → Chat tab: Blueprint's direct chat with this artist, WhatsApp layout. */

@@ -18,6 +18,7 @@ import type { AppConfig } from '../lib/config.ts';
 import type { Preferences } from '../lib/notifications.ts';
 import { disablePush, enablePush, pushSupported } from '../lib/push.ts';
 import type { Theme } from '../components/Shell.tsx';
+import { useLayoutChoice, type LayoutChoice } from '../lib/layout.ts';
 import { ProfilePicture } from '../components/ProfilePicture.tsx';
 import { Button, Card, Field, Notice, WaveLoader } from '../components/ui.tsx';
 
@@ -71,6 +72,13 @@ export function Profile({
   }
 
   const row = 'flex min-h-12 items-center gap-3 border-b border-[#EDF0F3] py-2 last:border-0';
+  // Rev 16: artists choose the phone or desktop layout on this device.
+  const [layout, setLayout] = useLayoutChoice();
+  const layouts: [LayoutChoice, string][] = [
+    ['auto', 'Automatic'],
+    ['phone', 'Phone'],
+    ['desktop', 'Desktop'],
+  ];
   return (
     <div className={`flex flex-wrap items-start gap-5 ${compact ? 'flex-col' : ''}`}>
       <AboutYou
@@ -215,6 +223,34 @@ export function Profile({
             ))}
           </div>
         </div>
+        {me.role === 'artist' && (
+          <div>
+            <span id="layout-label" className="mb-1.5 block text-[15px] font-bold">
+              Layout
+            </span>
+            <div
+              role="group"
+              aria-labelledby="layout-label"
+              className="grid grid-cols-3 gap-1 rounded-lg bg-secondary p-1"
+            >
+              {layouts.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={layout === id}
+                  onClick={() => setLayout(id)}
+                  className={`min-h-[34px] rounded-md text-sm font-bold ${layout === id ? 'bg-card shadow-xs' : 'text-muted-foreground'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="src mt-1.5 leading-snug">
+              Automatic uses the desktop layout on computers and tablets held sideways, and the
+              phone layout on phones. Saved on this device.
+            </p>
+          </div>
+        )}
         <Button variant="ghost" onClick={onSignOut}>
           Sign out
         </Button>

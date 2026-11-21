@@ -769,11 +769,14 @@ export function ArtistTodos({
   token,
   artistId,
   isBmg,
+  wide = false,
 }: {
   cfg: AppConfig;
   token: string;
   artistId: string;
   isBmg: boolean;
+  /** Artist desktop layout (rev 16): the open to-do sits in a panel beside the list. */
+  wide?: boolean;
 }) {
   const path = useCallback(
     (f: string) => `/artists/${artistId}/todos${f ? `?filter=${f}` : ''}`,
@@ -801,6 +804,7 @@ export function ArtistTodos({
   if (!isBmg) {
     return (
       <PhoneTodos
+        wide={wide}
         todos={todos}
         sentBack={sentBack}
         error={error}
@@ -930,7 +934,9 @@ function PhoneTodos({
   editor,
   saved,
   add,
+  wide = false,
 }: {
+  wide?: boolean;
   todos: Todo[] | null;
   sentBack: Todo[];
   error: string | null;
@@ -983,8 +989,8 @@ function PhoneTodos({
       {items.map(card)}
     </ul>
   );
-  return (
-    <div className="flex flex-col gap-1.5">
+  const sections = (
+    <div className="flex min-w-0 flex-col gap-1.5">
       {error && <Notice tone="error">{error}</Notice>}
       {saved && <Notice tone="success">{saved}</Notice>}
       <div className="eyebrow py-1.5 text-muted-foreground">From Blueprint</div>
@@ -1008,7 +1014,15 @@ function PhoneTodos({
       <div className="eyebrow pt-2.5 pb-1.5 text-muted-foreground">My own</div>
       {own.length ? list('My own', own) : <p className="src">Nothing of your own yet.</p>}
       <div className="mt-1.5">{add}</div>
-      {editor}
+      {!wide && editor}
+    </div>
+  );
+  if (!wide) return sections;
+  // Desktop (rev 16): the list on the left, the open to-do in a panel on the right.
+  return (
+    <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
+      {sections}
+      {editor && <div className="lg:sticky lg:top-[88px]">{editor}</div>}
     </div>
   );
 }
