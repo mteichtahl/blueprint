@@ -139,7 +139,7 @@ dns
   .action(wrap((o: { env: string }) => dnsRecordsCmd({ ...g(), ...o })));
 dns
   .command('check')
-  .description('check the records are live and the hosts answer (read-only)')
+  .description('check the records are live and the certificate is issued (read-only)')
   .option('--env <env>', 'staging or prod', 'staging')
   .action(wrap((o: { env: string }) => dnsCheck({ ...g(), ...o })));
 

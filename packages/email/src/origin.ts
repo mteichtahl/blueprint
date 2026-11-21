@@ -35,6 +35,15 @@ export async function adminOrigin(): Promise<string> {
 
 /** appOrigin() until the custom hosts are live, then the admin host. */
 export function pickAdminOrigin(app: string, admin: string | undefined): string {
-  if (!admin || !app || app.includes('.cloudfront.net')) return app;
+  if (!admin || !app || onCloudFront(app)) return app;
   return admin.replace(/\/$/, '');
+}
+
+/** Whether an address is a CloudFront default host (*.cloudfront.net), by its parsed host name. */
+function onCloudFront(url: string): boolean {
+  try {
+    return new URL(url).hostname.endsWith('.cloudfront.net');
+  } catch {
+    return false;
+  }
 }

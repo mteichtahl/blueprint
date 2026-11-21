@@ -222,7 +222,7 @@ async function cname(name: string): Promise<string[]> {
   }
 }
 
-/** Check the records are live in public DNS and the hosts answer over HTTPS (read-only). */
+/** Check the records are live in public DNS and the certificate is issued (read-only). */
 export async function dnsCheck(opts: DnsOptions): Promise<void> {
   const env = EnvironmentName.parse(opts.env);
   const cfg = readConfig();
@@ -242,7 +242,7 @@ export async function dnsCheck(opts: DnsOptions): Promise<void> {
     else {
       good = false;
       fail(
-        `${r.fqdn} should be a CNAME to ${r.value}${found.length ? ` (found ${found.join(', ')})` : ' (not found)'}`,
+        `${r.fqdn} should be a CNAME to ${r.value} (${found.length ? 'it points elsewhere' : 'not found'})`,
       );
     }
   }
@@ -252,14 +252,5 @@ export async function dnsCheck(opts: DnsOptions): Promise<void> {
       ? 'bmg.config.json has the certificate'
       : 'bmg.config.json has no certificateArn yet (dns cert saves it once issued)',
   );
-  for (const h of hosts) {
-    try {
-      const res = await fetch(`https://${h}/config.json`, { redirect: 'manual' });
-      (res.ok ? ok : warn)(`https://${h} answers ${res.status}`);
-    } catch (err) {
-      good = false;
-      warn(`https://${h} doesn't answer yet (${(err as Error).message})`);
-    }
-  }
   if (!good) process.exitCode = 1;
 }
