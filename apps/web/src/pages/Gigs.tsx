@@ -21,6 +21,7 @@ import {
 import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
 import { VenuePicker } from './Venues.tsx';
 import { GigMedia } from '../components/GigMedia.tsx';
+import { useLive } from '../lib/live.ts';
 
 /** Gigs (screens: workspace Gigs tab, BMG Artist gigs, artist My gigs / Plan a gig). */
 
@@ -109,7 +110,8 @@ function useGigs(cfg: AppConfig, token: string, path: string) {
       setError((e as Error).message);
     }
   }, [cfg, token, path]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['gigs']);
+  useEffect(() => void load(), [load, live]);
   async function patch(g: Gig, body: Record<string, unknown>) {
     try {
       await api(cfg, token, 'PATCH', `/artists/${g.artistId}/gigs/${g.gigId}`, body);

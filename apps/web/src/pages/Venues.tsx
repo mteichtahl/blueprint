@@ -33,6 +33,7 @@ import {
   VenueLogo,
   type VenueLogoRef,
 } from '../components/VenueLogo.tsx';
+import { useLive } from '../lib/live.ts';
 
 /**
  * Venues (rev 7): name, capacity, backline (yes/no), website, address, and the
@@ -292,10 +293,11 @@ export function useVenues(
       setError((e as Error).message);
     }
   }, [cfg, token, q, backline, minCapacity, archived, enabled]);
+  const live = useLive(['venues']);
   useEffect(() => {
     const t = setTimeout(() => void load(), q ? 250 : 0);
     return () => clearTimeout(t);
-  }, [load, q]);
+  }, [load, q, live]);
   return { venues, error, reload: load };
 }
 

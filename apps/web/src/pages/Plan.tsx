@@ -29,6 +29,7 @@ import {
 import { PlanTimeline } from '../components/PlanTimeline.tsx';
 import { ChangeOwnerPanel, OwnerChip, OwnerPicker } from '../components/PlanOwner.tsx';
 import { AskOwner } from './Todos.tsx';
+import { useLive } from '../lib/live.ts';
 
 const MEASURES: MeasureId[] = ['M1', 'M2', 'M3', 'M4'];
 const fmtDay = (d: string) =>
@@ -154,6 +155,15 @@ export function PlanTab({
       }
     });
   }, [load, autoStart, canEdit]);
+  // Live updates (rev 17): someone else changed the plan. Refresh it, unless
+  // an edit is open here (saving that shows the latest anyway).
+  const live = useLive(['plan'], artistId);
+  useEffect(() => {
+    if (!live || draft) return;
+    api<PlanResponse>(cfg, token, 'GET', `/artists/${artistId}/plan`)
+      .then(setData)
+      .catch(() => undefined);
+  }, [live]);
   // Moving to another view leaves an unsaved edit behind (except a plan being started).
   useEffect(() => {
     if (data?.exists) {
@@ -1021,7 +1031,8 @@ export function PlanStages({
       setError((e as Error).message);
     }
   }, [cfg, token]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['plan']);
+  useEffect(() => void load(), [load, live]);
 
   async function save() {
     if (!editing) return;

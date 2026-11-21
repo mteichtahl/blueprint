@@ -21,6 +21,7 @@ import {
 import { Button, Dialog, Field, Icon, Notice, Tag, usePhone, WaveLoader } from './ui.tsx';
 import { DangerArea, EditScreen, RecordPage } from './patterns.tsx';
 import { downloadZip, searchLibrary, zipEntries, zipTooBig, type SearchScope } from '../lib/zip.ts';
+import { useLive } from '../lib/live.ts';
 
 /** "Copied 3 files and 1 folder to “Contracts”" (and what was left out). */
 export function copiedText(name: string, done?: CopyResult): string {
@@ -58,7 +59,8 @@ export function useFolders(cfg: AppConfig, token: string, base: string) {
       setError((e as Error).message);
     }
   }, [cfg, token, base]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['files']);
+  useEffect(() => void load(), [load, live]);
   return { list, error, load };
 }
 

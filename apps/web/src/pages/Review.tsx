@@ -29,6 +29,7 @@ import {
 } from '../components/ui.tsx';
 
 import { PRIORITY_TAG } from '../lib/labels.ts';
+import { useLive } from '../lib/live.ts';
 
 export { PRIORITY_TAG } from '../lib/labels.ts';
 
@@ -106,7 +107,8 @@ function useArtistFiles(cfg: AppConfig, token: string, artistId: string) {
       setFiles([]);
     }
   }, [cfg, token, artistId]);
-  useEffect(() => void reload(), [reload]);
+  const live = useLive(['files'], artistId);
+  useEffect(() => void reload(), [reload, live]);
   return { files, reload };
 }
 
@@ -502,7 +504,8 @@ function SubmissionView({
       setError((e as Error).message);
     }
   }, [cfg, token, path]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['reviews'], artistId);
+  useEffect(() => void load(), [load, live]);
 
   /** P3/P4: the submission is worked on here; its priority and date sit behind Edit details. */
   const [editing, setEditing] = useState<{ priority: string; neededBy: string } | null>(null);
@@ -880,7 +883,8 @@ export function ArtistSubmissions({
       setError((e as Error).message);
     }
   }, [cfg, token, artistId]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['reviews'], artistId);
+  useEffect(() => void load(), [load, live]);
 
   if (openId) {
     return (
@@ -989,7 +993,8 @@ export function ReviewQueue({
       setError((e as Error).message);
     }
   }, [cfg, token, status]);
-  useEffect(() => void load(), [load]);
+  const live = useLive(['reviews']);
+  useEffect(() => void load(), [load, live]);
 
   if (opened) {
     return (

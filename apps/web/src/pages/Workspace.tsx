@@ -23,6 +23,7 @@ import { ArtistSubmissions, PRIORITY_TAG } from './Review.tsx';
 import { ArtistTodos } from './Todos.tsx';
 import { LatestMeetingCard, PlanSuggestionsBanner, useArtistMeetings } from './Meetings.tsx';
 import type { Meeting } from '../lib/meetings.ts';
+import { useLive } from '../lib/live.ts';
 
 /**
  * Workspace tabs (screens doc rev 9): four tabs, each with a section switch
@@ -229,7 +230,12 @@ export function ArtistWorkspace({
     loadCounts();
   }, [loadPlan, loadCounts, target]);
   // Counts follow what's open, so a review or a ticked to-do shows on the tabs.
-  useEffect(() => loadCounts(), [tab, loadCounts]);
+  // Live updates (rev 17): and whatever the artist or the team changes elsewhere.
+  const live = useLive(['plan', 'todos', 'reviews'], artist.artistId);
+  useEffect(() => loadCounts(), [tab, loadCounts, live]);
+  useEffect(() => {
+    if (live) loadPlan();
+  }, [live]);
 
   const group = groupOf(tab);
   const sectionCount: Partial<Record<TabId, { n: number; hot?: boolean }>> = {
@@ -478,6 +484,7 @@ function WorkspaceOverview({
   const [todos, setTodos] = useState<Todo[]>([]);
   const [doneCount, setDoneCount] = useState(0);
   const base = `/artists/${artist.artistId}`;
+  const live = useLive(['todos', 'reviews'], artist.artistId);
   useEffect(() => {
     api<{ submissions: SubmissionSummary[] }>(cfg, token, 'GET', `${base}/submissions`)
       .then((r) => setSubs(r.submissions.filter((s) => s.status === 'open')))
@@ -488,7 +495,7 @@ function WorkspaceOverview({
     api<{ todos: Todo[] }>(cfg, token, 'GET', `${base}/todos?filter=done`)
       .then((r) => setDoneCount(r.todos.length))
       .catch(() => setDoneCount(0));
-  }, [cfg, token, base]);
+  }, [cfg, token, base, live]);
   const total = todos.length + doneCount;
 
   return (
