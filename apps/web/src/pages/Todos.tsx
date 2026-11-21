@@ -26,6 +26,7 @@ import {
   Card,
   Chips,
   DataTable,
+  DoneBox,
   Field,
   Icon,
   Notice,
@@ -622,7 +623,7 @@ function useEditing(load: () => Promise<void>) {
   };
 }
 
-/** P1 (rev 13): the whole row opens the to-do; Mark done is on the to-do. */
+/** P1 (rev 13): the whole row opens the to-do. Its tick box marks it done there and then. */
 /** Select mode's bulk actions for to-dos: Mark done and Mark not done (rev 13). */
 function todoActions(cfg: AppConfig, token: string, todos: readonly Todo[]): BulkAction[] {
   const byId = new Map(todos.map((t) => [t.todoId, t]));
@@ -650,11 +651,14 @@ function todoActions(cfg: AppConfig, token: string, todos: readonly Todo[]): Bul
 function TodoRows({
   todos,
   onEdit,
+  onToggle,
   artistName,
   select,
 }: {
   todos: Todo[];
   onEdit: (t: Todo) => void;
+  /** The row's tick box: mark done / not done without opening the to-do. */
+  onToggle: (t: Todo) => Promise<void>;
   artistName?: (id: string) => string;
   /** Select mode (rev 13): a row tap ticks it instead of opening it. */
   select?: SelectState;
@@ -683,7 +687,9 @@ function TodoRows({
                 checked={select!.has(t.todoId)}
                 onChange={() => select!.toggle(t.todoId)}
               />
-            ) : undefined
+            ) : (
+              <DoneBox label={t.title} done={t.done} onChange={() => onToggle(t)} />
+            )
           }
           onOpen={() => tap(t)}
           openLabel={selecting ? `Tick "${t.title}"` : `Open "${t.title}"`}
@@ -692,11 +698,9 @@ function TodoRows({
     >
       <thead>
         <tr>
-          {selecting && (
-            <th scope="col">
-              <span className="sr-only">Selected</span>
-            </th>
-          )}
+          <th scope="col" className="w-10">
+            <span className="sr-only">{selecting ? 'Selected' : 'Done'}</span>
+          </th>
           <th scope="col">To-do</th>
           {artistName && <th scope="col">Artist</th>}
           <th scope="col">From</th>
@@ -706,15 +710,17 @@ function TodoRows({
       <tbody>
         {todos.map((t) => (
           <tr key={t.todoId} className="cursor-pointer" onClick={() => tap(t)}>
-            {selecting && (
-              <td className="w-10">
+            <td className="w-10">
+              {selecting ? (
                 <SelectBox
                   label={t.title}
                   checked={select!.has(t.todoId)}
                   onChange={() => select!.toggle(t.todoId)}
                 />
-              </td>
-            )}
+              ) : (
+                <DoneBox label={t.title} done={t.done} onChange={() => onToggle(t)} />
+              )}
+            </td>
             <td>
               <button
                 type="button"
@@ -803,6 +809,7 @@ export function ArtistTodos({
         sentBack={sentBack}
         error={error}
         onEdit={ed.open}
+        onToggle={toggle}
         editor={editor}
         saved={ed.saved}
         add={
@@ -846,7 +853,7 @@ export function ArtistTodos({
             actions={todoActions(cfg, token, todos)}
             onDone={() => void load()}
           />
-          <TodoRows todos={todos} onEdit={ed.open} select={sel} />
+          <TodoRows todos={todos} onEdit={ed.open} onToggle={toggle} select={sel} />
         </>
       )}
       {editor}
@@ -923,6 +930,7 @@ function PhoneTodos({
   sentBack,
   error,
   onEdit,
+  onToggle,
   editor,
   saved,
   add,
@@ -933,6 +941,7 @@ function PhoneTodos({
   sentBack: Todo[];
   error: string | null;
   onEdit: (t: Todo) => void;
+  onToggle: (t: Todo) => Promise<void>;
   editor: React.ReactNode;
   saved: string | null;
   add: React.ReactNode;
@@ -965,6 +974,12 @@ function PhoneTodos({
           .join(' · ') || undefined
       }
       tags={t.due || t.commentCount ? <DueTag t={t} /> : undefined}
+      lead={
+        // Sent-back to-dos have their own choices (Send again, Make it mine).
+        t.sentBack && !t.done ? undefined : (
+          <DoneBox label={t.title} done={t.done} onChange={() => onToggle(t)} />
+        )
+      }
       onOpen={() => onEdit(t)}
       openLabel={`Open "${t.title}"`}
     />
@@ -1077,6 +1092,7 @@ export function AllTodos({
               <TodoRows
                 todos={todos}
                 onEdit={ed.open}
+                onToggle={toggle}
                 artistName={(id) => names[id] ?? 'Artist'}
                 select={sel}
               />

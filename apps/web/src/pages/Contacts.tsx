@@ -49,6 +49,23 @@ export interface Contact {
   addedByArtist: boolean;
   canEdit: boolean;
   bmgNotes?: string;
+  /** When it was added to the shared list (ISO time). */
+  createdAt?: string;
+}
+
+/** "Date created: 21 November 2026 · by Blueprint" on contact and venue pages. */
+export function CreatedLine({ at, byArtist }: { at?: string; byArtist: boolean }) {
+  const d = at ? new Date(at) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return (
+    <p className="src m-0">
+      Date created:{' '}
+      <time dateTime={at}>
+        {d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}
+      </time>{' '}
+      · by {byArtist ? 'an artist' : 'Blueprint'}
+    </p>
+  );
 }
 
 const EMPTY = {
@@ -388,6 +405,7 @@ export function Contacts({
           {!c.canEdit && (
             <p className="src">Added by Blueprint. Ask Blueprint if something needs changing.</p>
           )}
+          <CreatedLine at={c.createdAt} byArtist={c.addedByArtist} />
         </RecordPage>
       );
     }

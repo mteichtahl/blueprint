@@ -575,7 +575,11 @@ export function BmgShell({
       className="bp flex min-h-full flex-col gap-0.5 overflow-x-hidden px-3.5 pt-[18px] pb-3.5"
     >
       <Ribbon text="STUDIO ★ ALL ACCESS" className="-mx-8 mt-2 mb-3" />
-      <button type="button" className="mb-[14px] px-2 text-left" onClick={() => go('overview')}>
+      <button
+        type="button"
+        className="mb-[14px] flex justify-center self-stretch px-2"
+        onClick={() => go('overview')}
+      >
         <Logo />
       </button>
       {phone ? (
@@ -798,6 +802,7 @@ export function ArtistShell({
   onNavigate,
   header,
   onAsk,
+  compact = false,
   desktop,
   children,
 }: {
@@ -807,6 +812,8 @@ export function ArtistShell({
   header: ReactNode;
   /** Opted-in artists only: the floating assistant button (phone), Ask BMG and ⌘K (desktop). */
   onAsk?: () => void;
+  /** Phone Chat: a slim header (no ribbon) so the conversation gets the screen. */
+  compact?: boolean;
   /** Set for the desktop layout (rev 16). */
   desktop?: ArtistDesktop | undefined;
   children: ReactNode;
@@ -847,7 +854,7 @@ export function ArtistShell({
             <Ribbon text="ARTIST ★ ALL ACCESS" className="-mx-8 mt-2 mb-3" />
             <button
               type="button"
-              className="mb-[14px] px-2 text-left"
+              className="mb-[14px] flex justify-center self-stretch px-2"
               aria-label="Blueprint Music Group, go to Home"
               onClick={() => onNavigate('home')}
             >
@@ -899,8 +906,10 @@ export function ArtistShell({
             </div>
           </header>
         ) : (
-          <header className="bp flex flex-none flex-col gap-1.5 overflow-hidden px-5 pt-[calc(10px+env(safe-area-inset-top))] pr-[max(20px,env(safe-area-inset-right))] pb-3.5 pl-[max(20px,env(safe-area-inset-left))]">
-            <Ribbon text="ARTIST ★ ALL ACCESS" className="-mx-8 mb-1.5" />
+          <header
+            className={`bp flex flex-none flex-col gap-1.5 overflow-hidden px-5 pr-[max(20px,env(safe-area-inset-right))] pl-[max(20px,env(safe-area-inset-left))] ${compact ? 'pt-[calc(6px+env(safe-area-inset-top))] pb-1.5' : 'pt-[calc(10px+env(safe-area-inset-top))] pb-3.5'}`}
+          >
+            {!compact && <Ribbon text="ARTIST ★ ALL ACCESS" className="-mx-8 mb-1.5" />}
             {header}
           </header>
         )}
@@ -955,13 +964,26 @@ export function PhoneHeader({
   eyebrow,
   title,
   right,
+  compact = false,
   children,
 }: {
   eyebrow: string;
   title: string;
   right?: ReactNode;
+  /** One slim row: the title goes beside the bell instead of under it (Chat). */
+  compact?: boolean;
   children?: ReactNode;
 }) {
+  if (compact) {
+    return (
+      <div className="flex items-center gap-3">
+        <span className="eyebrow !text-[#E8726E]">{eyebrow}</span>
+        <h1 className="sr-only">{title}</h1>
+        <span className="flex-1" />
+        {right}
+      </div>
+    );
+  }
   return (
     <>
       <div className="flex items-center gap-3">
@@ -994,7 +1016,9 @@ export function AuthFrame({
       <aside className="bp flex flex-col gap-3 overflow-hidden px-6 pt-[calc(20px+env(safe-area-inset-top))] pb-6 md:w-[44%] md:justify-between md:p-12">
         <div className="flex flex-col gap-4">
           <Ribbon text="ARTISTS ONLY ★ ALL ACCESS" className="-mx-12 md:-mx-16" />
-          <Logo />
+          <span className="flex justify-center">
+            <Logo />
+          </span>
         </div>
         <div className="flex flex-col gap-2 md:mb-16">
           <span className="eyebrow !text-[#E8726E]">{eyebrow}</span>

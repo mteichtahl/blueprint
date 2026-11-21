@@ -65,6 +65,11 @@ Plus invitation tracking, finished reviews, and a smarter library.
 - **Back links say where they go**, such as "← Review queue".
 - A gig opens one page with its help, checklist, money and photos.
 - A to-do opens to show **Mark done**, Edit details and its conversation.
+- **Tick a to-do done** straight from any to-do list, including the home
+  screen and Studio HQ, without opening it.
+- **Show password:** an eye button on every password box (sign-in, new
+  password, connector secrets) shows what you've typed.
+- **Date created** shows on every contact and venue page, with who added it.
 - In a workspace, **Work** is now To-dos · Submissions · Gigs, and **Plan**
   is Outcome · Stages · Timeline · History.
 - Picking a chat on the overview's Chat card opens that conversation.
@@ -83,6 +88,16 @@ Plus invitation tracking, finished reviews, and a smarter library.
   "admin actions need a fresh step-up".
 - On phones, the chat message box stays at the bottom when the keyboard
   opens, instead of being pushed off screen.
+- **Chat for artists** now fills the phone screen: the header slims down to
+  one row on the Chat tab, and tablets in the phone layout no longer squeeze
+  three panes into it (the desktop layout keeps its three panes).
+- **Notifications** open on top of everything, instead of behind the chat.
+- **Blueprint Assistant answers** show headings, lists, bold, tables and
+  links properly instead of Markdown symbols.
+- The plan screen is titled **My Plan** (it said both "My plan" and "Your
+  plan").
+- The Blueprint Music Group logo is centred on the sign-in screens and in
+  the side menu.
 
 ## 1.5.1 — 2026-11-11
 
