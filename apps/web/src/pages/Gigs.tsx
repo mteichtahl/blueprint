@@ -892,10 +892,13 @@ export function ArtistGigs({
   cfg,
   token,
   artistId,
+  wide = false,
 }: {
   cfg: AppConfig;
   token: string;
   artistId: string;
+  /** Artist desktop layout (rev 16): a table instead of cards. */
+  wide?: boolean;
 }) {
   const { gigs, error, load, patch } = useGigs(cfg, token, `/artists/${artistId}/gigs`);
   const [view, setView] = useState<'upcoming' | 'ideas' | 'past'>('upcoming');
@@ -943,7 +946,7 @@ export function ArtistGigs({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <div className="flex flex-1 gap-1.5" role="group" aria-label="Show gigs">
+        <div className={`flex gap-1.5 ${wide ? '' : 'flex-1'}`} role="group" aria-label="Show gigs">
           {(
             [
               ['upcoming', `Upcoming · ${upcoming.length}`],
@@ -955,7 +958,7 @@ export function ArtistGigs({
               key={id}
               size="sm"
               variant={view === id ? 'navy' : 'ghost'}
-              className="flex-1"
+              className={wide ? '' : 'flex-1'}
               aria-pressed={view === id}
               onClick={() => setView(id)}
             >
@@ -964,7 +967,7 @@ export function ArtistGigs({
           ))}
         </div>
       </div>
-      <Button variant="cta" onClick={() => setOpened('new')}>
+      <Button variant="cta" className={wide ? 'self-start' : ''} onClick={() => setOpened('new')}>
         Plan a gig
       </Button>
       {error && <Notice tone="error">{error}</Notice>}
@@ -978,9 +981,24 @@ export function ArtistGigs({
               : 'Nothing booked yet. Plan your next gig.'}
         </p>
       )}
-      {shown.map((g) => (
-        <GigCard key={g.gigId} gig={g} onOpen={() => setOpened(g.gigId)} />
-      ))}
+      {wide
+        ? gigs !== null &&
+          shown.length > 0 && (
+            <Card
+              className="pb-0"
+              title={
+                view === 'past' ? 'Past gigs' : view === 'ideas' ? 'Gig ideas' : 'Upcoming gigs'
+              }
+            >
+              <GigTable
+                gigs={shown}
+                artistName="You"
+                onOpen={(gigId) => setOpened(gigId)}
+                empty="No gigs here yet."
+              />
+            </Card>
+          )
+        : shown.map((g) => <GigCard key={g.gigId} gig={g} onOpen={() => setOpened(g.gigId)} />)}
       <p className="src leading-snug">
         Gigs you share with Blueprint show up in your workspace for the team, so they can help with
         booking, promo and budgets.

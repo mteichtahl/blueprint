@@ -1497,3 +1497,90 @@ describe('rev 15: to-dos for the plan owner', () => {
     expect(await violations()).toEqual([]);
   });
 });
+
+describe('rev 16: the artist desktop layout', () => {
+  let before: typeof window.matchMedia;
+  beforeAll(() => {
+    before = window.matchMedia;
+    // A 1280px laptop (or an iPad held sideways): min-width queries match, max-width ones don't.
+    window.matchMedia = ((q: string) => ({
+      matches: /min-width:\s*(640|1024)px/.test(q),
+      media: q,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+  afterEach(() => window.localStorage.removeItem('bmg-artist-layout'));
+  afterAll(() => {
+    window.matchMedia = before;
+  });
+
+  const sidebar = () => within(screen.getByRole('navigation', { name: 'Main' }));
+
+  it('shows the sidebar and top bar, not the phone tabs', async () => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    expect(screen.queryByRole('navigation', { name: 'Tabs' })).toBeNull();
+    for (const name of ['Home', 'Chat', 'To-dos', 'Gigs', 'Library', 'My plan', 'Submissions'])
+      expect(sidebar().getByRole('button', { name: new RegExp(`^${name}`) })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Ask BMG/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1, name: 'Hi Chloe' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  const VIEWS = [
+    'Chat',
+    'To-dos',
+    'Gigs',
+    'Library',
+    'My plan',
+    'Submissions',
+    'My stats',
+    'My brand kit',
+    'Contacts & venues',
+  ];
+  it.each(VIEWS)('artist desktop: %s', async (label) => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    fireEvent.click(sidebar().getByRole('button', { name: new RegExp(`^${label}`) }));
+    await settle();
+    expect(
+      sidebar()
+        .getByRole('button', { name: new RegExp(`^${label}`) })
+        .getAttribute('aria-current'),
+    ).toBe('page');
+    // Pages reached from Home on the phone don't need "← Home" here.
+    expect(screen.queryByRole('button', { name: '← Home' })).toBeNull();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('gigs are a table, and the library uses the desktop table', async () => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    fireEvent.click(sidebar().getByRole('button', { name: /^Gigs/ }));
+    await settle();
+    expect(document.querySelector('table.dt')).toBeTruthy();
+  });
+
+  it('Profile → Layout: Phone switches to the phone layout on this device', async () => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: /your account$/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile & preferences' }));
+    await settle();
+    const layout = within(screen.getByRole('group', { name: 'Layout' }));
+    expect(layout.getByRole('button', { name: 'Automatic' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    fireEvent.click(layout.getByRole('button', { name: 'Phone' }));
+    await settle();
+    expect(screen.getByRole('navigation', { name: 'Tabs' })).toBeTruthy();
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
+    expect(window.localStorage.getItem('bmg-artist-layout')).toBe('phone');
+    expect(await violations()).toEqual([]);
+  });
+});

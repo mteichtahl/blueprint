@@ -21,6 +21,7 @@ import {
   useTheme,
   type NavSection,
 } from '../components/Shell.tsx';
+import { useArtistDesktop } from '../lib/layout.ts';
 import {
   Avatar,
   Bar,
@@ -1380,12 +1381,87 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
     view === 'stats' ||
     view === 'contacts';
 
+  const desktop = useArtistDesktop();
+  const inbox = useInbox(cfg, token, me);
+  const bell = (
+    <Bell
+      light={!desktop}
+      items={notes.items}
+      unread={notes.unread}
+      onMarkAll={() => void notes.markRead('all')}
+      onOpen={(n) => {
+        void notes.markRead([n.id]);
+        if (n.link.startsWith('chat:')) setChatTarget(n.link.slice('chat:'.length) || null);
+        setView(
+          n.link.startsWith('chat:')
+            ? 'chat'
+            : n.link === 'submit'
+              ? 'submit'
+              : n.link === 'library'
+                ? 'library'
+                : n.link === 'connectors'
+                  ? 'connectors'
+                  : n.link === 'todos'
+                    ? 'todo'
+                    : n.link === 'plan'
+                      ? 'plan'
+                      : 'home',
+        );
+      }}
+    />
+  );
+  const account = (
+    <ProfileMenu
+      userName={userName}
+      roleLabel="Artist"
+      avatar={avatar}
+      size={desktop ? 36 : 34}
+      onProfile={() => setView('profile')}
+      items={[{ label: 'My connectors', icon: 'plug', onSelect: () => setView('connectors') }]}
+      onSignOut={onSignOut}
+    />
+  );
+  // Rev 16: the desktop sidebar. The phone tabs first, then the pages Home links to.
+  const sections: NavSection[] = [
+    {
+      items: [
+        { id: 'home', label: 'Home', icon: 'home' },
+        { id: 'chat', label: 'Chat', icon: 'chat', badge: inbox.unreadChats },
+        { id: 'todo', label: 'To-dos', icon: 'todo' },
+        { id: 'gigs', label: 'Gigs', icon: 'mic' },
+        { id: 'library', label: 'Library', icon: 'folder' },
+      ],
+    },
+    {
+      label: 'MY CAREER',
+      items: [
+        { id: 'plan', label: 'My plan', icon: 'template' },
+        { id: 'submit', label: 'Submissions', icon: 'upload' },
+        { id: 'stats', label: 'My stats', icon: 'chart' },
+        { id: 'brand', label: 'My brand kit', icon: 'sparkle' },
+        { id: 'contacts', label: 'Contacts & venues', icon: 'users' },
+      ],
+    },
+  ];
+
   return (
     <ArtistShell
       tabs={tabs}
-      current={back ? 'home' : view}
+      current={back && !desktop ? 'home' : view}
       onNavigate={(id) => setView(id as ArtistView)}
       {...(me.consent?.aiOptIn ? { onAsk: () => setAsking(true) } : {})}
+      desktop={
+        desktop
+          ? {
+              sections,
+              theme,
+              onTheme: setTheme,
+              bell,
+              account,
+              pageHead: <PageHeader eyebrow={headers[view].eyebrow} title={headers[view].title} />,
+            }
+          : undefined
+      }
       header={
         <PhoneHeader
           eyebrow={headers[view].eyebrow}
@@ -1401,43 +1477,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
               </button>
             ) : (
               <span className="flex items-center gap-1">
-                <Bell
-                  light
-                  items={notes.items}
-                  unread={notes.unread}
-                  onMarkAll={() => void notes.markRead('all')}
-                  onOpen={(n) => {
-                    void notes.markRead([n.id]);
-                    if (n.link.startsWith('chat:'))
-                      setChatTarget(n.link.slice('chat:'.length) || null);
-                    setView(
-                      n.link.startsWith('chat:')
-                        ? 'chat'
-                        : n.link === 'submit'
-                          ? 'submit'
-                          : n.link === 'library'
-                            ? 'library'
-                            : n.link === 'connectors'
-                              ? 'connectors'
-                              : n.link === 'todos'
-                                ? 'todo'
-                                : n.link === 'plan'
-                                  ? 'plan'
-                                  : 'home',
-                    );
-                  }}
-                />
-                <ProfileMenu
-                  userName={userName}
-                  roleLabel="Artist"
-                  avatar={avatar}
-                  size={34}
-                  onProfile={() => setView('profile')}
-                  items={[
-                    { label: 'My connectors', icon: 'plug', onSelect: () => setView('connectors') },
-                  ]}
-                  onSignOut={onSignOut}
-                />
+                {bell}
+                {account}
               </span>
             )
           }
@@ -1446,6 +1487,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
     >
       {view === 'home' && (
         <ArtistHome
+          wide={desktop}
           cfg={cfg}
           token={token}
           me={me}
@@ -1466,7 +1508,9 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
           initialConversationId={chatTarget}
         />
       )}
-      {view === 'todo' && <ArtistTodos cfg={cfg} token={token} artistId={artistId} isBmg={false} />}
+      {view === 'todo' && (
+        <ArtistTodos cfg={cfg} token={token} artistId={artistId} isBmg={false} wide={desktop} />
+      )}
       {view === 'library' && (
         <>
           <div className={`flex flex-wrap items-center gap-2 ${docOpen ? 'hidden' : ''}`}>
@@ -1489,6 +1533,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
                   artistId={artistId}
                   isBmg={false}
                   kind={libTab}
+                  compact={!desktop}
                   onOpenChange={mineOpen}
                   openFileId={myFile}
                   openFolderId={myFolder}
@@ -1503,6 +1548,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
                   token={token}
                   isBmg={false}
                   artists={[]}
+                  compact={!desktop}
                   openFileId={libraryFile}
                   openFolderId={sharedFolder}
                   onClosed={() => setLibraryFile(null)}
@@ -1517,7 +1563,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
               artistId={artistId}
               artistName={userName}
               isArtist
-              compact
+              compact={!desktop}
               onOpenBrandKit={() => setView('brand')}
             />
           )}
@@ -1530,7 +1576,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
           artistId={artistId}
           artistName={userName}
           isArtist
-          compact
+          compact={!desktop}
           onOpenAssets={() => {
             setLibTab('assets');
             setView('library');
@@ -1555,7 +1601,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
           canEdit={false}
         />
       )}
-      {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} />}
+      {view === 'gigs' && <ArtistGigs cfg={cfg} token={token} artistId={artistId} wide={desktop} />}
       {view === 'connectors' && <MyConnectors cfg={cfg} token={token} artistId={artistId} />}
       {view === 'contacts' && (
         <>
@@ -1569,15 +1615,21 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
             ]}
           />
           {bookTab === 'contacts' ? (
-            <Contacts cfg={cfg} token={token} isBmg={false} compact />
+            <Contacts cfg={cfg} token={token} isBmg={false} compact={!desktop} />
           ) : (
-            <Venues cfg={cfg} token={token} isBmg={false} compact />
+            <Venues cfg={cfg} token={token} isBmg={false} compact={!desktop} />
           )}
         </>
       )}
       {view === 'stats' && (
         <>
-          <ArtistStats cfg={cfg} token={token} artistId={artistId} name={userName} compact />
+          <ArtistStats
+            cfg={cfg}
+            token={token}
+            artistId={artistId}
+            name={userName}
+            compact={!desktop}
+          />
           <Button variant="ghost" onClick={() => setView('connectors')}>
             My connectors
           </Button>
@@ -1594,7 +1646,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
           onSignOut={onSignOut}
           onReauth={onReauth}
           onAvatar={setAvatar}
-          compact
+          compact={!desktop}
         />
       )}
       {me.consent?.aiOptIn && (
@@ -1628,7 +1680,10 @@ function ArtistHome({
   me,
   onNavigate,
   onOpenFile,
+  wide = false,
 }: {
+  /** Desktop layout (rev 16): the cards sit in a grid. */
+  wide?: boolean;
   cfg: AppConfig;
   token: string;
   me: Me;
@@ -1658,13 +1713,22 @@ function ArtistHome({
   const changed = subs.filter((s) => s.status === 'open' && s.changedByBmgAt);
   const reviewed = subs.filter((s) => s.status === 'reviewed').slice(0, 2);
 
+  // Desktop: a dashboard grid, the plan across two columns. Phone: one column.
+  const span = wide ? 'md:col-span-2' : '';
+  const full = wide ? 'col-span-full' : '';
   return (
-    <>
+    <div
+      className={
+        wide ? 'grid grid-cols-1 items-start gap-5 md:grid-cols-2 xl:grid-cols-3' : 'contents'
+      }
+    >
       {changed.map((s) => (
-        <Notice key={s.submissionId}>Blueprint changed the priority or date of “{s.title}”.</Notice>
+        <div key={s.submissionId} className={full}>
+          <Notice>Blueprint changed the priority or date of “{s.title}”.</Notice>
+        </div>
       ))}
       {plan?.exists && (
-        <section className="paper-card tilt-l mt-3 mb-1 flex flex-col gap-2.5">
+        <section className={`paper-card tilt-l mt-3 mb-1 flex flex-col gap-2.5 ${span}`}>
           <span className="tape" aria-hidden="true" />
           <span className="tape tape-r" aria-hidden="true" />
           <div className="flex items-center gap-2">
@@ -1709,7 +1773,7 @@ function ArtistHome({
           </button>
         </div>
         {todos.length === 0 && <p className="src">You're all caught up.</p>}
-        {todos.slice(0, 3).map((t) => (
+        {todos.slice(0, wide ? 6 : 3).map((t) => (
           <div key={t.todoId} className="flex items-center gap-3 text-[15px]">
             <span className="flex-1">{t.title}</span>
             {t.due && <Tag tone="s">{shortDate(t.due)}</Tag>}
@@ -1744,7 +1808,7 @@ function ArtistHome({
           </button>
         </div>
         {shared.length === 0 && <p className="src">Nothing shared yet.</p>}
-        {shared.slice(0, 3).map((f) => (
+        {shared.slice(0, wide ? 6 : 3).map((f) => (
           <button
             key={f.fileId}
             type="button"
@@ -1802,11 +1866,11 @@ function ArtistHome({
       </section>
       <Button
         variant="cta"
-        className="min-h-[50px] w-full tracking-[.04em]"
+        className={`min-h-[50px] tracking-[.04em] ${wide ? 'col-span-full justify-self-start px-8' : 'w-full'}`}
         onClick={() => onNavigate('submit')}
       >
         Upload music or lyrics for review
       </Button>
-    </>
+    </div>
   );
 }
