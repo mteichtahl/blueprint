@@ -480,7 +480,10 @@ export class WebStack extends BmgStack {
 export function spaRoutingCode(redirectHost?: string): string {
   const redirect = redirectHost
     ? `var h = r.headers.host ? r.headers.host.value : ''; ` +
-      `if (h.slice(-15) === '.cloudfront.net') { return { statusCode: 301, statusDescription: 'Moved Permanently', headers: { location: { value: 'https://${redirectHost}' + r.uri } } }; } `
+      `if (h.slice(-15) === '.cloudfront.net') { ` +
+      // Keep the query string: links like /?go=plan:… carry where to open.
+      `var q = r.querystring, p = []; for (var k in q) { var v = q[k]; if (v.multiValue) { for (var i = 0; i < v.multiValue.length; i++) { p.push(k + '=' + v.multiValue[i].value); } } else { p.push(k + '=' + v.value); } } ` +
+      `return { statusCode: 301, statusDescription: 'Moved Permanently', headers: { location: { value: 'https://${redirectHost}' + r.uri + (p.length ? '?' + p.join('&') : '') } } }; } `
     : '';
   return `function handler(event) { var r = event.request; ${redirect}if (r.uri.indexOf('.') === -1) { r.uri = '/index.html'; } return r; }`;
 }

@@ -1142,3 +1142,35 @@ describe('custom domains (artist and admin hosts, docs/dns.md)', () => {
     expect(files).not.toContain('https://*.cloudfront.net');
   });
 });
+
+describe('CloudFront address redirect', () => {
+  // Runs the edge function's code the way CloudFront would call it.
+  const run = (code: string, request: object) =>
+    new Function(`${code}; return handler;`)()({ request });
+
+  it('keeps the path and query string when it sends people to the artist host', async () => {
+    const { spaRoutingCode } = await import('../lib/web-stack.ts');
+    const res = run(spaRoutingCode('artist-beta.example.com'), {
+      uri: '/',
+      headers: { host: { value: 'd123.cloudfront.net' } },
+      querystring: {
+        go: { value: 'plan:art_1' },
+        tab: { value: 'a', multiValue: [{ value: 'a' }, { value: 'b' }] },
+      },
+    });
+    expect(res.statusCode).toBe(301);
+    expect(res.headers.location.value).toBe(
+      'https://artist-beta.example.com/?go=plan:art_1&tab=a&tab=b',
+    );
+  });
+
+  it('serves the app as before on the custom hosts', async () => {
+    const { spaRoutingCode } = await import('../lib/web-stack.ts');
+    const req = {
+      uri: '/home',
+      headers: { host: { value: 'artist-beta.example.com' } },
+      querystring: {},
+    };
+    expect(run(spaRoutingCode('artist-beta.example.com'), req).uri).toBe('/index.html');
+  });
+});
