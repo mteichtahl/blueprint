@@ -38,7 +38,7 @@ export async function signIn(page: Page, key: E2eAccountKey): Promise<void> {
   await page.goto('/');
   await page.getByLabel('Email').fill(a.email);
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByLabel('Password').fill(a.password);
+  await page.getByLabel('Password', { exact: true }).fill(a.password);
   await page.getByRole('button', { name: 'Sign in with password' }).click();
   await page.getByLabel('6-digit code').fill(await freshCode(a.email, a.totpSecret));
   await page.getByRole('button', { name: 'Verify' }).click();

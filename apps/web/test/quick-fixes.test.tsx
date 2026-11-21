@@ -9,11 +9,17 @@ afterEach(cleanup);
 describe('Password fields', () => {
   it('show and hide what is typed with the eye button', () => {
     render(<Field label="Password" type="password" defaultValue="Secret#Pass123" />);
-    const input = screen.getByLabelText('Password', { selector: 'input' });
+    // The box's name is just its label, so `getByLabel('Password')`-style
+    // lookups (the staging E2E sign-in) find one element.
+    const input = screen.getByLabelText('Password', { exact: true });
+    expect(input.tagName).toBe('INPUT');
     expect(input.getAttribute('type')).toBe('password');
-    fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    const eye = screen.getByRole('button', { name: 'Show password' });
+    expect(eye.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(eye);
     expect(input.getAttribute('type')).toBe('text');
-    fireEvent.click(screen.getByRole('button', { name: 'Hide password' }));
+    expect(eye.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(eye);
     expect(input.getAttribute('type')).toBe('password');
   });
 
