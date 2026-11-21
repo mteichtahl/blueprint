@@ -174,7 +174,7 @@ export class NotifyStack extends BmgStack {
         filters: [
           FilterCriteria.filter({
             dynamodb: {
-              Keys: { PK: { S: LIVE_PK_PREFIXES.map((p) => FilterRule.beginsWith(p)) } },
+              Keys: { PK: { S: LIVE_PK_PREFIXES.flatMap((p) => FilterRule.beginsWith(p)) } },
             },
           }),
         ],
