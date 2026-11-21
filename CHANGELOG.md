@@ -24,6 +24,12 @@ Plus invitation tracking, finished reviews, and a smarter library.
 
 ### New
 
+- **Artists get a desktop layout** on computers and on iPads held sideways:
+  a menu down the side, Ask BMG at the top, a dashboard Home, the full
+  three-pane Chat, the library table with its folder tree, a gigs table and
+  to-dos that open beside the list. Phones (and iPads held upright) keep
+  the phone layout. Artists can pick **Automatic**, **Phone** or
+  **Desktop** in Profile › Layout.
 - **Quick reactions in Chat:** tap or hover a message to react with 👍 👎 😊
   or 😢. Tap the same one again to take it off.
 - **Invitations** are listed under Invite artist, showing whether each is

@@ -769,11 +769,27 @@ export function BmgShell({
 }
 
 // ── Artist app: phone-first, navy blueprint header + bottom tab bar ──────────
+// Rev 16: on a computer (and iPads held sideways) the same shell switches to a
+// blueprint sidebar and top bar. It's one component on purpose: the content
+// keeps its place in the tree, so resizing or turning a tablet across 1024px
+// keeps the open page and anything typed.
 export interface PhoneTab {
   id: string;
   label: string;
   icon: IconName;
   soon?: boolean;
+}
+
+export interface ArtistDesktop {
+  /** Sidebar items: the phone tabs, then the pages reached from Home. */
+  sections: NavSection[];
+  theme: Theme;
+  onTheme: (t: Theme) => void;
+  bell?: ReactNode;
+  /** The account menu on the avatar. */
+  account: ReactNode;
+  /** The page heading at the top of the content. */
+  pageHead?: ReactNode;
 }
 
 export function ArtistShell({
@@ -782,62 +798,154 @@ export function ArtistShell({
   onNavigate,
   header,
   onAsk,
+  desktop,
   children,
 }: {
   tabs: PhoneTab[];
   current: string;
   onNavigate: (id: string) => void;
   header: ReactNode;
-  /** Opted-in artists only: the floating assistant button. */
+  /** Opted-in artists only: the floating assistant button (phone), Ask BMG and ⌘K (desktop). */
   onAsk?: () => void;
+  /** Set for the desktop layout (rev 16). */
+  desktop?: ArtistDesktop | undefined;
   children: ReactNode;
 }) {
   const main = useRef<HTMLElement>(null);
-  // Each tab starts at the top (the content area scrolls, not the window).
+  // Each tab starts at the top (on a phone the content area scrolls, not the window).
   useEffect(() => {
     if (main.current) main.current.scrollTop = 0;
+    if (desktop) window.scrollTo?.({ top: 0 });
   }, [current]);
+  const wide = !!desktop;
+  useEffect(() => {
+    if (!onAsk || !wide) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        onAsk();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onAsk, wide]);
   return (
-    <div className="app-frame mx-auto flex w-full max-w-[480px] flex-col overflow-hidden bg-background text-foreground shadow-md">
+    <div
+      className={
+        desktop
+          ? 'bmg-frame artist-desktop flex min-h-dvh bg-background text-foreground'
+          : 'app-frame mx-auto flex w-full max-w-[480px] flex-col overflow-hidden bg-background text-foreground shadow-md'
+      }
+    >
       <SkipLink />
-      <header className="bp flex flex-none flex-col gap-1.5 overflow-hidden px-5 pt-[calc(10px+env(safe-area-inset-top))] pr-[max(20px,env(safe-area-inset-right))] pb-3.5 pl-[max(20px,env(safe-area-inset-left))]">
-        <Ribbon text="ARTIST ★ ALL ACCESS" className="-mx-8 mb-1.5" />
-        {header}
-      </header>
-      <main
-        ref={main}
-        id="main"
-        tabIndex={-1}
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-4 pt-3 pb-24 outline-none"
-      >
-        {children}
-      </main>
-      <nav aria-label="Tabs" className="tabbar relative flex flex-none">
-        {onAsk && current !== 'chat' && (
-          <button
-            type="button"
-            aria-label="Ask BMG"
-            onClick={onAsk}
-            className="absolute -top-[70px] right-4 flex size-14 items-center justify-center rounded-full border-2 border-[#011935] bg-lilac text-[#011935] shadow-[3px_3px_0_#011935] hover:bg-lilac-hover"
+      {desktop && (
+        <div className="sticky top-0 h-dvh w-[264px] flex-none overflow-y-auto overscroll-contain bg-[#011935]">
+          <nav
+            aria-label="Main"
+            className="bp flex min-h-full flex-col gap-0.5 overflow-x-hidden px-3.5 pt-[18px] pb-3.5"
           >
-            <Icon name="assistant" size={24} />
-          </button>
+            <Ribbon text="ARTIST ★ ALL ACCESS" className="-mx-8 mt-2 mb-3" />
+            <button
+              type="button"
+              className="mb-[14px] px-2 text-left"
+              aria-label="Blueprint Music Group, go to Home"
+              onClick={() => onNavigate('home')}
+            >
+              <Logo />
+            </button>
+            {desktop.sections.map((section, i) => (
+              <div key={section.label ?? i} className="flex flex-col gap-0.5">
+                {section.label && <div className="navlabel">{section.label}</div>}
+                {section.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    // 44px rows: iPads held sideways get this layout too.
+                    className="nav min-h-11"
+                    aria-current={current === item.id ? 'page' : undefined}
+                    onClick={() => onNavigate(item.id)}
+                  >
+                    {item.icon && <Icon name={item.icon} />}
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                    {item.badge !== undefined && item.badge !== 0 && (
+                      <span className={`tag t${item.badgeTone ?? 'k'}`}>{item.badge}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ))}
+            <div className="mt-auto pt-5">
+              <AppearanceSwitch theme={desktop.theme} onChange={desktop.onTheme} />
+              <ReleaseFooter />
+            </div>
+          </nav>
+        </div>
+      )}
+      <div className={desktop ? 'bmg-col flex min-w-0 flex-1 flex-col' : 'contents'}>
+        {desktop ? (
+          <header className="topbar">
+            <div className="ml-auto flex items-center gap-2.5">
+              {onAsk && (
+                <button type="button" className="askbtn" title="Ask BMG (⌘K)" onClick={onAsk}>
+                  <Icon name="assistant" />
+                  Ask BMG
+                  <span className="kbd" aria-hidden="true">
+                    ⌘K
+                  </span>
+                </button>
+              )}
+              {desktop.bell}
+              {desktop.account}
+            </div>
+          </header>
+        ) : (
+          <header className="bp flex flex-none flex-col gap-1.5 overflow-hidden px-5 pt-[calc(10px+env(safe-area-inset-top))] pr-[max(20px,env(safe-area-inset-right))] pb-3.5 pl-[max(20px,env(safe-area-inset-left))]">
+            <Ribbon text="ARTIST ★ ALL ACCESS" className="-mx-8 mb-1.5" />
+            {header}
+          </header>
         )}
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className="ptab"
-            aria-current={current === t.id ? 'page' : undefined}
-            aria-disabled={t.soon || undefined}
-            title={t.soon ? 'Coming in a later release' : undefined}
-            onClick={() => !t.soon && onNavigate(t.id)}
-          >
-            <Icon name={t.icon} size={22} />
-            {t.label}
-          </button>
-        ))}
-      </nav>
+        <main
+          ref={main}
+          id="main"
+          tabIndex={-1}
+          className={
+            desktop
+              ? 'flex flex-col gap-5 px-8 pt-6 pb-11 outline-none'
+              : 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-4 pt-3 pb-24 outline-none'
+          }
+        >
+          {desktop?.pageHead}
+          {children}
+        </main>
+        {!desktop && (
+          <nav aria-label="Tabs" className="tabbar relative flex flex-none">
+            {onAsk && current !== 'chat' && (
+              <button
+                type="button"
+                aria-label="Ask BMG"
+                onClick={onAsk}
+                className="absolute -top-[70px] right-4 flex size-14 items-center justify-center rounded-full border-2 border-[#011935] bg-lilac text-[#011935] shadow-[3px_3px_0_#011935] hover:bg-lilac-hover"
+              >
+                <Icon name="assistant" size={24} />
+              </button>
+            )}
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="ptab"
+                aria-current={current === t.id ? 'page' : undefined}
+                aria-disabled={t.soon || undefined}
+                title={t.soon ? 'Coming in a later release' : undefined}
+                onClick={() => !t.soon && onNavigate(t.id)}
+              >
+                <Icon name={t.icon} size={22} />
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        )}
+      </div>
     </div>
   );
 }

@@ -3521,7 +3521,9 @@ function Chat({
         <section className="wa-pane wa-pane-empty">
           <div className="wa-emptyhero">
             <G n="newchat" size={48} />
-            <p className="wa-name">Chat with your artists</p>
+            <p className="wa-name">
+              {ctx.isBmg ? 'Chat with your artists' : 'Chat with Blueprint and other artists'}
+            </p>
             <p className="wa-sub">Pick a chat on the left, or start a new one.</p>
             <p className="wa-sub">
               <Icon name="lock" size={12} /> Chats between artists are private to them. Blueprint
