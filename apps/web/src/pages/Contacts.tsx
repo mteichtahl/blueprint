@@ -30,7 +30,63 @@ import { useLive } from '../lib/live.ts';
  * Contacts (rev 7): one shared list. Blueprint manages it (BMG desktop
  * "Contacts"); artists search it, pick from it and add to it, and can change
  * only what they added. Blueprint's notes never reach artists (the API drops them).
+ *
+ * Rev 18: a contact an artist adds is theirs alone until they share it, with
+ * Blueprint, or with Blueprint and the other artists.
  */
+
+export type ContactSharing = 'private' | 'bmg' | 'all';
+
+/** The choices an artist has for their own contact, in order. */
+export const SHARING_OPTIONS: readonly { id: ContactSharing; label: string; hint: string }[] = [
+  { id: 'private', label: 'Only me', hint: 'Nobody else sees this contact, not even Blueprint.' },
+  { id: 'bmg', label: 'Me and Blueprint', hint: 'The Blueprint team can see and use it.' },
+  {
+    id: 'all',
+    label: 'Blueprint and other artists',
+    hint: 'Everyone in the app can see and pick it.',
+  },
+];
+
+/** "Only you", "Shared with Blueprint"… for a tag on a contact. */
+export function sharingLabel(c: Pick<Contact, 'sharing' | 'mine'>, isBmg: boolean): string | null {
+  if (c.sharing === 'private') return c.mine ? 'Only you' : null;
+  if (c.sharing === 'bmg')
+    return c.mine ? 'Shared with Blueprint' : isBmg ? 'Shared with Blueprint only' : null;
+  return null;
+}
+
+/** "Who can see this contact?" for the artist who added it (rev 18). */
+export function SharingChoice({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: ContactSharing;
+  onChange: (v: ContactSharing) => void;
+  disabled?: boolean;
+}) {
+  const hint = SHARING_OPTIONS.find((o) => o.id === value)?.hint;
+  return (
+    <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0" disabled={disabled}>
+      <legend className="mb-1.5 p-0 text-[15px] font-bold">Who can see this contact?</legend>
+      <div className="flex flex-wrap gap-1.5">
+        {SHARING_OPTIONS.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            className="chip min-h-8"
+            aria-pressed={value === o.id}
+            onClick={() => onChange(o.id)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {hint && <span className="src">{hint}</span>}
+    </fieldset>
+  );
+}
 
 export interface Contact {
   contactId: string;
@@ -48,6 +104,10 @@ export interface Contact {
   tags: string[];
   archived: boolean;
   addedByArtist: boolean;
+  /** Who can see it (rev 18). Blueprint's contacts are always `all`. */
+  sharing: ContactSharing;
+  /** Added by the person signed in. */
+  mine: boolean;
   canEdit: boolean;
   bmgNotes?: string;
   /** When it was added to the shared list (ISO time). */
@@ -82,6 +142,8 @@ const EMPTY = {
   address: '',
   tags: [] as string[],
   bmgNotes: '',
+  /** Artists' new contacts are private until they share them (rev 18). */
+  sharing: 'private' as ContactSharing,
 };
 export type ContactDraft = typeof EMPTY;
 
@@ -171,9 +233,12 @@ export function ContactForm({
           address: contact.address,
           tags: contact.tags,
           bmgNotes: contact.bmgNotes ?? '',
+          sharing: contact.sharing,
         }
       : {}),
   });
+  // Only the artist who added a contact (or is adding one) picks who sees it.
+  const choosesSharing = !isBmg && (!contact || (contact.mine && contact.addedByArtist));
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<Contact | null>(null);
   const [busy, setBusy] = useState(false);
@@ -186,7 +251,11 @@ export function ContactForm({
     setBusy(true);
     setError(null);
     setExisting(null);
-    const body = { ...f, ...(isBmg ? {} : { bmgNotes: undefined }) };
+    const body = {
+      ...f,
+      ...(isBmg ? {} : { bmgNotes: undefined }),
+      ...(choosesSharing ? {} : { sharing: undefined }),
+    };
     try {
       const saved = contact
         ? await api<Contact>(cfg, token, 'PATCH', `/contacts/${contact.contactId}`, body)
@@ -217,7 +286,7 @@ export function ContactForm({
           label="Job title"
           value={f.jobTitle}
           onChange={set('jobTitle')}
-          placeholder="Venue booker"
+          placeholder="Venue contact"
         />
         <Field label="Organisation" value={f.organisation} onChange={set('organisation')} />
         <Field label="Email" type="email" value={f.email} onChange={set('email')} />
@@ -261,6 +330,9 @@ export function ContactForm({
             ))}
           </div>
         </div>
+      )}
+      {choosesSharing && (
+        <SharingChoice value={f.sharing} onChange={(sharing) => setF({ ...f, sharing })} />
       )}
       {isBmg && (
         <TextArea
@@ -346,6 +418,32 @@ export function Contacts({
   const sel = useSelect();
   const selectable = isBmg && !compact;
 
+  const [sharingBusy, setSharingBusy] = useState(false);
+  /** The artist shares (or un-shares) their own contact straight from its page. */
+  async function share(c: Contact, sharing: ContactSharing) {
+    if (sharing === c.sharing) return;
+    setActionError(null);
+    setSharingBusy(true);
+    try {
+      const saved = await api<Contact>(cfg, token, 'PATCH', `/contacts/${c.contactId}`, {
+        sharing,
+      });
+      setOpen(saved);
+      setNote(
+        sharing === 'private'
+          ? `Only you can see ${saved.name} now.`
+          : sharing === 'bmg'
+            ? `${saved.name} is shared with Blueprint.`
+            : `${saved.name} is shared with Blueprint and the other artists.`,
+      );
+      void reload();
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setSharingBusy(false);
+    }
+  }
+
   async function archive(c: Contact, archived: boolean) {
     setActionError(null);
     try {
@@ -384,9 +482,10 @@ export function Contacts({
           title={c.name}
           sub={[c.jobTitle, c.organisation].filter(Boolean).join(' · ') || undefined}
           badges={
-            c.tags.length > 0 || c.archived ? (
+            c.tags.length > 0 || c.archived || sharingLabel(c, isBmg) ? (
               <>
                 {c.archived && <Tag tone="c">Archived</Tag>}
+                {sharingLabel(c, isBmg) && <Tag tone="n">{sharingLabel(c, isBmg)}</Tag>}
                 {c.tags.map((t) => (
                   <Tag key={t}>{t}</Tag>
                 ))}
@@ -399,6 +498,13 @@ export function Contacts({
           {actionError && <Notice tone="error">{actionError}</Notice>}
           {note && <Notice tone="success">{note}</Notice>}
           <ContactView c={c} />
+          {!isBmg && c.mine && c.addedByArtist && (
+            <SharingChoice
+              value={c.sharing}
+              disabled={sharingBusy}
+              onChange={(sharing) => void share(c, sharing)}
+            />
+          )}
           {isBmg && c.bmgNotes && (
             <Notice>
               <b>Blueprint notes:</b> {c.bmgNotes}
@@ -453,6 +559,13 @@ export function Contacts({
                 {c.archived ? 'Restore' : 'Archive'}
               </Button>
             }
+          />
+        )}
+        {c && !isBmg && c.mine && (
+          <DangerArea
+            title={`Delete ${c.name}`}
+            what="Removed from your contacts, and from anyone you shared it with. A contact used by a venue can’t be deleted."
+            onConfirm={() => remove(c)}
           />
         )}
       </Card>
@@ -514,10 +627,10 @@ export function Contacts({
         </p>
       ) : compact ? (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Contacts">
-          {contactCards(contacts, setOpen)}
+          {contactCards(contacts, setOpen, undefined, isBmg)}
         </ul>
       ) : (
-        <DataTable label="Contacts" cards={contactCards(contacts, setOpen, sel)}>
+        <DataTable label="Contacts" cards={contactCards(contacts, setOpen, sel, isBmg)}>
           <thead>
             <tr>
               {sel.on && (
@@ -572,7 +685,12 @@ export function Contacts({
                     ))}
                   </span>
                 </td>
-                <td>{c.addedByArtist ? 'An artist' : 'Blueprint'}</td>
+                <td>
+                  {c.mine ? 'You' : c.addedByArtist ? 'An artist' : 'Blueprint'}
+                  {sharingLabel(c, isBmg) && (
+                    <span className="src block">{sharingLabel(c, isBmg)}</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -581,14 +699,19 @@ export function Contacts({
       <p className="src">
         {isBmg
           ? 'Shared with artists: they can pick and add contacts, and change only the ones they added. Your notes stay private.'
-          : 'Shared by Blueprint. Pick contacts for your gigs and add new ones.'}
+          : 'Pick contacts for your gigs and add your own. A contact you add is only yours until you share it.'}
       </p>
     </Card>
   );
 }
 
 /** Contacts as phone cards: name and role, tags, and one-tap call and email. */
-function contactCards(contacts: Contact[], open: (c: Contact) => void, select?: SelectState) {
+function contactCards(
+  contacts: Contact[],
+  open: (c: Contact) => void,
+  select?: SelectState,
+  isBmg = false,
+) {
   const selecting = !!select?.on;
   return contacts.map((c) => (
     <RowCard
@@ -606,8 +729,9 @@ function contactCards(contacts: Contact[], open: (c: Contact) => void, select?: 
       status={c.archived ? <Tag>Archived</Tag> : undefined}
       sub={[c.jobTitle, c.organisation].filter(Boolean).join(' · ') || c.email || c.phone}
       tags={
-        c.tags.length > 0 ? (
+        c.tags.length > 0 || sharingLabel(c, isBmg) ? (
           <>
+            {sharingLabel(c, isBmg) && <Tag tone="n">{sharingLabel(c, isBmg)}</Tag>}
             {c.tags.map((t) => (
               <Tag key={t}>{t}</Tag>
             ))}
@@ -667,7 +791,7 @@ export function archiveActions(
 
 /**
  * Pick someone from the main contacts list, or add them on the spot.
- * Used wherever a person is needed: venue manager and booker, crew, gig contacts.
+ * Used wherever a person is needed: the venue contact, crew, gig contacts.
  */
 export function ContactPicker({
   cfg,
@@ -684,7 +808,7 @@ export function ContactPicker({
   label: string;
   value: { contactId: string; name: string } | null;
   onChange: (c: Contact | null) => void;
-  /** Tags given to a contact added from here, e.g. "Venue booker". */
+  /** Tags given to a contact added from here, e.g. "Venue contact". */
   defaultTags?: string[];
 }) {
   const [q, setQ] = useState('');

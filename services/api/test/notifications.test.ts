@@ -442,3 +442,27 @@ describe('account security', () => {
     expect(p!.draft.body).toContain('no recovery codes left');
   });
 });
+
+describe('meetings an artist was in (rev 18)', () => {
+  it('tells the artists in it, with when and who, and links to My meetings', () => {
+    const p = plan(
+      {
+        type: 'meeting.withArtist',
+        meetingId: 'm1',
+        artistIds: [A],
+        title: 'Release planning',
+        startedAt: '2026-11-20T01:00:00Z',
+        withNames: ['Kyra'],
+        bySub: 'staffA',
+      },
+      people,
+    );
+    expect(subs(p)).toEqual(['chloe']);
+    expect(p?.draft).toMatchObject({
+      kind: 'meeting',
+      title: 'You were in a meeting with Blueprint: Release planning',
+      body: "Fri 20 Nov · with Kyra. It's in My meetings.",
+      link: 'meetings',
+    });
+  });
+});

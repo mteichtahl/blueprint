@@ -37,8 +37,9 @@ import { useLive } from '../lib/live.ts';
 
 /**
  * Venues (rev 7): name, capacity, backline (yes/no), website, address, and the
- * venue manager and booker, who are people in Contacts. Shared like contacts:
- * artists pick and add; Blueprint manages.
+ * venue contact, a person in Contacts (rev 18: one contact, where there used to
+ * be a manager and a booker). Shared like contacts: artists pick and add;
+ * Blueprint manages.
  */
 
 export interface VenuePerson {
@@ -57,8 +58,8 @@ export interface Venue {
   website: string;
   address: string;
   suburb: string;
-  manager: VenuePerson | null;
-  booker: VenuePerson | null;
+  /** The venue's contact; null when none is set, or the caller can't see them. */
+  contact: VenuePerson | null;
   /** "Automatically get logo" from the website when none is uploaded (default on). */
   autoLogo: boolean;
   logo: VenueLogoRef | null;
@@ -309,7 +310,7 @@ const existingVenue = (e: unknown): Venue | undefined =>
 const personRef = (p: VenuePerson | Contact | null) =>
   p ? { contactId: p.contactId, name: p.name } : null;
 
-/** Add or edit a venue; the manager and booker are picked from (or added to) Contacts. */
+/** Add or edit a venue; the venue contact is picked from (or added to) Contacts. */
 export function VenueForm({
   cfg,
   token,
@@ -339,8 +340,7 @@ export function VenueForm({
     suburb: venue?.suburb ?? '',
     bmgNotes: venue?.bmgNotes ?? '',
   });
-  const [manager, setManager] = useState(personRef(venue?.manager ?? null));
-  const [booker, setBooker] = useState(personRef(venue?.booker ?? null));
+  const [person, setPerson] = useState(personRef(venue?.contact ?? null));
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<Venue | null>(null);
   const [busy, setBusy] = useState(false);
@@ -572,8 +572,7 @@ export function VenueForm({
       website: f.website,
       address: f.address,
       suburb: f.suburb,
-      managerContactId: manager?.contactId ?? null,
-      bookerContactId: booker?.contactId ?? null,
+      contactId: person?.contactId ?? null,
       autoLogo,
       ...(isBmg ? { bmgNotes: f.bmgNotes } : {}),
     };
@@ -732,19 +731,10 @@ export function VenueForm({
           cfg={cfg}
           token={token}
           isBmg={isBmg}
-          label="Venue manager"
-          value={manager}
-          onChange={(c) => setManager(personRef(c))}
-          defaultTags={['Venue manager']}
-        />
-        <ContactPicker
-          cfg={cfg}
-          token={token}
-          isBmg={isBmg}
-          label="Venue booker"
-          value={booker}
-          onChange={(c) => setBooker(personRef(c))}
-          defaultTags={['Venue booker']}
+          label="Venue contact"
+          value={person}
+          onChange={(c) => setPerson(personRef(c))}
+          defaultTags={['Venue contact']}
         />
       </div>
       {isBmg && (
@@ -788,27 +778,17 @@ function Person({ role, p }: { role: string; p: VenuePerson | null }) {
   );
 }
 
-/** Who at a venue can be reached: manager and booker, once each, with how. */
-export function venueContacts(v: Pick<Venue, 'manager' | 'booker'>) {
-  const out: { role: string; p: VenuePerson }[] = [];
-  for (const [role, p] of [
-    ['Venue booker', v.booker],
-    ['Venue manager', v.manager],
-  ] as const) {
-    if (!p || (!p.email && !p.phone)) continue;
-    const same = out.find((o) => o.p.contactId === p.contactId);
-    if (same) same.role = 'Venue manager and booker';
-    else out.push({ role, p });
-  }
-  return out;
+/** Who at a venue can be reached: the venue contact, when they have an email or phone. */
+export function venueContacts(v: Pick<Venue, 'contact'>) {
+  const p = v.contact;
+  return p && (p.email || p.phone) ? [{ role: 'Venue contact', p }] : [];
 }
 
 const linkBtn =
   'inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full border-2 px-5 font-title text-[15px] font-extrabold no-underline transition';
 
 /**
- * "Contact venue": pick who (booker or manager), then email or phone them.
- * With only one person, it goes straight to how.
+ * "Contact venue": email or phone the venue contact.
  */
 export function ContactVenue({ venue, onEdit }: { venue: Venue; onEdit?: () => void }) {
   const people = venueContacts(venue);
@@ -839,8 +819,8 @@ export function ContactVenue({ venue, onEdit }: { venue: Venue; onEdit?: () => v
           {people.length === 0 ? (
             <div className="flex flex-col gap-2">
               <p className="m-0">
-                No one at {venue.name} has an email or phone number yet. Add a venue manager or
-                booker with their details.
+                No one at {venue.name} has an email or phone number yet. Add a venue contact with
+                their details.
               </p>
               {onEdit && (
                 <Button
@@ -997,10 +977,9 @@ export function Venues({
           {note && <Notice tone="success">{note}</Notice>}
           <VenueMapAndSite cfg={cfg} token={token} venue={v} />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <Person role="Venue manager" p={v.manager} />
-            <Person role="Venue booker" p={v.booker} />
+            <Person role="Venue contact" p={v.contact} />
           </div>
-          {!v.manager && !v.booker && <p className="src">No manager or booker yet.</p>}
+          {!v.contact && <p className="src">No venue contact yet.</p>}
           {isBmg && v.bmgNotes && (
             <Notice>
               <b>Blueprint notes:</b> {v.bmgNotes}
@@ -1167,8 +1146,7 @@ export function Venues({
               <th scope="col">Capacity</th>
               <th scope="col">Backline</th>
               <th scope="col">Booked</th>
-              <th scope="col">Manager</th>
-              <th scope="col">Booker</th>
+              <th scope="col">Venue contact</th>
             </tr>
           </thead>
           <tbody>
@@ -1203,8 +1181,7 @@ export function Venues({
                     {v.bookings ?? 0}
                   </span>
                 </td>
-                <td>{v.manager?.name ?? '—'}</td>
-                <td>{v.booker?.name ?? '—'}</td>
+                <td>{v.contact?.name ?? '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -1247,10 +1224,7 @@ function venueCards(
             <span className="sr-only">{bookedLabel(v.bookings)}</span>
           </span>
           {v.backline && <Tag tone="n">Backline</Tag>}
-          {v.booker?.name && <span className="src">Booker: {v.booker.name}</span>}
-          {!v.booker?.name && v.manager?.name && (
-            <span className="src">Manager: {v.manager.name}</span>
-          )}
+          {v.contact?.name && <span className="src">Contact: {v.contact.name}</span>}
         </>
       }
       onOpen={() => (selecting ? select!.toggle(v.venueId) : open(v))}

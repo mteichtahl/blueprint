@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { Principal } from '@bmg/authz';
 import {
   applyContentPatch,
+  artistMeeting,
+  artistSeesMeeting,
   artistsInvolved,
+  newArtistAttendees,
   clock,
   emptyContent,
   isMeetingAudio,
@@ -284,5 +287,71 @@ describe('who can open meetings', () => {
     expect(
       MeetingCreate.safeParse({ title: 'Catch-up', consent: true, shared: true }).success,
     ).toBe(false);
+  });
+});
+
+describe('what artists see of meetings (rev 18)', () => {
+  const m = (over: Partial<Meeting> = {}): Meeting =>
+    ({
+      meetingId: 'm1',
+      artistId: ARTIST,
+      title: 'Release planning',
+      source: 'recording',
+      createdBy: 'staff',
+      createdByRole: 'bmg-staff',
+      createdAt: '2026-11-20T00:00:00Z',
+      startedAt: '2026-11-20T00:00:00Z',
+      durationSec: 1500,
+      attendees: [
+        { kind: 'staff', id: 'staff', name: 'Kyra' },
+        { kind: 'artist', id: ARTIST, name: 'Chloe' },
+      ],
+      consent: { bySub: 'staff', at: '', wording: '' },
+      shared: false,
+      status: 'ready',
+      contentVersion: 1,
+      updatedAt: '',
+      noteFileId: 'note1',
+      audioFileId: 'audio1',
+      ...over,
+    }) as Meeting;
+
+  it('shows a meeting to the artists who were in it, and a shared one to the artist it’s about', () => {
+    expect(artistSeesMeeting(m(), ARTIST)).toBe(true);
+    expect(artistSeesMeeting(m(), OTHER)).toBe(false);
+    const aboutOnly = m({ attendees: [{ kind: 'staff', id: 'staff', name: 'Kyra' }] });
+    expect(artistSeesMeeting(aboutOnly, ARTIST)).toBe(false);
+    expect(artistSeesMeeting({ ...aboutOnly, shared: true }, ARTIST)).toBe(true);
+    const guest = m({
+      artistId: OTHER,
+      attendees: [{ kind: 'artist', id: ARTIST, name: 'Chloe' }],
+    });
+    expect(artistSeesMeeting(guest, ARTIST)).toBe(true);
+  });
+
+  it('gives the title, when and who; the note and recording only once shared', () => {
+    const v = artistMeeting(m(), ARTIST);
+    expect(v).toMatchObject({ title: 'Release planning', with: ['Kyra'], aboutMe: true });
+    expect(v.noteFileId).toBeNull();
+    expect(v.audioFileId).toBeNull();
+    expect('segments' in v || 'notes' in v).toBe(false);
+    expect(artistMeeting(m({ shared: true }), ARTIST)).toMatchObject({
+      shared: true,
+      noteFileId: 'note1',
+      audioFileId: 'audio1',
+    });
+    // A guest in someone else's meeting never gets its files.
+    const guest = artistMeeting(m({ artistId: OTHER, shared: true }), ARTIST);
+    expect(guest).toMatchObject({ aboutMe: false, shared: false, noteFileId: null });
+  });
+
+  it('tells only artists newly added to the attendees', () => {
+    const before = m().attendees;
+    expect(newArtistAttendees([], before)).toEqual([ARTIST]);
+    expect(newArtistAttendees(before, before)).toEqual([]);
+    expect(
+      newArtistAttendees(before, [...before, { kind: 'artist', id: OTHER, name: 'Sarun' }]),
+    ).toEqual([OTHER]);
+    expect(newArtistAttendees([], [{ kind: 'contact', id: 'c1', name: 'Pat' }])).toEqual([]);
   });
 });

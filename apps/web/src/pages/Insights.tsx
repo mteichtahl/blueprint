@@ -1,7 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
-import { SOURCE_LABEL, type AccountInsight, type InsightsData } from '../lib/connectors.ts';
+import {
+  melbourneDay,
+  SOURCE_LABEL,
+  type AccountInsight,
+  type HumanitixEventRow,
+  type HumanitixStats,
+  type InsightsData,
+} from '../lib/connectors.ts';
+import { useLive } from '../lib/live.ts';
 import {
   Avatar,
   Button,
@@ -9,6 +17,7 @@ import {
   Chips,
   DataTable,
   Notice,
+  Select,
   Tag,
   WaveLoader,
 } from '../components/ui.tsx';
@@ -322,20 +331,52 @@ export function ArtistStats({
 }) {
   const [range, setRange] = useState<Range>('30');
   const [data, setData] = useState<
-    (Omit<AccountInsight, 'account' | 'name'> & { range: number }) | null
+    | (Omit<AccountInsight, 'account' | 'name'> & { range: number; humanitix?: HumanitixStats })
+    | null
   >(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    void (async () => {
-      try {
-        setData(await api(cfg, token, 'GET', `/artists/${artistId}/stats?range=${range}`));
-      } catch (e) {
-        setError((e as Error).message);
-      }
-    })();
+  const load = useCallback(async () => {
+    try {
+      setData(await api(cfg, token, 'GET', `/artists/${artistId}/stats?range=${range}`));
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }, [cfg, token, artistId, range]);
+  // A gig linked (or its count synced) elsewhere shows here without a reload.
+  const live = useLive(['gigs'], artistId);
+  useEffect(() => void load(), [load, live]);
   if (!data) return error ? <Notice tone="error">{error}</Notice> : <WaveLoader />;
   const a: AccountInsight = { ...data, account: artistId, name };
+  return (
+    <>
+      <FollowersCard a={a} name={name} compact={compact} range={range} setRange={setRange} />
+      {data.humanitix && (
+        <HumanitixCard
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          hx={data.humanitix}
+          range={range}
+          onChanged={load}
+        />
+      )}
+    </>
+  );
+}
+
+function FollowersCard({
+  a,
+  name,
+  compact,
+  range,
+  setRange,
+}: {
+  a: AccountInsight;
+  name: string;
+  compact: boolean;
+  range: Range;
+  setRange: (r: Range) => void;
+}) {
   return (
     <Card
       title={<span className="eyebrow">{compact ? 'My stats' : 'Followers'}</span>}
@@ -375,5 +416,260 @@ export function ArtistStats({
         <p className="src">No numbers yet. Connect accounts in My connectors to see them here.</p>
       )}
     </Card>
+  );
+}
+
+const dayLabel = (d: string) =>
+  new Date(`${d}T00:00:00`).toLocaleDateString('en-AU', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+const syncedLabel = (iso: string | null) =>
+  iso
+    ? new Date(iso).toLocaleString('en-AU', {
+        day: 'numeric',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : 'not yet';
+
+/**
+ * Rev 18: the artist's Humanitix tickets in My stats: tickets sold across
+ * upcoming linked gigs, each linked gig's count, and (for the artist) their
+ * Humanitix events with an offer to link each one to a gig, or add it as one.
+ */
+export function HumanitixCard({
+  cfg,
+  token,
+  artistId,
+  hx,
+  range,
+  onChanged,
+}: {
+  cfg: AppConfig;
+  token: string;
+  artistId: string;
+  hx: HumanitixStats;
+  range: Range;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mine = hx.events !== undefined;
+
+  async function run(key: string, done: string, step: () => Promise<unknown>) {
+    setBusy(key);
+    setError(null);
+    setNote(null);
+    try {
+      await step();
+      // Fetch the counts for what just changed, then show them.
+      await api(cfg, token, 'POST', `/artists/${artistId}/connectors/humanitix/sync`).catch(
+        () => undefined,
+      );
+      await onChanged();
+      setNote(done);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+  const link = (e: HumanitixEventRow, gigId: string, gigTitle: string) =>
+    run(e.id, `${e.name} is linked to ${gigTitle}. Its ticket sales come in by themselves.`, () =>
+      api(cfg, token, 'PATCH', `/artists/${artistId}/gigs/${gigId}`, {
+        humanitixEventId: e.id,
+      }),
+    );
+  const unlink = (gigId: string, title: string) =>
+    run(gigId, `${title} isn't linked to Humanitix any more.`, () =>
+      api(cfg, token, 'PATCH', `/artists/${artistId}/gigs/${gigId}`, { humanitixEventId: null }),
+    );
+  const addGig = (e: HumanitixEventRow) =>
+    run(e.id, `${e.name} is in your gigs now, linked to Humanitix.`, () =>
+      api(cfg, token, 'POST', `/artists/${artistId}/gigs`, {
+        title: e.name.slice(0, 120),
+        date: melbourneDay(e.startDate),
+        status: 'confirmed',
+        deal: 'ticketed',
+        humanitixEventId: e.id,
+      }),
+    );
+
+  return (
+    <Card
+      title={<span className="eyebrow">Tickets · Humanitix</span>}
+      action={
+        hx.connected ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy !== null}
+            onClick={() => void run('sync', 'Up to date with Humanitix.', async () => undefined)}
+          >
+            {busy === 'sync' ? 'Syncing…' : 'Sync now'}
+          </Button>
+        ) : undefined
+      }
+    >
+      {!hx.connected ? (
+        <p className="src m-0">
+          {mine
+            ? 'Connect Humanitix in My connectors to see ticket sales for your gigs here.'
+            : 'Humanitix isn’t connected for this artist yet.'}
+        </p>
+      ) : (
+        <>
+          {error && <Notice tone="error">{error}</Notice>}
+          {note && <Notice tone="success">{note}</Notice>}
+          {hx.lastError && <Notice tone="error">Humanitix: {hx.lastError}</Notice>}
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="t text-[30px]">{n(hx.ticketsSold)}</span>
+            <span className="src">
+              tickets sold for upcoming gigs · synced {syncedLabel(hx.lastSyncAt)}
+            </span>
+          </div>
+          <Sparkline values={hx.series} color="#011935" label={`Tickets sold over ${range} days`} />
+          {hx.gigs.length > 0 ? (
+            <DataTable fit label="Gigs on Humanitix">
+              <thead>
+                <tr>
+                  <th scope="col">Gig</th>
+                  <th scope="col">Tickets sold</th>
+                  {mine && (
+                    <th scope="col">
+                      <span className="sr-only">Link</span>
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {hx.gigs.map((g) => (
+                  <tr key={g.gigId}>
+                    <td>
+                      <b>{g.title}</b>
+                      <span className="src block">
+                        {dayLabel(g.date)}
+                        {g.eventName && g.eventName !== g.title ? ` · ${g.eventName}` : ''}
+                      </span>
+                    </td>
+                    <td>{g.ticketsSold === null ? 'Syncing…' : n(g.ticketsSold)}</td>
+                    {mine && (
+                      <td>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy !== null}
+                          onClick={() => void unlink(g.gigId, g.title)}
+                        >
+                          Unlink
+                        </Button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </DataTable>
+          ) : (
+            <p className="src m-0">No gigs linked to Humanitix yet.</p>
+          )}
+          {mine && (
+            <HumanitixEvents
+              events={hx.events!}
+              linkable={hx.linkable ?? []}
+              busy={busy}
+              onLink={(e, gigId) => {
+                const g = (hx.linkable ?? []).find((x) => x.gigId === gigId);
+                void link(e, gigId, g?.title ?? 'the gig');
+              }}
+              onAdd={(e) => void addGig(e)}
+            />
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** The artist's Humanitix events, each linked to a gig or offering to be. */
+function HumanitixEvents({
+  events,
+  linkable,
+  busy,
+  onLink,
+  onAdd,
+}: {
+  events: HumanitixEventRow[];
+  linkable: { gigId: string; title: string; date: string }[];
+  busy: string | null;
+  onLink: (e: HumanitixEventRow, gigId: string) => void;
+  onAdd: (e: HumanitixEventRow) => void;
+}) {
+  const [pick, setPick] = useState<Record<string, string>>({});
+  if (events.length === 0)
+    return <p className="src m-0">No events found in your Humanitix account yet.</p>;
+  return (
+    <section className="flex flex-col gap-2" aria-label="Your Humanitix events">
+      <span className="text-[15px] font-bold">Your Humanitix events</span>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">
+        {events.map((e) => {
+          const day = melbourneDay(e.startDate);
+          const chosen = pick[e.id] ?? e.suggestedGigId ?? '';
+          return (
+            <li key={e.id} className="flex flex-col gap-2 rounded-lg border border-input p-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <b>{e.name}</b>
+                {day && <span className="src">{dayLabel(day)}</span>}
+                {e.gigId && <Tag tone="s">Linked to {e.gigTitle}</Tag>}
+              </div>
+              {!e.gigId && (
+                <div className="flex flex-wrap items-end gap-2">
+                  {linkable.length > 0 && (
+                    <>
+                      <div className="min-w-[220px] flex-1">
+                        <Select
+                          label={`Link ${e.name} to a gig`}
+                          value={chosen}
+                          onChange={(ev) => setPick({ ...pick, [e.id]: ev.target.value })}
+                          options={[
+                            { value: '', label: 'Pick a gig' },
+                            ...linkable.map((g) => ({
+                              value: g.gigId,
+                              label: `${g.title} · ${dayLabel(g.date)}${g.gigId === e.suggestedGigId ? ' (same day)' : ''}`,
+                            })),
+                          ]}
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="navy"
+                        disabled={!chosen || busy !== null}
+                        onClick={() => onLink(e, chosen)}
+                      >
+                        {busy === e.id ? 'Linking…' : 'Link'}
+                      </Button>
+                    </>
+                  )}
+                  {day && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy !== null}
+                      onClick={() => onAdd(e)}
+                    >
+                      Add as a gig
+                    </Button>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

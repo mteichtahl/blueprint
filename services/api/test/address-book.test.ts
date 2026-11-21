@@ -7,7 +7,11 @@ import {
   contactFor,
   contactMatches,
   ContactPatch,
+  contactVisible,
   findDuplicate,
+  sharingOf,
+  venueContactId,
+  withVenueContact,
   normalisePhone,
   applyVenuePatch,
   findDuplicateVenue,
@@ -88,15 +92,44 @@ describe('contacts', () => {
   it('searches names, organisations, tags and phone digits', () => {
     const c = base({
       organisation: 'The Corner Hotel',
-      tags: ['Venue booker'],
+      tags: ['Venue contact'],
       phone: '0412 345 678',
     });
     expect(contactMatches(c, 'corner')).toBe(true);
     expect(contactMatches(c, 'sam lee')).toBe(true);
     expect(contactMatches(c, '345')).toBe(true);
     expect(contactMatches(c, 'zzz')).toBe(false);
-    expect(contactMatches(c, '', 'venue booker')).toBe(true);
+    expect(contactMatches(c, '', 'venue contact')).toBe(true);
     expect(contactMatches(c, '', 'Crew')).toBe(false);
+  });
+
+  it('keeps an artist’s contact to themselves until they share it (rev 18)', () => {
+    expect(ContactBody.parse({ firstName: 'A' }).sharing).toBe('private');
+    const mine = base({ createdBy: 'u-art', createdByRole: 'artist', sharing: 'private' });
+    const me = { sub: 'u-art', isBmg: false };
+    const other = { sub: 'u-other', isBmg: false };
+    const staff = { sub: 'u-staff2', isBmg: true };
+    expect(contactVisible(mine, me)).toBe(true);
+    expect(contactVisible(mine, other)).toBe(false);
+    expect(contactVisible(mine, staff)).toBe(false);
+    const withBmg = { ...mine, sharing: 'bmg' as const };
+    expect(contactVisible(withBmg, staff)).toBe(true);
+    expect(contactVisible(withBmg, other)).toBe(false);
+    expect(contactVisible({ ...mine, sharing: 'all' }, other)).toBe(true);
+    // Blueprint's contacts, and artists' contacts from before rev 18, are shared.
+    expect(contactVisible(base({ sharing: 'private' }), other)).toBe(true);
+    const older = base({ createdBy: 'u-art', createdByRole: 'artist' });
+    delete (older as Partial<Contact>).sharing;
+    expect(sharingOf(older)).toBe('all');
+    expect(contactFor(mine, false, true)).toMatchObject({ sharing: 'private', mine: true });
+  });
+
+  it('lets only the artist who added a contact change who sees it', () => {
+    const mine = base({ createdBy: 'u-art', createdByRole: 'artist', sharing: 'private' });
+    expect(applyContactPatch(mine, { sharing: 'bmg' }, false, true).sharing).toBe('bmg');
+    expect(applyContactPatch(mine, { sharing: 'all' }, true, false).sharing).toBe('private');
+    expect(applyContactPatch(base(), { sharing: 'private' }, true, true).sharing).toBe('private');
+    expect(sharingOf(applyContactPatch(base(), { sharing: 'private' }, true, true))).toBe('all');
   });
 
   it('tidies tags', () => {
@@ -124,22 +157,52 @@ describe('venues', () => {
 
   it('takes the brief fields with sensible defaults', () => {
     const v = VenueBody.parse({ name: 'Northcote Social Club' });
-    expect(v).toMatchObject({ capacity: 0, backline: false, managerContactId: null });
+    expect(v).toMatchObject({ capacity: 0, backline: false, contactId: null });
     expect(VenueBody.safeParse({ name: '' }).success).toBe(false);
     expect(VenueBody.safeParse({ name: 'X', capacity: -1 }).success).toBe(false);
-    expect(VenueBody.safeParse({ name: 'X', managerContactId: 'Bob' }).success).toBe(false);
+    expect(VenueBody.safeParse({ name: 'X', contactId: 'Bob' }).success).toBe(false);
+    // Rev 18: no more manager and booker.
+    expect(VenueBody.safeParse({ name: 'X', managerContactId: null }).success).toBe(false);
     expect(VenuePatch.parse({ backline: true })).toEqual({ backline: true });
   });
 
-  it('shows the manager and booker as contact cards, without Blueprint notes for artists', () => {
+  it('shows the venue contact as a card, without Blueprint notes for artists', () => {
     const sam = { ...ContactBody.parse({ firstName: 'Sam', email: 's@x.com' }) } as Contact;
     Object.assign(sam, { contactId: 'c1', createdBy: 'u', createdByRole: 'bmg', createdAt: '' });
-    const v = venue({ managerContactId: 'c1', bookerContactId: 'gone', bmgNotes: 'secret' });
+    const v = venue({ contactId: 'c1', bmgNotes: 'secret' });
     const out = venueFor(v, false, true, new Map([['c1', sam]]));
-    expect(out.manager).toMatchObject({ name: 'Sam', email: 's@x.com' });
-    expect(out.booker).toBeNull();
+    expect(out.contact).toMatchObject({ name: 'Sam', email: 's@x.com' });
+    expect('manager' in out || 'booker' in out).toBe(false);
     expect('bmgNotes' in out).toBe(false);
+    expect(venueFor(venue({ contactId: 'gone' }), true, false, new Map()).contact).toBeNull();
     expect(venueFor(v, true, false, new Map()).bmgNotes).toBe('secret');
+  });
+
+  it('reads an older venue’s manager (or else booker) as its contact, and drops both on save', () => {
+    const old = venue({ managerContactId: 'c1', bookerContactId: 'c2' });
+    delete (old as Partial<Venue>).contactId;
+    expect(venueContactId(old)).toBe('c1');
+    expect(venueContactId({ bookerContactId: 'c2' } as Venue)).toBe('c2');
+    const moved = withVenueContact(old);
+    expect(moved.contactId).toBe('c1');
+    expect('managerContactId' in moved || 'bookerContactId' in moved).toBe(false);
+    // Clearing the contact clears the old roles too.
+    expect(applyVenuePatch(old, { contactId: null }, true).contactId).toBeNull();
+  });
+
+  it('hides a venue contact the viewer can’t see', () => {
+    const priv = { ...ContactBody.parse({ firstName: 'Pat' }) } as Contact;
+    Object.assign(priv, {
+      contactId: 'c9',
+      createdBy: 'u-art',
+      createdByRole: 'artist',
+      createdAt: '',
+      sharing: 'private',
+    });
+    const v = venue({ contactId: 'c9' });
+    const people = new Map([['c9', priv]]);
+    expect(venueFor(v, false, true, people, 'u-art').contact).toMatchObject({ name: 'Pat' });
+    expect(venueFor(v, true, false, people, 'u-staff').contact).toBeNull();
   });
 
   it('filters by name, capacity and backline', () => {
@@ -163,8 +226,12 @@ describe('venues', () => {
   });
 
   it('knows which venues use a contact', () => {
-    const all = [venue({ bookerContactId: 'c1' }), venue({ venueId: 'v2' })];
-    expect(venuesUsing(all, 'c1')).toHaveLength(1);
+    const all = [
+      venue({ contactId: 'c1' }),
+      venue({ venueId: 'v2' }),
+      venue({ venueId: 'v3', contactId: null, bookerContactId: 'c1' }),
+    ];
+    expect(venuesUsing(all, 'c1')).toHaveLength(2);
   });
 
   it('keeps Blueprint notes away from artist edits', () => {

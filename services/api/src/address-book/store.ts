@@ -84,6 +84,8 @@ export async function upsertPerson(
   }
   const contact: Contact = {
     ...ContactBody.parse({ ...splitName(p.name), email: p.email, phone: p.phone, tags: [p.tag] }),
+    // Blueprint's contacts are shared; an artist's stay theirs until they share them.
+    sharing: by.role === 'bmg' ? 'all' : 'private',
     contactId: newId(),
     createdBy: by.sub,
     createdByRole: by.role,
