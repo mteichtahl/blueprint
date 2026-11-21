@@ -66,6 +66,8 @@ export interface Gig {
   ticketUrl?: string;
   /** The artist's Humanitix event for this gig (rev 18), picked from their Humanitix list. */
   humanitixEventId?: string;
+  /** Rev 19: 'bmg' when Blueprint picked one of its own Humanitix events; else the artist's. */
+  humanitixAccount?: 'bmg';
   /** Tickets sold on Humanitix, from the hourly sync (rev 18). */
   humanitix?: { ticketsSold: number; syncedAt: string };
   /** Tickets sold, takings and costs; absent until someone enters figures. */

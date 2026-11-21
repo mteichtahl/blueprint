@@ -67,6 +67,12 @@ Plus invitation tracking, finished reviews, and a smarter library.
   count for each gig, and your Humanitix events with **Link** to a gig (the
   one on the same day is suggested) or **Add as a gig**. Linked gigs show
   their Humanitix count on the gig page and in Studio HQ's Tickets card.
+- **Pick a Humanitix event on the gig form:** New gig and Edit gig have a
+  **Humanitix event** picker. Events on the gig's date come first, and one
+  already on another gig can't be picked. Picking one fills in the ticket
+  link, and on a new gig **Use event details** fills the name, date, times
+  and venue. Artists pick from their own Humanitix events, Blueprint from
+  Blueprint's.
 - **Ask for a change** beside Export to PDF on My plan: say what should
   change, and it goes to your plan owner as a to-do. You're told when it's
   done.

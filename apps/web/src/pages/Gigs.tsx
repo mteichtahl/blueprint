@@ -21,6 +21,8 @@ import {
 import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
 import { VenuePicker } from './Venues.tsx';
 import { GigMedia } from '../components/GigMedia.tsx';
+import { HumanitixPicker } from '../components/HumanitixPicker.tsx';
+import { melbourneDay, melbourneTime, type HumanitixEvent } from '../lib/connectors.ts';
 import { useLive } from '../lib/live.ts';
 
 /** Gigs (screens: workspace Gigs tab, BMG Artist gigs, artist My gigs / Plan a gig). */
@@ -44,6 +46,8 @@ export interface Gig {
   ticketUrl?: string;
   /** Rev 18: the artist's Humanitix event, and its count from the hourly sync. */
   humanitixEventId?: string;
+  /** Rev 19: 'bmg' when the event is in Blueprint's Humanitix account. */
+  humanitixAccount?: 'bmg';
   humanitix?: { ticketsSold: number; syncedAt: string };
   money?: MoneyFigures;
   checklist: { id: string; title: string; done: boolean }[];
@@ -195,8 +199,51 @@ function GigForm({
   const [topics, setTopics] = useState<HelpTopic[]>([]);
   const [helpText, setHelpText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Rev 19: the Humanitix event picked on the form (saved with the gig).
+  const [hxId, setHxId] = useState<string | null>(gig?.humanitixEventId ?? null);
+  const [hxEvent, setHxEvent] = useState<HumanitixEvent | null>(null);
+  const [replaceUrl, setReplaceUrl] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF({ ...f, [k]: e.target.value });
+
+  function pickEvent(e: HumanitixEvent | null) {
+    setHxId(e?.id ?? null);
+    setHxEvent(e);
+    setReplaceUrl(null);
+    if (!e) return;
+    const next = { ...f };
+    if (next.deal === 'tbc') next.deal = 'ticketed';
+    if (e.url && !next.ticketUrl) next.ticketUrl = e.url;
+    else if (e.url && next.ticketUrl !== e.url) setReplaceUrl(e.url);
+    setF(next);
+  }
+
+  /** New gig: fill the empty fields from the event. Never overwrites what's typed. */
+  async function fillFromEvent(e: HumanitixEvent) {
+    const day = melbourneDay(e.startDate ?? null);
+    setF((cur) => ({
+      ...cur,
+      title: cur.title || e.name.slice(0, 120),
+      date: cur.date || day || '',
+      startTime: cur.startTime || melbourneTime(e.startDate) || '',
+      endTime: cur.endTime || (cur.startTime ? '' : melbourneTime(e.endDate) || ''),
+    }));
+    if (!venue && e.venue) {
+      const name = e.venue;
+      try {
+        const res = await api<{ venues: { venueId: string; name: string }[] }>(
+          cfg,
+          token,
+          'GET',
+          `/venues?${new URLSearchParams({ q: name })}`,
+        );
+        const match = res.venues.find((v) => v.name.trim().toLowerCase() === name.toLowerCase());
+        setVenue(match ? { venueId: match.venueId, name: match.name } : { venueId: null, name });
+      } catch {
+        setVenue({ venueId: null, name });
+      }
+    }
+  }
   const timeError =
     f.endTime && !f.startTime
       ? 'Add a start time too'
@@ -223,6 +270,13 @@ function GigForm({
           ? { venue: venue.name, ...(venue.venueId ? { venueId: venue.venueId } : {}) }
           : {}),
       ...(f.ticketUrl ? { ticketUrl: f.ticketUrl } : {}),
+      ...(gig
+        ? hxId !== (gig.humanitixEventId ?? null)
+          ? { humanitixEventId: hxId }
+          : {}
+        : hxId
+          ? { humanitixEventId: hxId }
+          : {}),
       ...(f.notes ? { notes: f.notes } : {}),
       ...(isArtist ? { shared: f.shared } : {}),
     };
@@ -270,6 +324,42 @@ function GigForm({
             maxLength={300}
             placeholder="e.g. 70/30 door split after costs, plus rider"
           />
+        )}
+        <HumanitixPicker
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          isArtist={isArtist}
+          {...(gig ? { gigId: gig.gigId } : {})}
+          {...(f.date ? { gigDate: f.date } : {})}
+          value={hxId}
+          lockedToArtist={!isArtist && !!gig?.humanitixEventId && gig.humanitixAccount !== 'bmg'}
+          onPick={pickEvent}
+        />
+        {!gig && hxEvent && (
+          <div className="col-span-2 flex flex-wrap items-center gap-2">
+            <Button variant="ghost" onClick={() => void fillFromEvent(hxEvent)}>
+              Use event details
+            </Button>
+            <span className="src">Fills the name, date, times and venue where they’re empty.</span>
+          </div>
+        )}
+        {replaceUrl && (
+          <div className="col-span-2 flex flex-wrap items-center gap-2">
+            <span className="text-sm">Replace the ticket link with the Humanitix page?</span>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setF((cur) => ({ ...cur, ticketUrl: replaceUrl }));
+                setReplaceUrl(null);
+              }}
+            >
+              Replace
+            </Button>
+            <Button variant="ghost" onClick={() => setReplaceUrl(null)}>
+              Keep mine
+            </Button>
+          </div>
         )}
         <Field
           label="Tickets"

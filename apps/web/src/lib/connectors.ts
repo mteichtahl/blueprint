@@ -87,6 +87,81 @@ export function melbourneDay(iso: string | null): string | null {
   return d.toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
 }
 
+/** "19:30" on Melbourne's clock, for a Humanitix start or end time. */
+export function melbourneTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString('en-GB', {
+    timeZone: 'Australia/Melbourne',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+/** Rev 19: one of an account's Humanitix events, for the gig form's picker. */
+export interface HumanitixEvent {
+  id: string;
+  name: string;
+  startDate?: string;
+  endDate?: string;
+  venue?: string;
+  url?: string;
+}
+
+export interface PickerRow extends HumanitixEvent {
+  day: string | null;
+  sameDay: boolean;
+  /** The other gig this event is linked to, which makes it unpickable here. */
+  linkedTo: string | null;
+}
+
+/**
+ * Rev 19: the picker's order. Events on the gig's date first (Same day),
+ * then upcoming soonest first; past events (newest first) are kept apart.
+ * The search matches the name or venue.
+ */
+export function pickerRows(
+  events: readonly HumanitixEvent[],
+  opts: {
+    gigId?: string;
+    gigDate?: string;
+    today: string;
+    q?: string;
+    /** Other gigs and their Humanitix event, to show "Linked to <gig>". */
+    gigs: readonly { gigId: string; title: string; status?: string; humanitixEventId?: string }[];
+  },
+): { upcoming: PickerRow[]; past: PickerRow[] } {
+  const q = (opts.q ?? '').trim().toLowerCase();
+  const linked = new Map<string, string>();
+  for (const g of opts.gigs)
+    if (g.humanitixEventId && g.gigId !== opts.gigId && g.status !== 'cancelled')
+      linked.set(g.humanitixEventId, g.title);
+  const rows = events
+    .filter((e) => !q || `${e.name} ${e.venue ?? ''}`.toLowerCase().includes(q))
+    .map((e) => {
+      const day = melbourneDay(e.startDate ?? null);
+      return {
+        ...e,
+        day,
+        sameDay: !!opts.gigDate && day === opts.gigDate,
+        linkedTo: linked.get(e.id) ?? null,
+      };
+    });
+  const upcoming = rows
+    .filter((r) => r.sameDay || !r.day || r.day >= opts.today)
+    .sort(
+      (a, b) =>
+        Number(b.sameDay) - Number(a.sameDay) ||
+        (a.startDate ?? '9999').localeCompare(b.startDate ?? '9999'),
+    );
+  const past = rows
+    .filter((r) => !upcoming.includes(r))
+    .sort((a, b) => (b.startDate ?? '').localeCompare(a.startDate ?? ''));
+  return { upcoming, past };
+}
+
 export interface InsightsData {
   range: 30 | 60 | 90;
   website: {

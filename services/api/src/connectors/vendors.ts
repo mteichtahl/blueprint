@@ -577,6 +577,21 @@ export interface HumanitixEvent {
   id: string;
   name: string;
   startDate?: string;
+  /** Rev 19: shown in the gig form's event picker, and used to fill a new gig. */
+  endDate?: string;
+  venue?: string;
+  /** The event's public Humanitix page. */
+  url?: string;
+}
+
+/** The event's public page: the URL Humanitix gives, else built from its slug. */
+function humanitixUrl(e: Record<string, unknown>): string | undefined {
+  const url = typeof e.url === 'string' ? e.url : undefined;
+  if (url && /^https:\/\/([a-z0-9-]+\.)*humanitix\.com\//i.test(url) && url.length <= 500)
+    return url;
+  const slug = typeof e.slug === 'string' ? e.slug : undefined;
+  if (slug && /^[A-Za-z0-9_-]{1,200}$/.test(slug)) return `https://events.humanitix.com/${slug}`;
+  return undefined;
 }
 
 export async function humanitixEvents(apiKey: string): Promise<HumanitixEvent[]> {
@@ -590,10 +605,16 @@ export async function humanitixEvents(apiKey: string): Promise<HumanitixEvent[]>
     for (const e of list) {
       const id = String(e._id ?? e.id ?? '');
       if (!id) continue;
+      const where = (e.eventLocation ?? {}) as Record<string, unknown>;
+      const venue = typeof where.venueName === 'string' ? where.venueName.trim() : '';
+      const url = humanitixUrl(e);
       out.push({
         id,
         name: String(e.name ?? 'Event').slice(0, 200),
         ...(typeof e.startDate === 'string' ? { startDate: e.startDate } : {}),
+        ...(typeof e.endDate === 'string' ? { endDate: e.endDate } : {}),
+        ...(venue ? { venue: venue.slice(0, 160) } : {}),
+        ...(url ? { url } : {}),
       });
     }
     if (list.length < 100) break;

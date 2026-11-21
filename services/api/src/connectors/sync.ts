@@ -6,6 +6,7 @@ import { EVENTS_PK, eventSk, gigSk, type Gig } from '../events/model.ts';
 import { artistPk } from '../workspace/model.ts';
 import { db, env } from '../lib.ts';
 import { connectorFor, isoDay, type Snapshot } from './catalog.ts';
+import { HUMANITIX_EVENTS_SK } from './humanitix-link.ts';
 import {
   clientCreds,
   isOrg,
@@ -25,6 +26,7 @@ import {
   refreshTokens,
   upsertCalendarEvent,
   VendorError,
+  type HumanitixEvent,
   type Tokens,
 } from './vendors.ts';
 
@@ -139,8 +141,8 @@ export async function syncConnection(c: ConnectionItem, role: SessionRole): Prom
   return { connection: next, snapshots: written };
 }
 
-/** Where an artist's own Humanitix event list is kept (rev 18), read by My stats. */
-export const HUMANITIX_EVENTS_SK = 'HUMANITIX#events';
+/** Where each account's Humanitix event list is kept (rev 18 artists, rev 19 Blueprint). */
+export { HUMANITIX_EVENTS_SK };
 /** Linked gigs keep syncing for a month after the night, so late sales and refunds land. */
 export const HUMANITIX_AFTER_DAYS = 30;
 
@@ -152,20 +154,7 @@ export const gigHumanitixId = (g: Pick<Gig, 'humanitixEventId' | 'ticketUrl'>) =
 async function syncHumanitix(account: string, apiKey: string, today: string): Promise<number> {
   if (!isOrg(account)) {
     // Rev 18: the artist's own Humanitix events, kept so My stats can offer to link them.
-    const events = await humanitixEvents(apiKey);
-    const syncedAt = new Date().toISOString();
-    await db.send(
-      new PutCommand({
-        TableName: table(),
-        Item: {
-          PK: artistPk(account),
-          SK: HUMANITIX_EVENTS_SK,
-          type: 'humanitix-events',
-          events: events.slice(0, 300),
-          syncedAt,
-        },
-      }),
-    );
+    const syncedAt = await saveHumanitixEvents(account, await humanitixEvents(apiKey));
     // Each linked gig gets its own count (upcoming, or up to a month ago); the
     // snapshot totals the upcoming ones, for the chart.
     const from = daysAgo(today, HUMANITIX_AFTER_DAYS);
@@ -173,6 +162,8 @@ async function syncHumanitix(account: string, apiKey: string, today: string): Pr
     for (const g of await allGigs(account)) {
       const id = gigHumanitixId(g);
       if (!id || g.date < from || g.status === 'cancelled') continue;
+      // Rev 19: linked to Blueprint's Humanitix account, so Blueprint's sync counts it.
+      if (g.humanitixAccount === 'bmg') continue;
       const n = await humanitixTicketsSold(apiKey, id);
       if (g.date >= today) sold += n;
       await db
@@ -193,6 +184,9 @@ async function syncHumanitix(account: string, apiKey: string, today: string): Pr
     await writeSnapshots(account, [{ date: today, source: 'humanitix', ticketsSold: sold }]);
     return 1;
   }
+  // Rev 19: Blueprint's own event list, for the gig form's picker and its checks.
+  await saveHumanitixEvents('bmg', await humanitixEvents(apiKey));
+  await syncBmgLinkedGigs(apiKey, today);
   const res = await db.send(
     new QueryCommand({
       TableName: table(),
@@ -217,6 +211,67 @@ async function syncHumanitix(account: string, apiKey: string, today: string): Pr
   }
   await writeSnapshots('bmg', [{ date: today, source: 'humanitix', ticketsSold: total }]);
   return 1;
+}
+
+/** The partition an account's Humanitix event list lives in. */
+export const humanitixEventsPk = (account: string) =>
+  isOrg(account) ? EVENTS_PK : artistPk(account);
+
+/** Keeps an account's Humanitix event list (artist: My stats and the picker; Blueprint: the picker). */
+export async function saveHumanitixEvents(
+  account: string,
+  events: readonly HumanitixEvent[],
+): Promise<string> {
+  const syncedAt = new Date().toISOString();
+  await db.send(
+    new PutCommand({
+      TableName: table(),
+      Item: {
+        PK: humanitixEventsPk(account),
+        SK: HUMANITIX_EVENTS_SK,
+        type: 'humanitix-events',
+        events: events.slice(0, 300),
+        syncedAt,
+      },
+    }),
+  );
+  return syncedAt;
+}
+
+/**
+ * Rev 19: gigs Blueprint linked to its own Humanitix events get their count
+ * from Blueprint's key. Blueprint only links gigs it can see, which are shared,
+ * so the shared-gigs index finds them (upcoming, or up to a month ago).
+ */
+async function syncBmgLinkedGigs(apiKey: string, today: string) {
+  const gigs = await db.send(
+    new QueryCommand({
+      TableName: table(),
+      IndexName: 'GSI3',
+      KeyConditionExpression: 'GSI3PK = :pk AND GSI3SK >= :d',
+      ExpressionAttributeValues: { ':pk': 'GIGS', ':d': daysAgo(today, HUMANITIX_AFTER_DAYS) },
+      Limit: 300,
+    }),
+  );
+  const syncedAt = new Date().toISOString();
+  for (const g of (gigs.Items ?? []) as Gig[]) {
+    if (g.humanitixAccount !== 'bmg' || !g.humanitixEventId || g.status === 'cancelled') continue;
+    const n = await humanitixTicketsSold(apiKey, g.humanitixEventId);
+    await db
+      .send(
+        new UpdateCommand({
+          TableName: table(),
+          Key: { PK: artistPk(g.artistId), SK: gigSk(g.gigId) },
+          UpdateExpression: 'SET humanitix = :h',
+          ConditionExpression: 'attribute_exists(PK) AND humanitixAccount = :bmg',
+          ExpressionAttributeValues: { ':h': { ticketsSold: n, syncedAt }, ':bmg': 'bmg' },
+        }),
+      )
+      .catch((err: unknown) => {
+        // Deleted or relinked meanwhile: nothing to update.
+        if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+      });
+  }
 }
 
 /** A Humanitix event id from a ticket link, when the link is to Humanitix. */
