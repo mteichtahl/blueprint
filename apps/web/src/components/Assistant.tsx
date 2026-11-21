@@ -1,7 +1,22 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../lib/api.ts';
 import type { AppConfig } from '../lib/config.ts';
 import { Button, Icon, Notice, Tag } from './ui.tsx';
+
+// Answers come back as Markdown. The renderer loads with the first answer, so
+// it stays out of the app's first download; until then the text shows as is.
+const MarkdownView = lazy(() =>
+  import('./Markdown.tsx').then((m) => ({ default: m.MarkdownView })),
+);
+
+function Answer({ text }: { text: string }) {
+  const plain = <div className="leading-normal whitespace-pre-wrap">{text}</div>;
+  return (
+    <Suspense fallback={plain}>
+      <MarkdownView value={text} rich />
+    </Suspense>
+  );
+}
 
 /**
  * Blueprint Assistant (screens doc "AI assistant, opened from any screen"):
@@ -239,7 +254,7 @@ export function Assistant({
               </div>
             ) : (
               <div key={i} className="flex max-w-[94%] flex-col gap-2">
-                <div className="leading-normal whitespace-pre-wrap">{t.text}</div>
+                <Answer text={t.text} />
                 {t.actions && t.actions.length > 0 && !t.done && (
                   <Checklist
                     actions={t.actions}

@@ -23,7 +23,7 @@ import {
   TextArea,
   WaveLoader,
 } from '../components/ui.tsx';
-import { archiveActions, ContactPicker, type Contact } from './Contacts.tsx';
+import { archiveActions, ContactPicker, CreatedLine, type Contact } from './Contacts.tsx';
 import { Dialog } from '../components/Folders.tsx';
 import {
   LogoTile,
@@ -65,6 +65,8 @@ export interface Venue {
   addedByArtist: boolean;
   canEdit: boolean;
   bmgNotes?: string;
+  /** When it was added to the shared list (ISO time). */
+  createdAt?: string;
   /** Times booked: confirmed, booked or played gigs and Blueprint events at this venue. */
   bookings?: number;
 }
@@ -1002,6 +1004,7 @@ export function Venues({
               <b>Blueprint notes:</b> {v.bmgNotes}
             </Notice>
           )}
+          <CreatedLine at={v.createdAt} byArtist={v.addedByArtist} />
         </RecordPage>
       );
     }

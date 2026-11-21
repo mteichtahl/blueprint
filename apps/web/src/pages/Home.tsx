@@ -28,6 +28,7 @@ import {
   Card,
   Chips,
   DataTable,
+  DoneBox,
   Field,
   Notice,
   PageHeader,
@@ -103,6 +104,11 @@ export function Home(props: HomeProps) {
       {props.me.role === 'artist' ? <ArtistApp {...props} /> : <BmgApp {...props} />}
     </AvatarProvider>
   );
+}
+
+/** Ticks a to-do done (or not) from a home-screen preview. */
+async function setTodoDone(cfg: AppConfig, token: string, t: Todo, done: boolean) {
+  await api(cfg, token, 'PATCH', `/artists/${t.artistId}/todos/${t.todoId}`, { done });
 }
 
 function greeting(): string {
@@ -910,7 +916,19 @@ function StudioHq({
           <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[15px]">
             {todos.slice(0, 3).map((t) => (
               <li key={t.todoId} className="flex items-center gap-3">
-                <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                <DoneBox
+                  label={t.title}
+                  done={t.done}
+                  onChange={async (done) => {
+                    await setTodoDone(cfg, token, t, done);
+                    setTodos((all) => all.map((x) => (x.todoId === t.todoId ? { ...x, done } : x)));
+                  }}
+                />
+                <span
+                  className={`min-w-0 flex-1 truncate ${t.done ? 'text-muted-foreground line-through' : ''}`}
+                >
+                  {t.title}
+                </span>
                 <span className="src max-w-[40%] truncate max-sm:hidden">
                   {names[t.artistId] ?? ''}
                 </span>
@@ -1353,7 +1371,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
     library: { eyebrow: 'Library', title: 'Your files' },
     brand: { eyebrow: 'Library', title: 'My brand kit' },
     submit: { eyebrow: 'Submit for review', title: 'Send to Blueprint' },
-    plan: { eyebrow: 'My plan', title: 'Your plan' },
+    plan: { eyebrow: 'Blueprint', title: 'My Plan' },
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
     connectors: { eyebrow: 'Profile', title: 'My connectors' },
     stats: { eyebrow: 'Socials', title: 'My stats' },
@@ -1386,10 +1404,12 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
       current={back ? 'home' : view}
       onNavigate={(id) => setView(id as ArtistView)}
       {...(me.consent?.aiOptIn ? { onAsk: () => setAsking(true) } : {})}
+      compact={view === 'chat'}
       header={
         <PhoneHeader
           eyebrow={headers[view].eyebrow}
           title={headers[view].title}
+          compact={view === 'chat'}
           right={
             back ? (
               <button
@@ -1711,7 +1731,17 @@ function ArtistHome({
         {todos.length === 0 && <p className="src">You're all caught up.</p>}
         {todos.slice(0, 3).map((t) => (
           <div key={t.todoId} className="flex items-center gap-3 text-[15px]">
-            <span className="flex-1">{t.title}</span>
+            <DoneBox
+              label={t.title}
+              done={t.done}
+              onChange={async (done) => {
+                await setTodoDone(cfg, token, t, done);
+                setTodos((all) => all.map((x) => (x.todoId === t.todoId ? { ...x, done } : x)));
+              }}
+            />
+            <span className={`flex-1 ${t.done ? 'text-muted-foreground line-through' : ''}`}>
+              {t.title}
+            </span>
             {t.due && <Tag tone="s">{shortDate(t.due)}</Tag>}
           </div>
         ))}

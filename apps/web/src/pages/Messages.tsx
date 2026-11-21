@@ -3543,10 +3543,13 @@ export function BmgChat(props: Omit<ChatProps, 'artists'> & { artists: ArtistSum
 /** @deprecated Use BmgChat. */
 export const BmgMessages = BmgChat;
 
-/** The artist's Chat screen: phone layout on small screens, three panes on desktop. */
+/**
+ * The artist's Chat screen. The artist app is a phone-width frame on every
+ * screen (480px at most), so Chat always uses the phone layout: one pane at a
+ * time. Three panes squeezed into that frame on tablets and computers.
+ */
 export function ArtistChats(props: ChatProps) {
-  const narrow = useNarrow();
-  return <Chat {...props} phone={narrow} />;
+  return <Chat {...props} phone />;
 }
 
 /** Workspace → Chat tab: Blueprint's direct chat with this artist, WhatsApp layout. */

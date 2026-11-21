@@ -73,6 +73,46 @@ main {
 
 /* ───── BMG design canvas patterns (bmg-ui.css, screens doc rev 4) ───── */
 @layer components {
+  /* To-do tick box (DoneBox): a round tick, filled when done. */
+  .done-box {
+    appearance: none;
+    display: grid;
+    place-content: center;
+    width: 24px;
+    height: 24px;
+    margin: 0;
+    border: 2px solid var(--color-foreground);
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s;
+  }
+  .done-box::after {
+    content: '';
+    width: 7px;
+    height: 12px;
+    margin-top: -3px;
+    border: solid transparent;
+    border-width: 0 2.5px 2.5px 0;
+    transform: rotate(45deg) scale(0);
+    transition: transform 0.15s;
+  }
+  .done-box:checked {
+    background: var(--color-foreground);
+  }
+  .done-box:checked::after {
+    transform: rotate(45deg) scale(1);
+    border-color: var(--color-background);
+  }
+  .done-box:hover:not(:checked) {
+    background: color-mix(in srgb, var(--color-foreground) 10%, transparent);
+  }
+  .done-box:disabled {
+    cursor: progress;
+    opacity: 0.7;
+  }
   /* Blueprint grid on navy: sidebar, phone headers, sign-in panel. */
   .bp {
     background-color: #011935;
@@ -779,11 +819,71 @@ main {
   .md blockquote {
     border-left: 3px solid #d9534f;
     padding-left: 12px;
-    color: #5c6775;
+    color: color-mix(in srgb, currentColor 75%, transparent);
   }
   .md a {
     text-decoration: underline;
     font-weight: 600;
+  }
+  /* Rich read-only Markdown (Blueprint Assistant answers). */
+  .md h1 {
+    font-family: var(--font-title, inherit);
+    font-size: 21px;
+    font-weight: 700;
+  }
+  .md h4 {
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .md li > p + * {
+    margin-top: 0.25em;
+  }
+  .md li + li {
+    margin-top: 0.2em;
+  }
+  .md code {
+    padding: 0.1em 0.35em;
+    border-radius: 6px;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+  }
+  .md pre {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    overflow-x: auto;
+    overflow-wrap: normal;
+  }
+  .md pre code {
+    padding: 0;
+    background: none;
+  }
+  .md hr {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+  }
+  .md .tableWrapper {
+    overflow-x: auto;
+  }
+  .md table {
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .md th,
+  .md td {
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    text-align: left;
+    vertical-align: top;
+  }
+  .md th {
+    font-weight: 700;
+    background: color-mix(in srgb, currentColor 6%, transparent);
+  }
+  .md th > p,
+  .md td > p {
+    margin: 0;
   }
   .md p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);

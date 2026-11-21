@@ -1,8 +1,9 @@
 import { Markdown as MarkdownExtension } from '@tiptap/markdown';
 import Placeholder from '@tiptap/extension-placeholder';
+import { TableKit } from '@tiptap/extension-table';
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { useEffect, useId } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 /**
  * Markdown, written in a graphical editor (Tiptap) and stored as Markdown.
@@ -10,13 +11,15 @@ import { useEffect, useId } from 'react';
  * sees. Content goes through the editor's schema, never through innerHTML,
  * so pasted HTML or script can't get in; links only allow http(s) and mailto.
  */
-function extensions(placeholder?: string) {
+function extensions(placeholder?: string, rich = false) {
   return [
     StarterKit.configure({
-      heading: { levels: [2, 3] },
-      codeBlock: false,
-      code: false,
-      horizontalRule: false,
+      // `rich` (read-only, e.g. Blueprint Assistant answers): everything an AI
+      // reply tends to use, so none of it shows as raw Markdown.
+      heading: { levels: rich ? [1, 2, 3, 4] : [2, 3] },
+      ...(rich
+        ? {}
+        : { codeBlock: false as const, code: false as const, horizontalRule: false as const }),
       link: {
         openOnClick: false,
         autolink: true,
@@ -25,6 +28,7 @@ function extensions(placeholder?: string) {
         isAllowedUri: (url) => /^(https?:|mailto:)/i.test(url),
       },
     }),
+    ...(rich ? [TableKit.configure({ table: { resizable: false } })] : []),
     MarkdownExtension,
     ...(placeholder ? [Placeholder.configure({ placeholder })] : []),
   ];
@@ -179,10 +183,21 @@ export function MarkdownEditor({
   );
 }
 
-/** Markdown shown read-only, through the same renderer as the editor. */
-export function MarkdownView({ value, className = '' }: { value: string; className?: string }) {
+/**
+ * Markdown shown read-only, through the same renderer as the editor. `rich`
+ * also renders code, rules, tables and every heading level (AI answers).
+ */
+export function MarkdownView({
+  value,
+  className = '',
+  rich = false,
+}: {
+  value: string;
+  className?: string;
+  rich?: boolean;
+}) {
   const editor = useEditor({
-    extensions: extensions(),
+    extensions: extensions(undefined, rich),
     content: value,
     contentType: 'markdown',
     editable: false,
@@ -191,10 +206,14 @@ export function MarkdownView({ value, className = '' }: { value: string; classNa
     // unlabelled text box (Phase 6 accessibility audit).
     editorProps: { attributes: { class: `md ${className}`, role: 'document' } },
   });
+  // Replace the content only when the text itself changes. (Comparing with
+  // the editor's own Markdown isn't enough: tables and lists can come back
+  // written slightly differently, which reset the view on every render.)
+  const shown = useRef(value);
   useEffect(() => {
-    if (editor && value !== editor.getMarkdown()) {
-      editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false });
-    }
+    if (!editor || editor.isDestroyed || shown.current === value) return;
+    shown.current = value;
+    editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false });
   }, [editor, value]);
   return <EditorContent editor={editor} />;
 }

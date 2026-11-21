@@ -82,10 +82,51 @@ export function Field({
   hint,
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }) {
+  if (props.type === 'password') return <PasswordField label={label} hint={hint} {...props} />;
   return (
     <label className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[15px] font-bold">{label}</span>
       <input className={control} {...props} />
+      {hint && <span className="src">{hint}</span>}
+    </label>
+  );
+}
+
+/**
+ * A password (or secret) box with an eye button inside it that shows or
+ * hides what's typed (sign-in, new password, connector secrets).
+ */
+export function PasswordField({
+  label,
+  hint,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <label className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-[15px] font-bold">{label}</span>
+      <span className="relative flex min-w-0">
+        <input
+          className={`${control} pr-12`}
+          {...props}
+          type={shown ? 'text' : 'password'}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          className="absolute inset-y-0 right-1 my-auto flex size-10 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+          aria-label={shown ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          aria-pressed={shown}
+          title={shown ? 'Hide' : 'Show'}
+          // Keep focus (and the mobile keyboard) in the box.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setShown((s) => !s)}
+        >
+          <Icon name={shown ? 'eyeOff' : 'eye'} size={20} />
+        </button>
+      </span>
       {hint && <span className="src">{hint}</span>}
     </label>
   );
@@ -393,6 +434,9 @@ const ICONS = {
   userPlus: 'M10 12a4 4 0 100-8 4 4 0 000 8zM2 21a8 8 0 0114.5-4.6M19 14v6M16 17h6',
   logout: 'M14 4h5v16h-5M10 8l-4 4 4 4M6 12h11',
   record: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 9a3 3 0 100 6 3 3 0 000-6z',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 100 6 3 3 0 000-6z',
+  eyeOff:
+    'M3 3l18 18M10.6 5.1A10 10 0 0112 5c6.5 0 10 7 10 7a17 17 0 01-3.2 4.2M6.6 6.6A17 17 0 002 12s3.5 7 10 7a9.7 9.7 0 005.4-1.6M9.9 9.9a3 3 0 004.2 4.2',
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -556,6 +600,50 @@ export function RowCard({
         <span className="flex flex-none items-center gap-1.5 self-center">{actions}</span>
       )}
     </li>
+  );
+}
+
+/**
+ * The to-do tick box: marks a to-do done (or not done) right from a list,
+ * without opening it. It shows the change at once and undoes it if saving fails.
+ */
+export function DoneBox({
+  label,
+  done,
+  onChange,
+}: {
+  label: string;
+  done: boolean;
+  onChange: (done: boolean) => Promise<unknown> | void;
+}) {
+  const [shown, setShown] = useState(done);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setShown(done), [done]);
+  return (
+    <label
+      className="-m-2 flex size-11 flex-none cursor-pointer items-center justify-center"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <input
+        type="checkbox"
+        className="done-box"
+        aria-label={shown ? `Mark “${label}” not done` : `Mark “${label}” done`}
+        checked={shown}
+        disabled={busy}
+        onChange={async (e) => {
+          const next = e.target.checked;
+          setShown(next);
+          setBusy(true);
+          try {
+            await onChange(next);
+          } catch {
+            setShown(!next);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+    </label>
   );
 }
 
