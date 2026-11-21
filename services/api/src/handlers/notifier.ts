@@ -364,7 +364,11 @@ async function deliver(e: DomainEvent, planned: Planned) {
     await sqs.send(
       new SendMessageCommand({
         QueueUrl: env('MAIL_QUEUE_URL'),
-        MessageBody: JSON.stringify({ to: r.email, draft: planned.draft }),
+        MessageBody: JSON.stringify({
+          to: r.email,
+          draft: planned.draft,
+          team: r.role !== 'artist',
+        }),
       }),
     );
   }

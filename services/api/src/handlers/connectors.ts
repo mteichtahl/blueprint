@@ -38,6 +38,7 @@ import {
   readSnapshots,
   readWebDetail,
   redirectUri,
+  redirectUris,
   saveConnection,
   seal,
   takeState,
@@ -216,7 +217,7 @@ const startOAuth = async (account: Account, def: ConnectorDef, sub: string) => {
   );
   return authorizeUrl(def, {
     clientId: creds.clientId,
-    redirectUri: await redirectUri(),
+    redirectUri: await redirectUri(account),
     state,
     ...(verifier ? { verifier } : {}),
   });
@@ -390,7 +391,7 @@ export const handler = handle(async (event) => {
     // ── The vendor OAuth apps (admins register them here, not with the CLI) ──
     case 'GET /connectors/apps': {
       ensureOrgAdmin(principal);
-      return json(200, { apps: await listApps(await redirectUri()) });
+      return json(200, { apps: await listApps(await redirectUris()) });
     }
 
     case 'PUT /connectors/apps/{provider}': {
@@ -399,7 +400,7 @@ export const handler = handle(async (event) => {
       if (!isProvider(provider)) throw new HttpError(404, 'No such connector app');
       await saveApp(provider, parseBody(event, AppCredentials));
       await audit(event, 'connectors.app.save', 'success', { provider });
-      return json(200, { apps: await listApps(await redirectUri()) });
+      return json(200, { apps: await listApps(await redirectUris()) });
     }
 
     case 'DELETE /connectors/apps/{provider}': {
@@ -408,7 +409,7 @@ export const handler = handle(async (event) => {
       if (!isProvider(provider)) throw new HttpError(404, 'No such connector app');
       await clearApp(provider);
       await audit(event, 'connectors.app.clear', 'success', { provider });
-      return json(200, { apps: await listApps(await redirectUri()) });
+      return json(200, { apps: await listApps(await redirectUris()) });
     }
 
     case 'POST /connectors/{connectorId}/connect':
@@ -482,7 +483,7 @@ export const handler = handle(async (event) => {
       if (!creds) throw new HttpError(409, `${def.label} isn't set up yet`);
       let got;
       try {
-        got = await exchangeCode(def, creds, body.code, await redirectUri(), s.verifier);
+        got = await exchangeCode(def, creds, body.code, await redirectUri(s.account), s.verifier);
       } catch (err) {
         await audit(event, 'connector.connected', 'failed', { connector: def.id });
         throw new HttpError(

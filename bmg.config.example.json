@@ -9,8 +9,18 @@
   },
   "toolingQualifier": "bmgtool",
   "environments": {
-    "staging": { "qualifier": "bmgstg", "subdomain": "staging", "cognitoPlan": "ESSENTIALS" },
-    "prod": { "qualifier": "bmgprd", "subdomain": "", "cognitoPlan": "PLUS" }
+    "staging": {
+      "qualifier": "bmgstg",
+      "subdomain": "staging",
+      "cognitoPlan": "ESSENTIALS",
+      "hosts": { "artist": "artist-beta", "admin": "admin-beta" }
+    },
+    "prod": {
+      "qualifier": "bmgprd",
+      "subdomain": "",
+      "cognitoPlan": "PLUS",
+      "hosts": { "artist": "artist", "admin": "admin" }
+    }
   },
   "domain": { "root": "blueprintmusic.group" },
   "github": {

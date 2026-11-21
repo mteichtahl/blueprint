@@ -14,7 +14,7 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { BatchGetCommand, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { authorize, type Principal } from '@bmg/authz';
-import { appOrigin, sendMail, teamInviteEmail } from '@bmg/email';
+import { adminOrigin, sendMail, teamInviteEmail } from '@bmg/email';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import {
   ACCESS_KEY,
@@ -179,7 +179,8 @@ async function sendTeamInvite(
   await sendMail(
     email,
     teamInviteEmail(
-      { appOrigin: await appOrigin() },
+      // The Blueprint team signs in on the admin address.
+      { appOrigin: await adminOrigin() },
       {
         displayName,
         email,

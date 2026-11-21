@@ -90,9 +90,10 @@ export class FilesStack extends BmgStack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
     const appOrigins = [
-      `https://${names.host(cfg, env, 'app')}`,
-      // The web app is served from its CloudFront domain until DNS is set up.
-      'https://*.cloudfront.net',
+      ...names.webHosts(cfg, env).map((h) => `https://${h}`),
+      // The web app is served from its CloudFront domain until its certificate
+      // is set (security review W3: narrowed once the custom hosts are live).
+      ...(names.customDomains(cfg, env) ? [] : ['https://*.cloudfront.net']),
       ...(prod ? [] : ['http://localhost:5173']),
     ];
     this.quarantine = new Bucket(this, 'Quarantine', {

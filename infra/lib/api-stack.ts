@@ -123,6 +123,8 @@ export class ApiStack extends BmgStack {
     const p = `${cfg.project}-${env}`;
 
     const common = {
+      // Links for the Blueprint team (team invites, their emails) use the admin address.
+      ADMIN_ORIGIN: `https://${names.webHost(cfg, env, 'admin')}`,
       MAIN_TABLE: props.mainTable.tableName,
       CONSENT_TABLE: props.consentTable.tableName,
       SESSIONS_TABLE: props.sessionsTable.tableName,
@@ -391,7 +393,7 @@ export class ApiStack extends BmgStack {
       // Invites go out as BMG-branded email through Gmail SMTP (design F1).
       SMTP_SECRET_ID: names.smtpSecret(cfg, env),
       APP_URL_PARAM: webUrlParam,
-      APP_ORIGIN: `https://${names.host(cfg, env, 'app')}`,
+      APP_ORIGIN: `https://${names.webHost(cfg, env, 'artist')}`,
     });
 
     const allow = (f: BmgFunction, sid: string, actions: string[], resources: string[]) =>
@@ -914,7 +916,11 @@ export class ApiStack extends BmgStack {
       description: `BMG ${env}: send notification email through Gmail SMTP`,
       timeout: Duration.seconds(30),
       prod,
-      environment: { SMTP_SECRET_ID: names.smtpSecret(cfg, env), APP_URL_PARAM: webUrlParam },
+      environment: {
+        SMTP_SECRET_ID: names.smtpSecret(cfg, env),
+        APP_URL_PARAM: webUrlParam,
+        ADMIN_ORIGIN: `https://${names.webHost(cfg, env, 'admin')}`,
+      },
     });
     allow(mailer, 'ReadSmtpSecret', ['secretsmanager:GetSecretValue'], [smtpSecretArn]);
     allow(
@@ -1028,7 +1034,8 @@ export class ApiStack extends BmgStack {
       retention: prod ? RetentionDays.ONE_YEAR : RetentionDays.ONE_MONTH,
       removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
-    const appOrigin = `https://${names.host(cfg, env, 'app')}`;
+    // The app calls the API on its own origin (/v1); CORS only matters for local dev.
+    const appOrigins = names.webHosts(cfg, env).map((h) => `https://${h}`);
     this.api = new RestApi(this, 'Api', {
       restApiName: `${p}-api`,
       description: `BMG ${env} API`,
@@ -1060,7 +1067,7 @@ export class ApiStack extends BmgStack {
         }),
       },
       defaultCorsPreflightOptions: {
-        allowOrigins: prod ? [appOrigin] : [appOrigin, 'http://localhost:5173'],
+        allowOrigins: prod ? appOrigins : [...appOrigins, 'http://localhost:5173'],
         allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
         allowHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
         maxAge: Duration.hours(1),
