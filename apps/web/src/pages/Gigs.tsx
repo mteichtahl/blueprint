@@ -42,6 +42,9 @@ export interface Gig {
   deal: GigDeal;
   dealNote?: string;
   ticketUrl?: string;
+  /** Rev 18: the artist's Humanitix event, and its count from the hourly sync. */
+  humanitixEventId?: string;
+  humanitix?: { ticketsSold: number; syncedAt: string };
   money?: MoneyFigures;
   checklist: { id: string; title: string; done: boolean }[];
   plannedBy: 'artist' | 'bmg';
@@ -546,6 +549,14 @@ function GigPage({
         <a href={gig.ticketUrl} target="_blank" rel="noreferrer" className="w-fit">
           Tickets
         </a>
+      )}
+      {gig.humanitixEventId && (
+        <p className="src m-0">
+          {gig.humanitix
+            ? `Humanitix: ${gig.humanitix.ticketsSold.toLocaleString('en-AU')} tickets sold (synced ${new Date(gig.humanitix.syncedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}).`
+            : 'Linked to Humanitix. Ticket sales come in with the next sync.'}
+          {isArtist ? ' Link or unlink it in My stats.' : ''}
+        </p>
       )}
       {helpOpen &&
         (isArtist ? (

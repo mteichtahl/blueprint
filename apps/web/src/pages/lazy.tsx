@@ -38,6 +38,7 @@ export const Invitations = page(() => import('./Invitations.tsx').then((m) => m.
 export const ArtistFiles = page(() => import('./Library.tsx').then((m) => m.ArtistFiles));
 export const Library = page(() => import('./Library.tsx').then((m) => m.Library));
 export const MeetingsPage = page(() => import('./Meetings.tsx').then((m) => m.MeetingsPage));
+export const MyMeetings = page(() => import('./MyMeetings.tsx').then((m) => m.MyMeetings));
 export const ArtistChats = page(() => import('./Messages.tsx').then((m) => m.ArtistChats));
 export const BmgChat = page(() => import('./Messages.tsx').then((m) => m.BmgChat));
 export const Newsroom = page(() => import('./Newsroom.tsx').then((m) => m.Newsroom));

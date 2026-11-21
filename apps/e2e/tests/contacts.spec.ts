@@ -55,19 +55,35 @@ test('H-02: the same email can’t be added twice', async () => {
   if (id && id !== contact.contactId) made.push(id);
 });
 
-test('an artist’s own contact is theirs to change, and only Blueprint deletes', async () => {
-  const mine = await ok<Contact>('artistOn', 'POST', '/contacts', {
+test('an artist’s own contact is private until they share it (rev 18)', async () => {
+  const mine = await ok<Contact & { sharing: string }>('artistOn', 'POST', '/contacts', {
     firstName: 'E2E',
     lastName: tag('artist contact'),
   });
   made.push(mine.contactId);
+  expect(mine.sharing).toBe('private');
   expect(
     (await call('artistOn', 'PATCH', `/contacts/${mine.contactId}`, { jobTitle: 'Booker' })).status,
+  ).toBe(200);
+  // Nobody else can see it, not even Blueprint.
+  expect((await call('artistOther', 'GET', `/contacts/${mine.contactId}`)).status).toBe(404);
+  expect((await call('admin', 'GET', `/contacts/${mine.contactId}`)).status).toBe(404);
+  // Shared with Blueprint: Blueprint sees it, other artists still don't.
+  expect(
+    (await call('artistOn', 'PATCH', `/contacts/${mine.contactId}`, { sharing: 'bmg' })).status,
+  ).toBe(200);
+  expect((await call('admin', 'GET', `/contacts/${mine.contactId}`)).status).toBe(200);
+  expect((await call('artistOther', 'GET', `/contacts/${mine.contactId}`)).status).toBe(404);
+  // Shared with everyone: another artist sees it but can't change it.
+  expect(
+    (await call('artistOn', 'PATCH', `/contacts/${mine.contactId}`, { sharing: 'all' })).status,
   ).toBe(200);
   expect(
     (await call('artistOther', 'PATCH', `/contacts/${mine.contactId}`, { jobTitle: 'X' })).status,
   ).toBe(403);
-  expect((await call('artistOn', 'DELETE', `/contacts/${mine.contactId}`)).status).toBe(403);
+  // The artist can remove what they added.
+  expect((await call('artistOn', 'DELETE', `/contacts/${mine.contactId}`)).status).toBe(200);
+  made.splice(made.indexOf(mine.contactId), 1);
 });
 
 test.afterAll(async () => {

@@ -41,6 +41,7 @@ import {
 } from '../events/model.ts';
 import { artistPk, newId } from '../workspace/model.ts';
 import { allContacts, upsertPerson } from '../address-book/store.ts';
+import { contactVisible } from '../address-book/model.ts';
 import {
   audit,
   authContext,
@@ -185,7 +186,10 @@ async function linkCrew(
   principal: Principal,
   people: CrewPerson[],
 ): Promise<CrewPerson[]> {
-  const known = await allContacts();
+  // Only contacts Blueprint can see: an artist's private contact is never matched or tagged.
+  const known = (await allContacts()).filter((c) =>
+    contactVisible(c, { sub: principal.sub, isBmg: true }),
+  );
   const out: CrewPerson[] = [];
   for (const p of people) {
     const { contact, created } = await upsertPerson(
@@ -266,6 +270,7 @@ export const handler = handle(async (event) => {
           ? { dealNote: dealNoteFor(body.deal, body.dealNote)! }
           : {}),
         ...(body.ticketUrl ? { ticketUrl: body.ticketUrl } : {}),
+        ...(body.humanitixEventId ? { humanitixEventId: body.humanitixEventId } : {}),
         checklist: DEFAULT_CHECKLIST.map((title, i) => ({ id: `c${i + 1}`, title, done: false })),
         plannedBy: isArtist ? 'artist' : 'bmg',
         // Gigs Blueprint adds are always shared.
@@ -284,8 +289,14 @@ export const handler = handle(async (event) => {
       const patch = parseBody(event, GigPatch);
       const refused = gigPatchAllowed(principal.role, gig, patch);
       if (refused) throw new HttpError(403, refused);
-      const { askHelp, helpDone, startTime, endTime, venueId, ...fields } = patch;
+      const { askHelp, helpDone, startTime, endTime, venueId, humanitixEventId, ...fields } = patch;
       const next: Gig = { ...gig, ...fields, updatedAt: now };
+      // Rev 18: linking to another Humanitix event (or unlinking) drops the old count.
+      if (humanitixEventId !== undefined && humanitixEventId !== gig.humanitixEventId) {
+        delete next.humanitix;
+        if (humanitixEventId === null) delete next.humanitixEventId;
+        else next.humanitixEventId = humanitixEventId;
+      }
       if (venueId === null || (fields.venue !== undefined && !fields.venue)) delete next.venueId;
       else if (venueId !== undefined) next.venueId = venueId;
       // Move an older single `time` across as the start time.

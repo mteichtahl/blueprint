@@ -47,6 +47,46 @@ export interface AccountInsight {
   spotifyListeners?: number;
 }
 
+/** Rev 18: an artist's Humanitix tickets, in My stats (see services/api connectors/humanitix.ts). */
+export interface HumanitixGigLink {
+  gigId: string;
+  title: string;
+  date: string;
+  venue: string | null;
+  humanitixEventId: string;
+  eventName: string | null;
+  ticketsSold: number | null;
+  syncedAt: string | null;
+}
+export interface HumanitixEventRow {
+  id: string;
+  name: string;
+  startDate: string | null;
+  gigId: string | null;
+  gigTitle: string | null;
+  suggestedGigId: string | null;
+}
+export interface HumanitixStats {
+  connected: boolean;
+  status: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  ticketsSold: number;
+  series: number[];
+  gigs: HumanitixGigLink[];
+  /** Only for the artist themselves. */
+  events?: HumanitixEventRow[];
+  linkable?: { gigId: string; title: string; date: string }[];
+}
+
+/** "2026-12-05" on Melbourne's calendar, for a Humanitix start time. */
+export function melbourneDay(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' });
+}
+
 export interface InsightsData {
   range: 30 | 60 | 90;
   website: {

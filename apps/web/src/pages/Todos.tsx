@@ -1271,9 +1271,16 @@ function AddTodo({
   );
 }
 
+/** The start of a plan-change to-do's title, so the owner sees what it is at a glance. */
+export const PLAN_CHANGE_PREFIX = 'Plan change: ';
+
 /**
  * Rev 15, My plan: "Ask Kyra to do something". A to-do for the artist's plan
  * owner, optionally linked to a stage or milestone of the plan.
+ *
+ * Rev 18, `change`: "Ask for a change" beside Export to PDF. The same to-do,
+ * worded as a change to the plan: the artist says what should change (and
+ * why), and it reaches the owner as "Plan change: …".
  */
 export function AskOwner({
   cfg,
@@ -1283,6 +1290,7 @@ export function AskOwner({
   phases,
   onClose,
   onSent,
+  mode = 'ask',
 }: {
   cfg: AppConfig;
   token: string;
@@ -1291,7 +1299,9 @@ export function AskOwner({
   phases: PlanResponse['plan']['phases'];
   onClose: () => void;
   onSent: (msg: string) => void;
+  mode?: 'ask' | 'change';
 }) {
+  const change = mode === 'change';
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [due, setDue] = useState('');
@@ -1312,14 +1322,18 @@ export function AskOwner({
     const [phaseId, milestoneId] = link.split('|');
     try {
       await api(cfg, token, 'POST', `/artists/${artistId}/todos`, {
-        title: title.trim(),
+        title: change ? `${PLAN_CHANGE_PREFIX}${title.trim()}` : title.trim(),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
         ...(due ? { due } : {}),
         ...(phaseId ? { phaseId } : {}),
         ...(phaseId && milestoneId ? { milestoneId } : {}),
         for: 'planOwner',
       });
-      onSent(`Sent to ${owner.to}. They're told now.`);
+      onSent(
+        change
+          ? `Your change is with ${owner.to} as a to-do. They're told now, and you'll hear when it's done.`
+          : `Sent to ${owner.to}. They're told now.`,
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1328,20 +1342,28 @@ export function AskOwner({
   }
 
   return (
-    <Card title={<span className="eyebrow">Ask {owner.to} to do something</span>}>
-      {owner.refused ? (
-        <Notice tone="info">{owner.refused}</Notice>
+    <Card
+      title={
+        <span className="eyebrow">
+          {change ? `Ask ${owner.to} for a change to your plan` : `Ask ${owner.to} to do something`}
+        </span>
+      }
+    >
+      {owner.refused || !owner.enabled ? (
+        <Notice tone="info">
+          {owner.refused ?? `${owner.to} isn't taking to-dos from artists right now.`}
+        </Notice>
       ) : (
         <>
           <Field
-            label="To-do"
+            label={change ? 'What should change?' : 'To-do'}
             value={title}
-            maxLength={200}
-            placeholder="Book the rehearsal room"
+            maxLength={200 - (change ? PLAN_CHANGE_PREFIX.length : 0)}
+            placeholder={change ? 'Move the EP release to March' : 'Book the rehearsal room'}
             onChange={(e) => setTitle(e.target.value)}
           />
           <TextArea
-            label="Notes"
+            label={change ? `Why, or anything else ${owner.to} should know` : 'Notes'}
             value={notes}
             maxLength={2000}
             onChange={(e) => setNotes(e.target.value)}
@@ -1361,6 +1383,9 @@ export function AskOwner({
             />
           </div>
           <span className="src">
+            {change
+              ? `It goes to ${owner.to} as a to-do. They make the change to your plan, and you're told when they finish it. `
+              : ''}
             {owner.to === 'Blueprint'
               ? "Your plan doesn't have a Blueprint owner yet. This goes to the Blueprint team."
               : `${owner.to} can have up to ${owner.max} open to-dos from you (${owner.open} now).`}
@@ -1369,9 +1394,9 @@ export function AskOwner({
       )}
       {error && <Notice tone="error">{error}</Notice>}
       <div className="flex gap-2">
-        {!owner.refused && (
+        {!owner.refused && owner.enabled && (
           <Button variant="cta" disabled={busy || !title.trim()} onClick={() => void send()}>
-            {busy ? 'Sending…' : `Send to ${owner.to}`}
+            {busy ? 'Sending…' : change ? 'Ask for the change' : `Send to ${owner.to}`}
           </Button>
         )}
         <Button variant="ghost" onClick={onClose}>

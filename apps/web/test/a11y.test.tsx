@@ -312,6 +312,105 @@ function answer(method: string, path: string): [number, unknown] {
   }
   if (method !== 'GET') return [200, {}];
   const routes: [RegExp, unknown][] = [
+    // Rev 18: the artist's meetings, Humanitix in My stats, and a private contact.
+    [
+      /^\/meetings\/mine$/,
+      {
+        meetings: [
+          {
+            meetingId: 'meet00000001',
+            title: 'Release planning',
+            startedAt: now,
+            durationSec: 1500,
+            with: ['Kyra Teichtahl'],
+            attended: true,
+            aboutMe: true,
+            shared: true,
+            recording: false,
+            noteFileId: 'file000000001',
+            audioFileId: null,
+          },
+        ],
+      },
+    ],
+    [
+      /^\/artists\/[^/]+\/stats$/,
+      {
+        range: 30,
+        total: 1200,
+        delta: 40,
+        series: [1160, 1200],
+        split: [{ source: 'instagram', followers: 1200 }],
+        humanitix: {
+          connected: true,
+          status: 'connected',
+          lastSyncAt: now,
+          lastError: null,
+          ticketsSold: 120,
+          series: [100, 120],
+          gigs: [
+            {
+              gigId: 'gig000000001',
+              title: 'Corner Hotel',
+              date: '2026-12-05',
+              venue: 'Corner Hotel',
+              humanitixEventId: 'hxCorner',
+              eventName: 'Chloe at the Corner',
+              ticketsSold: 120,
+              syncedAt: now,
+            },
+          ],
+          events: [
+            {
+              id: 'hxTote',
+              name: 'Chloe at the Tote',
+              startDate: '2026-12-12T09:00:00.000Z',
+              gigId: null,
+              gigTitle: null,
+              suggestedGigId: 'gig000000002',
+            },
+            {
+              id: 'hxCorner',
+              name: 'Chloe at the Corner',
+              startDate: '2026-12-05T09:00:00.000Z',
+              gigId: 'gig000000001',
+              gigTitle: 'Corner Hotel',
+              suggestedGigId: null,
+            },
+          ],
+          linkable: [{ gigId: 'gig000000002', title: 'The Tote', date: '2026-12-12' }],
+        },
+      },
+    ],
+    [
+      /^\/contacts$/,
+      {
+        tags: ['Venue contact', 'Crew'],
+        contacts: [
+          {
+            contactId: 'con000000001',
+            firstName: 'Pat',
+            lastName: 'Lee',
+            name: 'Pat Lee',
+            jobTitle: 'Booker',
+            organisation: 'The Tote',
+            email: 'pat@tote.com.au',
+            phone: '',
+            linkedin: '',
+            website: '',
+            instagram: '',
+            address: '',
+            tags: ['Venue contact'],
+            archived: false,
+            addedByArtist: true,
+            sharing: 'private',
+            mine: true,
+            canEdit: true,
+            createdAt: now,
+          },
+        ],
+      },
+    ],
     // Meeting notes (rev 11).
     [/^\/meetings\/items$/, { meetings: [meetingAiOff ? aiOffMeeting() : meeting] }],
     [
@@ -602,8 +701,7 @@ function answer(method: string, path: string): [number, unknown] {
             website: '',
             address: '252 Swanston St',
             suburb: 'Melbourne',
-            manager: null,
-            booker: null,
+            contact: null,
             autoLogo: false,
             logo: null,
             archived: false,
@@ -1462,6 +1560,39 @@ describe('rev 15: to-dos for the plan owner', () => {
     expect(await violations()).toEqual([]);
   });
 
+  it('artist: Ask for a change (rev 18) sends a "Plan change" to-do to the owner', async () => {
+    const sent: unknown[] = [];
+    const before = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    let done = '';
+    render(
+      <AskOwner
+        cfg={cfg}
+        token="t"
+        artistId="art_chloe00000001"
+        owner={owner}
+        phases={phases as never}
+        mode="change"
+        onClose={() => undefined}
+        onSent={(m) => (done = m)}
+      />,
+    );
+    await settle();
+    expect(screen.getByText('Ask Kyra for a change to your plan')).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.change(screen.getByLabelText('What should change?'), {
+      target: { value: 'Move the EP to March' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask for the change' }));
+    await settle();
+    globalThis.fetch = before;
+    expect(sent[0]).toMatchObject({ title: 'Plan change: Move the EP to March', for: 'planOwner' });
+    expect(done).toMatch(/with Kyra as a to-do/);
+  });
+
   it('artist: at the maximum, says why instead of the form', async () => {
     const refused =
       'Kyra has 10 open to-dos from you. You can add more when one is done or sent back.';
@@ -1542,6 +1673,7 @@ describe('rev 16: the artist desktop layout', () => {
     'My stats',
     'My brand kit',
     'Contacts & venues',
+    'My meetings',
   ];
   it.each(VIEWS)('artist desktop: %s', async (label) => {
     render(<Home {...props('artist')} />);
@@ -1555,6 +1687,34 @@ describe('rev 16: the artist desktop layout', () => {
     ).toBe('page');
     // Pages reached from Home on the phone don't need "← Home" here.
     expect(screen.queryByRole('button', { name: '← Home' })).toBeNull();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('rev 18: My stats shows Humanitix tickets and offers to link an event', async () => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    fireEvent.click(sidebar().getByRole('button', { name: /^My stats/ }));
+    await settle();
+    expect(screen.getByText('Tickets · Humanitix')).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Link Chloe at the Tote to a gig' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /The Tote .*\(same day\)/ })).toBeTruthy();
+    expect(screen.getByText('Linked to Corner Hotel')).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('rev 18: My meetings lists the meeting, and a contact shows it is only theirs', async () => {
+    render(<Home {...props('artist')} />);
+    await settle();
+    fireEvent.click(sidebar().getByRole('button', { name: /^My meetings/ }));
+    await settle();
+    expect(screen.getByText('Release planning')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open the note' })).toBeTruthy();
+    fireEvent.click(sidebar().getByRole('button', { name: /^Contacts & venues/ }));
+    await settle();
+    expect(screen.getAllByText('Only you').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Pat Lee' }));
+    await settle();
+    expect(screen.getByRole('group', { name: 'Who can see this contact?' })).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 

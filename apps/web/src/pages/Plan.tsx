@@ -128,6 +128,9 @@ export function PlanTab({
   const [ownerDone, setOwnerDone] = useState<string | null>(null);
   // Rev 15: the artist asks their plan owner to do something.
   const [asking, setAsking] = useState(false);
+  // Rev 18: "Ask for a change" beside Export to PDF.
+  const [askingChange, setAskingChange] = useState(false);
+  const [changeDone, setChangeDone] = useState<string | null>(null);
 
   const stopEditing = () => {
     setDraft(null);
@@ -282,6 +285,8 @@ export function PlanTab({
   );
   /** Rev 15: artists (no owner picker) can ask the owner, unless the owner turned it off. */
   const askable = !canEdit && !data.ownerCandidates && !!data.ownerTodos && data.ownerTodos.enabled;
+  /** Rev 18: artists can always see "Ask for a change"; it says so if the owner is full or off. */
+  const canAskChange = !canEdit && !data.ownerCandidates && !!data.ownerTodos;
   const editButton = (label: string, t: Target) =>
     canEdit && !editing ? (
       <Button size="sm" variant="ghost" onClick={() => startEdit(t)}>
@@ -492,9 +497,40 @@ export function PlanTab({
           >
             {exporting ? 'Making the PDF…' : 'Export to PDF'}
           </Button>
+          {canAskChange && (
+            <Button
+              variant="ghost"
+              aria-expanded={askingChange}
+              onClick={() => {
+                setChangeDone(null);
+                setAsking(false);
+                setAskingChange(true);
+              }}
+            >
+              <Icon name="pencil" size={15} />
+              Ask for a change
+            </Button>
+          )}
           <span className="src">The whole plan, with the timeline and its history of changes.</span>
         </div>
       )}
+      {data.exists && !editing && askingChange && canAskChange && (
+        <AskOwner
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          owner={data.ownerTodos!}
+          phases={data.plan.phases}
+          mode="change"
+          onClose={() => setAskingChange(false)}
+          onSent={(msg) => {
+            setAskingChange(false);
+            setChangeDone(msg);
+            void load();
+          }}
+        />
+      )}
+      {changeDone && !askingChange && <Notice tone="success">{changeDone}</Notice>}
     </div>
   );
 }

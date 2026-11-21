@@ -47,9 +47,16 @@ import {
   type Account,
   type ConnectionItem,
 } from '../connectors/store.ts';
-import { syncConnection } from '../connectors/sync.ts';
+import {
+  gigHumanitixId,
+  HUMANITIX_AFTER_DAYS,
+  HUMANITIX_EVENTS_SK,
+  syncConnection,
+} from '../connectors/sync.ts';
+import { humanitixView } from '../connectors/humanitix.ts';
+import type { HumanitixEvent } from '../connectors/vendors.ts';
 import { exchangeCode, humanitixEvents, VendorError } from '../connectors/vendors.ts';
-import { EVENTS_PK, eventSk } from '../events/model.ts';
+import { EVENTS_PK, eventSk, type Gig } from '../events/model.ts';
 import { artistPk, PROFILE_SK, ROSTER_GSI1PK } from '../workspace/model.ts';
 import {
   audit,
@@ -298,6 +305,51 @@ async function manualStats(event: APIGatewayProxyEvent, account: Account) {
 }
 
 /** One account's followers over the range, its split by platform and Spotify. */
+/**
+ * Rev 18: the artist's Humanitix tickets for My stats. The artist sees their
+ * own Humanitix events too, so they can link them to gigs; Blueprint sees the
+ * counts on gigs the artist shares.
+ */
+async function artistHumanitix(
+  artistId: string,
+  principal: Principal,
+  snaps: Snapshot[],
+  today: string,
+  range: number,
+) {
+  const isArtist = principal.role === 'artist' && principal.artistId === artistId;
+  const [connection, listed, gigs] = await Promise.all([
+    loadConnection(artistId, 'humanitix'),
+    isArtist
+      ? db.send(
+          new GetCommand({
+            TableName: table(),
+            Key: { PK: artistPk(artistId), SK: HUMANITIX_EVENTS_SK },
+          }),
+        )
+      : Promise.resolve(undefined),
+    db.send(
+      new QueryCommand({
+        TableName: table(),
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :g)',
+        ExpressionAttributeValues: { ':pk': artistPk(artistId), ':g': 'GIG#' },
+        Limit: 300,
+      }),
+    ),
+  ]);
+  return humanitixView({
+    connection: connection ?? undefined,
+    events: connection ? ((listed?.Item?.events ?? []) as HumanitixEvent[]) : [],
+    gigs: (gigs.Items ?? []) as Gig[],
+    snaps,
+    today,
+    range,
+    isArtist,
+    idOf: gigHumanitixId,
+    afterDays: HUMANITIX_AFTER_DAYS,
+  });
+}
+
 function accountInsight(snaps: Snapshot[], today: string, range: number) {
   const { series, split } = followerSeries(snaps, today, range);
   const first = series[0]?.followers ?? 0;
@@ -520,7 +572,11 @@ export const handler = handle(async (event) => {
       const range = rangeParam(event.queryStringParameters?.range);
       const today = isoDay(new Date());
       const snaps = await readSnapshots(artistId, daysBefore(today, range + 60));
-      return json(200, { range, ...accountInsight(snaps, today, range) });
+      return json(200, {
+        range,
+        ...accountInsight(snaps, today, range),
+        humanitix: await artistHumanitix(artistId, principal, snaps, today, range),
+      });
     }
 
     case 'GET /insights': {
