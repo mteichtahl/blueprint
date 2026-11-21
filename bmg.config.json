@@ -22,7 +22,8 @@
       "hosts": {
         "artist": "artist-beta",
         "admin": "admin-beta"
-      }
+      },
+      "certificateArn": "arn:aws:acm:us-east-1:346073464284:certificate/16ef12ce-c422-48e4-975d-d107787e779c"
     },
     "prod": {
       "qualifier": "bmgprd",
