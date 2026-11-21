@@ -22,3 +22,19 @@ export function appOrigin(): Promise<string> {
   })();
   return cached;
 }
+
+/**
+ * The address for the Blueprint team (team invites, their notification
+ * emails): ADMIN_ORIGIN, e.g. https://admin.blueprintmusic.group. While the
+ * app is still on its *.cloudfront.net address (no certificate yet) the admin
+ * host doesn't answer, so this is the same as appOrigin().
+ */
+export async function adminOrigin(): Promise<string> {
+  return pickAdminOrigin(await appOrigin(), process.env.ADMIN_ORIGIN);
+}
+
+/** appOrigin() until the custom hosts are live, then the admin host. */
+export function pickAdminOrigin(app: string, admin: string | undefined): string {
+  if (!admin || !app || app.includes('.cloudfront.net')) return app;
+  return admin.replace(/\/$/, '');
+}

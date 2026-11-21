@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-accessanalyzer": "^3.1168.0",
+    "@aws-sdk/client-acm": "^3.1175.0",
     "@aws-sdk/client-bedrock": "^3.1168.0",
     "@aws-sdk/client-bedrock-agentcore-control": "^3.1168.0",
     "@aws-sdk/client-cloudformation": "^3.1168.0",

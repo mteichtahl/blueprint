@@ -2,6 +2,7 @@ import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-sec
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import type { SQSEvent } from 'aws-lambda';
 import nodemailer from 'nodemailer';
+import { pickAdminOrigin } from '@bmg/email';
 import { emailText, type Draft } from '../notifications/model.ts';
 
 const secrets = new SecretsManagerClient({});
@@ -69,8 +70,14 @@ export async function handler(event: SQSEvent) {
   });
   try {
     for (const record of event.Records) {
-      const { to, draft } = JSON.parse(record.body) as { to: string; draft: Draft };
-      const mail = emailText(draft, await webUrl());
+      const { to, draft, team } = JSON.parse(record.body) as {
+        to: string;
+        draft: Draft;
+        /** The Blueprint team: links go to the admin address. */
+        team?: boolean;
+      };
+      const web = await webUrl();
+      const mail = emailText(draft, team ? pickAdminOrigin(web, process.env.ADMIN_ORIGIN) : web);
       await transport.sendMail({ from: creds.from, to, ...mail });
     }
     console.log(JSON.stringify({ level: 'info', event: 'mail.sent', count: event.Records.length }));

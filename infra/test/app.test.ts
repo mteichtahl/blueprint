@@ -1084,3 +1084,61 @@ describe('social sign-in and text codes switched on (design D2)', () => {
     expect(csp).toContain('amazoncognito.com');
   });
 });
+
+describe('custom domains (artist and admin hosts, docs/dns.md)', () => {
+  const certificateArn =
+    'arn:aws:acm:us-east-1:123456789012:certificate/0a1b2c3d-1111-2222-3333-444455556666';
+  const on = parseConfig(
+    JSON.parse(readFileSync(resolve(import.meta.dirname, '../../bmg.config.example.json'), 'utf8')),
+  );
+  on.environments.staging.certificateArn = certificateArn;
+  const app = new App();
+  const built = buildApp(app, on, { version: 'test' });
+  it('synthesizes with no unacknowledged cdk-nag findings', () => {
+    expect(() => app.synth()).not.toThrow();
+  });
+  const [staging, prod] = built.environments.map((e) => Template.fromStack(e.web));
+  const root = on.domain.root;
+
+  it('serves staging on artist-beta and admin-beta with TLS 1.2 minimum', () => {
+    staging!.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        Aliases: [`artist-beta.${root}`, `admin-beta.${root}`],
+        ViewerCertificate: {
+          AcmCertificateArn: certificateArn,
+          MinimumProtocolVersion: 'TLSv1.2_2021',
+          SslSupportMethod: 'sni-only',
+        },
+      }),
+    });
+  });
+
+  it('puts passkeys on the root domain so one works on both hosts', () => {
+    const rp = JSON.stringify(staging!.findResources('Custom::AWS'));
+    expect(rp).toContain(`\\"RelyingPartyId\\":\\"${root}\\"`);
+  });
+
+  it('publishes the artist host as the app address and redirects the CloudFront one', () => {
+    staging!.hasResourceProperties('AWS::SSM::Parameter', {
+      Name: '/bmg/staging/web/url',
+      Value: `https://artist-beta.${root}`,
+    });
+    const fn = JSON.stringify(staging!.findResources('AWS::CloudFront::Function'));
+    expect(fn).toContain('.cloudfront.net');
+    expect(fn).toContain(`https://artist-beta.${root}`);
+  });
+
+  it('leaves prod on its CloudFront address until it has a certificate', () => {
+    const dist = JSON.stringify(prod!.findResources('AWS::CloudFront::Distribution'));
+    expect(dist).not.toContain('Aliases');
+    expect(JSON.stringify(prod!.findResources('AWS::CloudFront::Function'))).not.toContain(
+      'Moved Permanently',
+    );
+  });
+
+  it('narrows upload CORS to the two hosts once they are live (review W3)', () => {
+    const files = JSON.stringify(Template.fromStack(built.environments[0]!.files).toJSON());
+    expect(files).toContain(`https://admin-beta.${root}`);
+    expect(files).not.toContain('https://*.cloudfront.net');
+  });
+});

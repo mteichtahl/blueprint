@@ -697,7 +697,8 @@ function AppForm({
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const redirects = app.redirectUris?.length ? app.redirectUris : [app.redirectUri];
   const ready = clientId.trim().length >= 4 && clientSecret.trim().length >= 8;
 
   const submit = async (e: FormEvent) => {
@@ -729,21 +730,23 @@ function AppForm({
         </a>
       </div>
       <div className="flex flex-col gap-1">
-        <span className="text-sm font-semibold">Redirect address</span>
-        <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded bg-secondary px-2 py-1.5 text-sm">
-            {app.redirectUri}
-          </code>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() =>
-              void navigator.clipboard?.writeText(app.redirectUri).then(() => setCopied(true))
-            }
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
+        <span className="text-sm font-semibold">
+          {redirects.length > 1 ? 'Redirect addresses (add both)' : 'Redirect address'}
+        </span>
+        {redirects.map((uri) => (
+          <div key={uri} className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded bg-secondary px-2 py-1.5 text-sm">
+              {uri}
+            </code>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void navigator.clipboard?.writeText(uri).then(() => setCopied(uri))}
+            >
+              {copied === uri ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+        ))}
       </div>
       <Field
         label={app.idLabel}

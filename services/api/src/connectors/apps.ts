@@ -121,7 +121,7 @@ export async function clientCreds(provider: Provider): Promise<ClientCreds | und
 /** "…abcd": enough to recognise which app is registered, never the whole id. */
 export const hint = (id: string) => (id.length <= 4 ? '…' : `…${id.slice(-4)}`);
 
-export async function listApps(redirectUri: string) {
+export async function listApps(redirectUris: string[]) {
   return Promise.all(
     PROVIDERS.map(async (provider) => {
       const v = await read(provider).catch(() => null);
@@ -135,7 +135,8 @@ export async function listApps(redirectUri: string) {
         configured,
         clientIdHint: configured ? hint(v!.clientId!) : null,
         updatedAt: configured ? (v!.updatedAt ?? null) : null,
-        redirectUri,
+        redirectUri: redirectUris[0] ?? '',
+        redirectUris,
       };
     }),
   );
