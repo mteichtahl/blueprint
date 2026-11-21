@@ -71,7 +71,8 @@ export class NotifyStack extends BmgStack {
         USER_POOL_ID: props.userPool.userPoolId,
         SMTP_SECRET_ID: names.smtpSecret(cfg, env),
         APP_URL_PARAM: webUrlParam,
-        APP_ORIGIN: `https://${names.host(cfg, env, 'app')}`,
+        APP_ORIGIN: `https://${names.webHost(cfg, env, 'artist')}`,
+        ADMIN_ORIGIN: `https://${names.webHost(cfg, env, 'admin')}`,
         BMG_NOTIFY_ADDRESS: cfg.email.senderAddress,
       },
     });

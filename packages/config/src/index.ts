@@ -19,8 +19,30 @@ export type EnvironmentName = z.infer<typeof EnvironmentName>;
 const environmentSchema = z.object({
   /** CDK bootstrap qualifier for this environment (separate roles per env). */
   qualifier,
-  /** Subdomain prefix, '' for prod, 'staging' for staging. */
+  /** Subdomain prefix, '' for prod, 'staging' for staging (API, files, auth host names). */
   subdomain: z.string(),
+  /**
+   * The web app's two addresses under domain.root (labels, not full names):
+   * artists sign in on `artist`, the Blueprint team on `admin`. Both serve the
+   * same app; defaults are artist/admin in prod and artist-beta/admin-beta in staging.
+   */
+  hosts: z
+    .object({
+      artist: z.string().regex(/^[a-z0-9-]+$/),
+      admin: z.string().regex(/^[a-z0-9-]+$/),
+    })
+    .optional(),
+  /**
+   * The ACM certificate (us-east-1) covering both hosts, from `blueprint dns cert`.
+   * Until it's set the app stays on its *.cloudfront.net address.
+   */
+  certificateArn: z
+    .string()
+    .regex(
+      /^arn:aws:acm:us-east-1:\d{12}:certificate\/[0-9a-f-]+$/,
+      'must be an ACM certificate in us-east-1',
+    )
+    .optional(),
   /** Cognito feature plan for this environment (D3). */
   cognitoPlan: z.enum(['ESSENTIALS', 'PLUS']),
   /**
@@ -151,6 +173,9 @@ export function saveConfig(config: BmgConfig, path = configPath()): void {
 }
 
 /** Resource-name helpers so the CLI and CDK always agree on names. */
+export const WEB_AUDIENCES = ['artist', 'admin'] as const;
+export type WebAudience = (typeof WEB_AUDIENCES)[number];
+
 export const names = {
   stack: (cfg: BmgConfig, suffix: string) => `${cfg.project}-${suffix}`,
   envStack: (cfg: BmgConfig, env: EnvironmentName, suffix: string) =>
@@ -180,8 +205,22 @@ export const names = {
   ssm: (cfg: BmgConfig, env: EnvironmentName, key: string) => `/${cfg.project}/${env}/${key}`,
   /** DynamoDB table names (design 8.1). */
   table: (cfg: BmgConfig, env: EnvironmentName, kind: TableKind) => `${cfg.project}-${env}-${kind}`,
-  /** Public host name in an environment, e.g. app.blueprintmusic.group / app.staging.blueprintmusic.group. */
-  host: (cfg: BmgConfig, env: EnvironmentName, sub: 'app' | 'api' | 'files' | 'join' | 'auth') => {
+  /**
+   * The web app's address for artists or the Blueprint team, e.g.
+   * artist.blueprintmusic.group / admin-beta.blueprintmusic.group.
+   */
+  webHost: (cfg: BmgConfig, env: EnvironmentName, who: WebAudience) => {
+    const label = cfg.environments[env].hosts?.[who] ?? (env === 'prod' ? who : `${who}-beta`);
+    return `${label}.${cfg.domain.root}`;
+  },
+  /** Both web app addresses, artist first. */
+  webHosts: (cfg: BmgConfig, env: EnvironmentName) =>
+    WEB_AUDIENCES.map((who) => names.webHost(cfg, env, who)),
+  /** True once the environment has its certificate, so CloudFront serves the custom hosts. */
+  customDomains: (cfg: BmgConfig, env: EnvironmentName) =>
+    Boolean(cfg.environments[env].certificateArn),
+  /** Public host name in an environment, e.g. api.blueprintmusic.group / api.staging.blueprintmusic.group. */
+  host: (cfg: BmgConfig, env: EnvironmentName, sub: 'api' | 'files' | 'join' | 'auth') => {
     const envPart = cfg.environments[env].subdomain;
     return [sub, envPart, cfg.domain.root].filter(Boolean).join('.');
   },

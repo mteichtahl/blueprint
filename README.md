@@ -98,6 +98,8 @@ blueprint status            # stacks, runners, deployed versions and alarms
 
 Connector OAuth apps are registered in the app (Connectors → Connector apps, admins only); `blueprint connectors setup <provider>` still works and writes the same secret. If a first deploy fails, `blueprint stacks repair` removes the stacks it left behind. `blueprint ai status` shows whether transcription may run.
 
+Web addresses (`artist-beta` / `admin-beta` for staging, `artist` / `admin` for prod): `blueprint dns cert`, `dns records` and `dns check`, in `docs/dns.md`.
+
 Every command that changes something shows its plan and asks before applying it. `--dry-run` shows the plan without applying it, and `--yes` skips the prompt.
 
 ## Development

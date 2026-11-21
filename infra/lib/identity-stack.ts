@@ -103,7 +103,8 @@ export class IdentityStack extends BmgStack {
       description: 'Cognito custom message: BMG-branded emails',
       environment: {
         APP_URL_PARAM: webUrlParam,
-        APP_ORIGIN: `https://${names.host(cfg, env, 'app')}`,
+        APP_ORIGIN: `https://${names.webHost(cfg, env, 'artist')}`,
+        ADMIN_ORIGIN: `https://${names.webHost(cfg, env, 'admin')}`,
       },
       prod,
     });

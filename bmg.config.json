@@ -18,12 +18,20 @@
     "staging": {
       "qualifier": "bmgstg",
       "subdomain": "staging",
-      "cognitoPlan": "ESSENTIALS"
+      "cognitoPlan": "ESSENTIALS",
+      "hosts": {
+        "artist": "artist-beta",
+        "admin": "admin-beta"
+      }
     },
     "prod": {
       "qualifier": "bmgprd",
       "subdomain": "",
-      "cognitoPlan": "PLUS"
+      "cognitoPlan": "PLUS",
+      "hosts": {
+        "artist": "artist",
+        "admin": "admin"
+      }
     }
   },
   "domain": {

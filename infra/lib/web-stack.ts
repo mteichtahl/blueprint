@@ -12,12 +12,15 @@ import {
   OriginRequestPolicy,
   PriceClass,
   ResponseHeadersPolicy,
+  SecurityPolicyProtocol,
+  SSLMethod,
   ViewerProtocolPolicy,
   Function as CfFunction,
   FunctionCode,
   FunctionEventType,
   FunctionRuntime,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { FunctionUrlOrigin, HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   ClientAttributes,
@@ -78,8 +81,13 @@ const WEB_DIST = resolve(REPO_ROOT, 'apps/web/dist');
  * - strict security headers, including a CSP that only allows this origin
  *   and Cognito;
  * - the public web client (code + PKCE) whose callback is this origin.
- * A custom domain and the edge WAF (us-east-1) follow once DNS for
- * blueprintmusic.group is on AWS.
+ *
+ * Custom domains: once the environment has `certificateArn` (from
+ * `blueprint dns cert`, docs/dns.md) the distribution answers on the artist
+ * and admin hosts (e.g. artist-beta / admin-beta.blueprintmusic.group), with
+ * TLS 1.2 minimum (review W1). Passkeys then belong to the root domain so one
+ * passkey works on both hosts, and the old *.cloudfront.net address redirects
+ * to the artist host. Until then the app stays on its CloudFront address.
  */
 export class WebStack extends BmgStack {
   constructor(scope: Construct, id: string, props: WebStackProps) {
@@ -92,6 +100,9 @@ export class WebStack extends BmgStack {
     const cfg = props.config;
     const prod = env === 'prod';
     const p = `${cfg.project}-${env}`;
+    const certificateArn = cfg.environments[env].certificateArn;
+    const hosts = names.webHosts(cfg, env);
+    const artistHost = names.webHost(cfg, env, 'artist');
 
     const logs = new Bucket(this, 'WebAccessLogs', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -175,13 +186,13 @@ export class WebStack extends BmgStack {
     // file extension (e.g. /auth/callback) load index.html. Distribution-level
     // error responses would also rewrite the API's own 403/404 answers into
     // index.html, hiding its problem+json errors from the app.
+    // With custom domains, pages asked for on the old *.cloudfront.net
+    // address go to the artist host (bookmarks and installed apps move over).
     const spaRouting = new CfFunction(this, 'SpaRouting', {
       functionName: `${p}-spa-routing`,
       runtime: FunctionRuntime.JS_2_0,
       comment: 'Serve index.html for app routes',
-      code: FunctionCode.fromInline(
-        "function handler(event) { var r = event.request; if (r.uri.indexOf('.') === -1) { r.uri = '/index.html'; } return r; }",
-      ),
+      code: FunctionCode.fromInline(spaRoutingCode(certificateArn ? artistHost : undefined)),
     });
     // ── Public endpoints (no sign-in): newsletter sign-up and recovery codes ──
     const publicFn = new BmgFunction(this, 'Public', {
@@ -233,6 +244,14 @@ export class WebStack extends BmgStack {
       enableLogging: true,
       logBucket: logs,
       logFilePrefix: 'cloudfront/',
+      ...(certificateArn
+        ? {
+            domainNames: hosts,
+            certificate: Certificate.fromCertificateArn(this, 'Certificate', certificateArn),
+            minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+            sslSupportMethod: SSLMethod.SNI,
+          }
+        : {}),
       defaultBehavior: {
         origin: S3BucketOrigin.withOriginAccessControl(site),
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -270,7 +289,13 @@ export class WebStack extends BmgStack {
         },
       },
     });
-    const origin = `https://${distribution.distributionDomainName}`;
+    const cloudFrontOrigin = `https://${distribution.distributionDomainName}`;
+    // Where links and emails send artists; the admin host is for the Blueprint team.
+    const origin = certificateArn ? `https://${artistHost}` : cloudFrontOrigin;
+    // Social sign-in may come back to any address the app answers on.
+    const appOrigins = certificateArn
+      ? [...hosts.map((h) => `https://${h}`), cloudFrontOrigin]
+      : [cloudFrontOrigin];
 
     const client = new UserPoolClient(this, 'WebClient', {
       userPool: props.userPool,
@@ -286,8 +311,8 @@ export class WebStack extends BmgStack {
             oAuth: {
               flows: { authorizationCodeGrant: true },
               scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-              callbackUrls: [`https://${distribution.distributionDomainName}/auth/callback`],
-              logoutUrls: [`https://${distribution.distributionDomainName}/`],
+              callbackUrls: appOrigins.map((o) => `${o}/auth/callback`),
+              logoutUrls: appOrigins.map((o) => `${o}/`),
             },
           }
         : { disableOAuth: true }),
@@ -320,7 +345,10 @@ export class WebStack extends BmgStack {
     // (the same MFA settings as the identity stack, plus the RP id), because
     // the app's address only exists once this distribution does. It is
     // re-applied on every deploy, after the identity stack's own update.
-    const rpId = distribution.distributionDomainName;
+    // With custom domains it is the root domain, which both hosts sit under,
+    // so one passkey works on the artist and the admin address. Passkeys made
+    // on the CloudFront address stop working then (docs/dns.md).
+    const rpId = certificateArn ? cfg.domain.root : distribution.distributionDomainName;
     const mfaConfig = {
       service: 'CognitoIdentityServiceProvider',
       action: 'setUserPoolMfaConfig',
@@ -429,13 +457,30 @@ export class WebStack extends BmgStack {
       stringValue: origin,
     });
     new CfnOutput(this, 'WebUrl', { value: origin });
+    new CfnOutput(this, 'CloudFrontDomain', {
+      value: distribution.distributionDomainName,
+      description: 'Point the artist and admin CNAME records here (docs/dns.md)',
+    });
 
     acknowledge(
       distribution,
-      'The edge WAF (us-east-1) and geo rules arrive with the custom domain; the API behind /v1 already has a regional WAF. The default CloudFront certificate is used until DNS for blueprintmusic.group is on AWS.',
+      'The edge WAF (us-east-1) and geo rules are still to come; the API behind /v1 already has a regional WAF. Until the certificate is set (blueprint dns cert) the default CloudFront certificate is used.',
       'AwsSolutions-CFR1',
       'AwsSolutions-CFR2',
       'AwsSolutions-CFR4',
     );
   }
+}
+
+/**
+ * The viewer-request function: index.html for app routes, and (with custom
+ * domains) a permanent redirect from the *.cloudfront.net address to the
+ * artist host. Exported for the tests.
+ */
+export function spaRoutingCode(redirectHost?: string): string {
+  const redirect = redirectHost
+    ? `var h = r.headers.host ? r.headers.host.value : ''; ` +
+      `if (h.slice(-15) === '.cloudfront.net') { return { statusCode: 301, statusDescription: 'Moved Permanently', headers: { location: { value: 'https://${redirectHost}' + r.uri } } }; } `
+    : '';
+  return `function handler(event) { var r = event.request; ${redirect}if (r.uri.indexOf('.') === -1) { r.uri = '/index.html'; } return r; }`;
 }

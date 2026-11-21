@@ -4,6 +4,7 @@ import { accountSetup } from './commands/account.ts';
 import { aiOptOut, aiStatus } from './commands/ai.ts';
 import { adminCreate } from './commands/admin.ts';
 import { bootstrap } from './commands/bootstrap.ts';
+import { dnsCert, dnsCheck, dnsRecordsCmd } from './commands/dns.ts';
 import { doctor } from './commands/doctor.ts';
 import { e2eSetup } from './commands/e2e.ts';
 import { connectorsSetup, connectorsStatus } from './commands/connectors.ts';
@@ -119,6 +120,28 @@ connectorsCmd
   .description('show which connector apps are registered')
   .option('--env <env>', 'staging or prod', 'prod')
   .action(wrap((o: { env: string }) => connectorsStatus({ ...g(), ...o })));
+
+const dns = program
+  .command('dns')
+  .description('custom web addresses (artist / admin hosts): certificate and records, docs/dns.md');
+dns
+  .command('cert')
+  .description(
+    'request the us-east-1 certificate, print its validation records, save it once issued',
+  )
+  .option('--env <env>', 'staging or prod', 'staging')
+  .option('--wait', 'keep checking until the certificate is issued (up to 30 minutes)')
+  .action(wrap((o: { env: string; wait?: boolean }) => dnsCert({ ...g(), ...o })));
+dns
+  .command('records')
+  .description('print every record to add at the name server (read-only)')
+  .option('--env <env>', 'staging or prod', 'staging')
+  .action(wrap((o: { env: string }) => dnsRecordsCmd({ ...g(), ...o })));
+dns
+  .command('check')
+  .description('check the records are live and the certificate is issued (read-only)')
+  .option('--env <env>', 'staging or prod', 'staging')
+  .action(wrap((o: { env: string }) => dnsCheck({ ...g(), ...o })));
 
 const pipeline = program.command('pipeline').description('CI/CD');
 pipeline

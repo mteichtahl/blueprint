@@ -14,6 +14,7 @@ import {
   encryptForArtist,
   type SessionRole,
 } from '@bmg/crypto';
+import { pickAdminOrigin } from '@bmg/email';
 import { artistPk } from '../workspace/model.ts';
 import { db, env } from '../lib.ts';
 import {
@@ -230,13 +231,30 @@ export async function takeState(state: string): Promise<OAuthState | undefined> 
 // ── App credentials and the redirect address ─────────────────────────────
 export { clientCreds } from './apps.ts';
 
-let appUrl: string | undefined;
-export async function redirectUri(): Promise<string> {
-  if (!appUrl) {
+let origins: { artist: string; admin: string } | undefined;
+async function appOrigins() {
+  if (!origins) {
     const res = await ssm.send(new GetParameterCommand({ Name: env('APP_URL_PARAM') }));
-    appUrl = (res.Parameter?.Value ?? '').replace(/\/$/, '');
+    const artist = (res.Parameter?.Value ?? '').replace(/\/$/, '');
+    origins = { artist, admin: pickAdminOrigin(artist, process.env.ADMIN_ORIGIN) };
   }
-  return `${appUrl}/connectors/callback`;
+  return origins;
+}
+
+/**
+ * Where the vendor sends people back: Blueprint's own connectors are set up
+ * by admins on the admin address, an artist's on the artist address (the
+ * session lives on the address it was started from).
+ */
+export async function redirectUri(account: Account): Promise<string> {
+  const o = await appOrigins();
+  return `${account === 'bmg' ? o.admin : o.artist}/connectors/callback`;
+}
+
+/** Every redirect address a vendor app must allow, admin first. */
+export async function redirectUris(): Promise<string[]> {
+  const o = await appOrigins();
+  return [...new Set([o.admin, o.artist])].map((u) => `${u}/connectors/callback`);
 }
 
 // ── Snapshots ────────────────────────────────────────────────────────────

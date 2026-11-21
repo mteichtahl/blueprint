@@ -192,4 +192,6 @@ export interface ConnectorApp {
   clientIdHint: string | null;
   updatedAt: string | null;
   redirectUri: string;
+  /** Every address the vendor app must allow: admin host (Blueprint) and artist host. */
+  redirectUris?: string[];
 }
