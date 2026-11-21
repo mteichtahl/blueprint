@@ -42,8 +42,7 @@ const venue = (more: Partial<Venue> = {}): Venue => ({
   website: '',
   address: '',
   suburb: '',
-  manager: null,
-  booker: null,
+  contact: null,
   autoLogo: true,
   logo: null,
   archived: false,
@@ -53,41 +52,34 @@ const venue = (more: Partial<Venue> = {}): Venue => ({
 });
 
 describe('Contact venue', () => {
-  it('offers who, then email or phone', () => {
+  it('goes straight to email or phone for the one venue contact', () => {
     render(
       <ContactVenue
         venue={venue({
-          booker: person('c1', 'Bea Booker', { email: 'bea@corner.com', phone: '03 9000 0001' }),
-          manager: person('c2', 'Max Manager', { phone: '0400 000 000' }),
+          contact: person('c1', 'Bea Booker', { email: 'bea@corner.com', phone: '03 9000 0001' }),
         })}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /Contact venue/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Bea Booker/ }));
+    expect(screen.getByText('Venue contact')).toBeTruthy();
     expect(screen.getByRole('link', { name: /Email bea@corner.com/ }).getAttribute('href')).toBe(
       'mailto:bea@corner.com?subject=Booking%20enquiry%3A%20The%20Corner',
     );
     expect(screen.getByRole('link', { name: /Call 03 9000 0001/ }).getAttribute('href')).toBe(
       'tel:0390000001',
     );
-    fireEvent.click(screen.getByRole('button', { name: /Someone else/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Max Manager/ }));
-    expect(screen.queryByRole('link', { name: /Email/ })).toBeNull();
-    expect(screen.getByRole('link', { name: /Call 0400 000 000/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Someone else/ })).toBeNull();
   });
 
-  it('skips the who step with one person, and lists someone in both roles once', () => {
+  it('lists the venue contact once, only with a way to reach them', () => {
     const p = person('c1', 'Sam', { email: 's@x.com' });
-    expect(venueContacts({ booker: p, manager: p })).toEqual([
-      { role: 'Venue manager and booker', p },
-    ]);
-    render(<ContactVenue venue={venue({ booker: p, manager: p })} />);
-    fireEvent.click(screen.getByRole('button', { name: /Contact venue/ }));
-    expect(screen.getByRole('link', { name: /Email s@x.com/ })).toBeTruthy();
+    expect(venueContacts({ contact: p })).toEqual([{ role: 'Venue contact', p }]);
+    expect(venueContacts({ contact: person('c2', 'No Details') })).toEqual([]);
+    expect(venueContacts({ contact: null })).toEqual([]);
   });
 
   it('says so when no one can be reached', () => {
-    render(<ContactVenue venue={venue({ manager: person('c1', 'No Details') })} />);
+    render(<ContactVenue venue={venue({ contact: person('c1', 'No Details') })} />);
     fireEvent.click(screen.getByRole('button', { name: /Contact venue/ }));
     expect(screen.getByText(/has an email or phone number yet/)).toBeTruthy();
   });

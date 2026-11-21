@@ -9,6 +9,7 @@ import {
   contactFor,
   contactMatches,
   ContactPatch,
+  contactVisible,
   CONTACT_TAGS,
   CONTACTS_PK,
   contactSk,
@@ -24,6 +25,7 @@ import {
   VENUES_PK,
   venueSk,
   venuesUsing,
+  withVenueContact,
   type Contact,
   type ContactPatchInput,
   type Venue,
@@ -147,7 +149,8 @@ async function saveVenue(v: Venue, condition?: 'new' | 'exists') {
   await db.send(
     new PutCommand({
       TableName: table(),
-      Item: { PK: VENUES_PK, SK: venueSk(v.venueId), type: 'venue', ...v },
+      // Older venues' manager and booker become the one venue contact (rev 18).
+      Item: { PK: VENUES_PK, SK: venueSk(v.venueId), type: 'venue', ...withVenueContact(v) },
       ...(condition === 'new' ? { ConditionExpression: 'attribute_not_exists(PK)' } : {}),
       ...(condition === 'exists' ? { ConditionExpression: 'attribute_exists(PK)' } : {}),
     }),
@@ -160,12 +163,23 @@ async function deleteVenueLogo(id: string) {
   );
 }
 
-/** The manager and booker must be real, current contacts. */
-async function checkContacts(ids: (string | null | undefined)[]): Promise<Map<string, Contact>> {
+/** The contacts this person can see (rev 18: an artist's own contacts are private until shared). */
+async function visibleContacts(principal: Principal): Promise<Contact[]> {
+  const viewer = { sub: principal.sub, isBmg: isBmg(principal) };
+  return (await allContacts()).filter((c) => contactVisible(c, viewer));
+}
+
+/** The venue contact must be a real, current contact the caller can see. */
+async function checkContacts(
+  principal: Principal,
+  ids: (string | null | undefined)[],
+): Promise<Map<string, Contact>> {
   const contacts = new Map((await allContacts()).map((c) => [c.contactId, c]));
+  const viewer = { sub: principal.sub, isBmg: isBmg(principal) };
   for (const id of ids) {
-    if (id && (!contacts.has(id) || contacts.get(id)!.archived))
-      throw new HttpError(400, 'Pick the manager and booker from contacts');
+    const c = id ? contacts.get(id) : undefined;
+    if (id && (!c || c.archived || !contactVisible(c, viewer)))
+      throw new HttpError(400, 'Pick the venue contact from contacts');
   }
   return contacts;
 }
@@ -196,16 +210,25 @@ function duplicateVenue(existing: Venue, principal: Principal, contacts: Map<str
   return json(409, {
     title: 'Already in venues',
     detail: `${existing.name} is already in venues.`,
-    existing: venueFor(existing, isBmg(principal), existing.createdBy === principal.sub, contacts),
+    existing: venueFor(
+      existing,
+      isBmg(principal),
+      existing.createdBy === principal.sub,
+      contacts,
+      principal.sub,
+    ),
   });
 }
 
-async function loadContact(id: string): Promise<Contact> {
+/** A contact by id; one the caller can't see is "no such contact" (rev 18). */
+async function loadContact(id: string, principal: Principal): Promise<Contact> {
   const res = await db.send(
     new GetCommand({ TableName: table(), Key: { PK: CONTACTS_PK, SK: contactSk(id) } }),
   );
-  if (!res.Item) throw new HttpError(404, 'No such contact');
-  return res.Item as Contact;
+  const c = res.Item as Contact | undefined;
+  if (!c || !contactVisible(c, { sub: principal.sub, isBmg: isBmg(principal) }))
+    throw new HttpError(404, 'No such contact');
+  return c;
 }
 
 /** A 409 that hands back the existing person, so the caller can pick them instead. */
@@ -284,7 +307,7 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       const q = event.queryStringParameters?.q ?? '';
       const tag = event.queryStringParameters?.tag || undefined;
       const withArchived = bmg && event.queryStringParameters?.archived === 'true';
-      const contacts = (await allContacts())
+      const contacts = (await visibleContacts(principal))
         .filter((c) => withArchived || !c.archived)
         .filter((c) => contactMatches(c, q, tag))
         .sort(byName)
@@ -295,38 +318,48 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
     case 'POST /contacts': {
       ensure(principal, 'write');
       const body = parseBody(event, ContactBody);
-      const existing = findDuplicate(await allContacts(), body);
+      // Only contacts this person can see count as "already in contacts", so a
+      // private contact never gives itself away.
+      const existing = findDuplicate(await visibleContacts(principal), body);
       if (existing) return duplicate(existing, principal);
       const contact: Contact = {
         ...body,
         tags: cleanTags(body.tags),
         bmgNotes: bmg ? body.bmgNotes : '',
+        // Rev 18: an artist's contact is theirs alone unless they share it.
+        sharing: bmg ? 'all' : body.sharing,
         contactId: newId(),
         createdBy: principal.sub,
         createdByRole: bmg ? 'bmg' : 'artist',
         createdAt: now,
       };
       await saveContact(contact, 'new');
-      await audit(event, 'contact.create', 'success', { contactId: contact.contactId });
+      await audit(event, 'contact.create', 'success', {
+        contactId: contact.contactId,
+        sharing: contact.sharing ?? 'all',
+      });
       return json(201, contactFor(contact, bmg, true));
     }
 
     case 'GET /contacts/:id': {
       ensure(principal, 'read');
-      const c = await loadContact(idParam(id));
+      const c = await loadContact(idParam(id), principal);
       if (c.archived && !bmg) throw new HttpError(404, 'No such contact');
       return json(200, contactFor(c, bmg, c.createdBy === principal.sub));
     }
 
     case 'PATCH /contacts/:id': {
-      const existing = await loadContact(idParam(id));
+      const existing = await loadContact(idParam(id), principal);
       ensure(principal, 'write', existing.createdBy);
       const patch = parseBody(event, ContactPatch) as ContactPatchInput;
       if (patch.archived !== undefined && !bmg)
         throw new HttpError(403, 'Only Blueprint archives contacts');
-      const next = applyContactPatch(existing, patch, bmg);
+      const mine = existing.createdBy === principal.sub;
+      if (patch.sharing !== undefined && !(mine && existing.createdByRole === 'artist'))
+        throw new HttpError(403, 'Only the artist who added this contact decides who sees it');
+      const next = applyContactPatch(existing, patch, bmg, mine);
       if (patch.email !== undefined || patch.phone !== undefined) {
-        const dup = findDuplicate(await allContacts(), next, existing.contactId);
+        const dup = findDuplicate(await visibleContacts(principal), next, existing.contactId);
         if (dup) return duplicate(dup, principal);
       }
       const saved: Contact = { ...next, updatedAt: now, updatedBy: principal.sub };
@@ -334,18 +367,21 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       await audit(event, 'contact.update', 'success', {
         contactId: saved.contactId,
         fields: Object.keys(patch).join(','),
+        ...(patch.sharing !== undefined ? { sharing: patch.sharing } : {}),
       });
       return json(200, contactFor(saved, bmg, saved.createdBy === principal.sub));
     }
 
     case 'DELETE /contacts/:id': {
-      if (!bmg) throw new HttpError(403, 'Only Blueprint removes contacts');
-      const existing = await loadContact(idParam(id));
+      const existing = await loadContact(idParam(id), principal);
+      // Blueprint removes any contact; an artist can remove one they added (rev 18).
+      if (!bmg && existing.createdBy !== principal.sub)
+        throw new HttpError(403, 'Only Blueprint removes contacts other people added');
       const inUse = venuesUsing(await allVenues(), existing.contactId);
       if (inUse.length)
         throw new HttpError(
           409,
-          `${fullName(existing)} is the manager or booker for ${inUse.map((v) => v.name).join(', ')}. Archive them instead, or change the venue first.`,
+          `${fullName(existing)} is the venue contact for ${inUse.map((v) => v.name).join(', ')}. Archive them instead, or change the venue first.`,
         );
       await db.send(
         new DeleteCommand({
@@ -375,7 +411,7 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
           .filter((v) => venueMatches(v, f))
           .sort((a, b) => a.name.localeCompare(b.name, 'en-AU', { sensitivity: 'base' }))
           .map((v) => ({
-            ...venueFor(v, bmg, v.createdBy === principal.sub, byId),
+            ...venueFor(v, bmg, v.createdBy === principal.sub, byId, principal.sub),
             bookings: bookings.get(v.venueId) ?? 0,
           })),
       });
@@ -384,7 +420,7 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
     case 'POST /venues': {
       ensure(principal, 'write');
       const body = parseBody(event, VenueBody);
-      const contacts = await checkContacts([body.managerContactId, body.bookerContactId]);
+      const contacts = await checkContacts(principal, [body.contactId]);
       const existing = findDuplicateVenue(await allVenues(), body);
       if (existing) return duplicateVenue(existing, principal, contacts);
       const venue: Venue = {
@@ -397,7 +433,7 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       };
       await saveVenue(venue, 'new');
       await audit(event, 'venue.create', 'success', { venueId: venue.venueId });
-      return json(201, venueFor(venue, bmg, true, contacts));
+      return json(201, venueFor(venue, bmg, true, contacts, principal.sub));
     }
 
     case 'GET /venues/:id': {
@@ -407,7 +443,7 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       const [all, bookings] = await Promise.all([allContacts(), venueBookings()]);
       const contacts = new Map(all.map((c) => [c.contactId, c]));
       return json(200, {
-        ...venueFor(v, bmg, v.createdBy === principal.sub, contacts),
+        ...venueFor(v, bmg, v.createdBy === principal.sub, contacts, principal.sub),
         bookings: bookings.get(v.venueId) ?? 0,
       });
     }
@@ -419,9 +455,8 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       if (patch.archived !== undefined && !bmg)
         throw new HttpError(403, 'Only Blueprint archives venues');
       const next = applyVenuePatch(existing, patch, bmg);
-      const contacts = await checkContacts([
-        patch.managerContactId !== undefined ? next.managerContactId : null,
-        patch.bookerContactId !== undefined ? next.bookerContactId : null,
+      const contacts = await checkContacts(principal, [
+        patch.contactId !== undefined ? next.contactId : null,
       ]);
       if (patch.name !== undefined || patch.suburb !== undefined) {
         const dup = findDuplicateVenue(await allVenues(), next, existing.venueId);
@@ -433,7 +468,10 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
         venueId: saved.venueId,
         fields: Object.keys(patch).join(','),
       });
-      return json(200, venueFor(saved, bmg, saved.createdBy === principal.sub, contacts));
+      return json(
+        200,
+        venueFor(saved, bmg, saved.createdBy === principal.sub, contacts, principal.sub),
+      );
     }
 
     case 'DELETE /venues/:id': {
@@ -509,7 +547,10 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
         bytes: bytes.length,
       });
       const contacts = new Map((await allContacts()).map((c) => [c.contactId, c]));
-      return json(200, venueFor(saved, bmg, saved.createdBy === principal.sub, contacts));
+      return json(
+        200,
+        venueFor(saved, bmg, saved.createdBy === principal.sub, contacts, principal.sub),
+      );
     }
 
     case 'DELETE /venues/:id/logo': {
@@ -521,7 +562,10 @@ export const handler = handle(async (event: APIGatewayProxyEvent) => {
       await saveVenue(saved, 'exists');
       await audit(event, 'venue.logoRemove', 'success', { venueId: saved.venueId });
       const contacts = new Map((await allContacts()).map((c) => [c.contactId, c]));
-      return json(200, venueFor(saved, bmg, saved.createdBy === principal.sub, contacts));
+      return json(
+        200,
+        venueFor(saved, bmg, saved.createdBy === principal.sub, contacts, principal.sub),
+      );
     }
 
     default:

@@ -69,6 +69,7 @@ import {
   Invitations,
   Library,
   MeetingsPage,
+  MyMeetings,
   MyConnectors,
   Newsroom,
   PlanStages,
@@ -1304,7 +1305,8 @@ type ArtistView =
   | 'profile'
   | 'connectors'
   | 'stats'
-  | 'contacts';
+  | 'contacts'
+  | 'meetings';
 
 function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme('dark');
@@ -1353,7 +1355,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
           ? link
           : link === 'todos'
             ? 'todo'
-            : link === 'plan' || link === 'profile'
+            : link === 'plan' || link === 'profile' || link === 'meetings'
               ? link
               : 'home',
     );
@@ -1380,7 +1382,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
     gigs: { eyebrow: 'Gigs', title: 'My gigs' },
     connectors: { eyebrow: 'Profile', title: 'My connectors' },
     stats: { eyebrow: 'Socials', title: 'My stats' },
-    contacts: { eyebrow: 'Shared by Blueprint', title: 'Contacts & venues' },
+    contacts: { eyebrow: 'Address book', title: 'Contacts & venues' },
+    meetings: { eyebrow: 'Blueprint', title: 'My meetings' },
   };
   const [libTab, setLibTab] = useState<LibraryKind>('all');
   // Which list has a document page open; the rest of the library is hidden meanwhile.
@@ -1401,7 +1404,8 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
     view === 'profile' ||
     view === 'connectors' ||
     view === 'stats' ||
-    view === 'contacts';
+    view === 'contacts' ||
+    view === 'meetings';
 
   const desktop = useArtistDesktop();
   const inbox = useInbox(cfg, token, me);
@@ -1427,7 +1431,9 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
                     ? 'todo'
                     : n.link === 'plan'
                       ? 'plan'
-                      : 'home',
+                      : n.link === 'meetings'
+                        ? 'meetings'
+                        : 'home',
         );
       }}
     />
@@ -1462,6 +1468,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
         { id: 'stats', label: 'My stats', icon: 'chart' },
         { id: 'brand', label: 'My brand kit', icon: 'sparkle' },
         { id: 'contacts', label: 'Contacts & venues', icon: 'users' },
+        { id: 'meetings', label: 'My meetings', icon: 'calendar' },
       ],
     },
   ];
@@ -1645,6 +1652,19 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
             <Venues cfg={cfg} token={token} isBmg={false} compact={!desktop} />
           )}
         </>
+      )}
+      {view === 'meetings' && (
+        <MyMeetings
+          cfg={cfg}
+          token={token}
+          artistId={artistId}
+          compact={!desktop}
+          onOpenFile={(fileId) => {
+            setLibTab('all');
+            setMyFile(fileId);
+            setView('library');
+          }}
+        />
       )}
       {view === 'stats' && (
         <>
@@ -1898,7 +1918,26 @@ function ArtistHome({
           className="text-left text-[15px]"
           onClick={() => onNavigate('contacts')}
         >
-          Venues, bookers and crew, shared with Blueprint →
+          Venues and the people you work with →
+        </button>
+      </section>
+      <section className="card gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="eyebrow">Meetings</span>
+          <button
+            type="button"
+            className="ml-auto text-sm font-bold underline"
+            onClick={() => onNavigate('meetings')}
+          >
+            Open
+          </button>
+        </div>
+        <button
+          type="button"
+          className="text-left text-[15px]"
+          onClick={() => onNavigate('meetings')}
+        >
+          Meetings you've had with Blueprint →
         </button>
       </section>
       <Button

@@ -40,6 +40,9 @@ export interface TicketGig {
   deal: string;
   ticketUrl?: string;
   money?: { ticketsSold: number; takingsCents: number };
+  /** Rev 18: linked to the artist's Humanitix event, with the synced count. */
+  humanitixEventId?: string;
+  humanitix?: { ticketsSold: number; syncedAt: string };
 }
 
 export interface TicketRow {
@@ -89,7 +92,12 @@ const isHumanitix = (url?: string) => {
 
 export function isTicketedGig(g: TicketGig): boolean {
   if (SKIP_STATUSES.has(g.status)) return false;
-  return TICKETED_DEALS.has(g.deal) || !!g.ticketUrl || (g.money?.ticketsSold ?? 0) > 0;
+  return (
+    TICKETED_DEALS.has(g.deal) ||
+    !!g.ticketUrl ||
+    !!g.humanitixEventId ||
+    (g.money?.ticketsSold ?? 0) > 0
+  );
 }
 
 function behindOn(sold: number, of: number, daysAway: number) {
@@ -136,7 +144,8 @@ export function ticketRows({
   for (const g of gigs) {
     if (g.date < today || !isTicketedGig(g)) continue;
     const daysAway = daysBetween(today, g.date);
-    const sold = g.money?.ticketsSold ?? 0;
+    // Rev 18: a Humanitix count from the sync wins over one typed in.
+    const sold = g.humanitix?.ticketsSold ?? g.money?.ticketsSold ?? 0;
     const of = (g.venueId && venueCapacity[g.venueId]) || 0;
     rows.push({
       id: `gig:${g.gigId}`,
@@ -148,7 +157,7 @@ export function ticketRows({
       of,
       ofLabel: of ? 'capacity' : '',
       takingsCents: g.money?.takingsCents ?? 0,
-      source: isHumanitix(g.ticketUrl) ? 'humanitix' : 'typed',
+      source: g.humanitix || g.humanitixEventId || isHumanitix(g.ticketUrl) ? 'humanitix' : 'typed',
       behind: behindOn(sold, of, daysAway),
       daysAway,
       gigId: g.gigId,

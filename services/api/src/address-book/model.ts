@@ -7,6 +7,9 @@ import type { VenueLogoMeta } from './logo.ts';
  * and its artists. Everyone signed in can search it, pick from it and add to it.
  * Artists can change only what they added; Blueprint manages everything.
  * `bmgNotes` is Blueprint's own and never leaves the API for an artist.
+ *
+ * Rev 18: a contact an artist adds is theirs alone until they share it, with
+ * Blueprint or with Blueprint and the other artists (`sharing`).
  */
 
 export const CONTACTS_PK = 'ORG#contacts';
@@ -21,8 +24,7 @@ export const normalisePhone = (phone: string) => {
 
 /** Tags offered in the app; any other short tag can be typed in. */
 export const CONTACT_TAGS = [
-  'Venue manager',
-  'Venue booker',
+  'Venue contact',
   'Crew',
   'Volunteer',
   'Speaker',
@@ -35,6 +37,17 @@ export const CONTACT_TAGS = [
 ] as const;
 
 const Text = (max: number) => z.string().trim().max(max);
+
+/**
+ * Who can see a contact an artist added (rev 18):
+ * - `private`: only the artist who added it (the default for artists);
+ * - `bmg`: the artist and Blueprint;
+ * - `all`: everyone, like Blueprint's own contacts.
+ * Blueprint's contacts are always `all`. Contacts saved before rev 18 have no
+ * value and stay as they were: shared with everyone.
+ */
+export const CONTACT_SHARING = ['private', 'bmg', 'all'] as const;
+export type ContactSharing = (typeof CONTACT_SHARING)[number];
 const Url = z
   .string()
   .trim()
@@ -63,6 +76,8 @@ export const ContactBody = z
     tags: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
     /** Blueprint only. Ignored when an artist sends it. */
     bmgNotes: Text(2000).default(''),
+    /** Artists only (rev 18); Blueprint's contacts are always shared. */
+    sharing: z.enum(CONTACT_SHARING).default('private'),
   })
   .strict();
 export type ContactInput = z.infer<typeof ContactBody>;
@@ -83,6 +98,20 @@ export interface Contact extends ContactInput {
   updatedBy?: string;
   /** Archived contacts are hidden from pickers but kept for history. */
   archived?: boolean;
+}
+
+/** Who can see it: Blueprint's contacts and older ones are shared with everyone. */
+export const sharingOf = (c: Pick<Contact, 'sharing' | 'createdByRole'>): ContactSharing =>
+  c.createdByRole === 'bmg' ? 'all' : (c.sharing ?? 'all');
+
+/** Whether this person can see a contact at all (rev 18). */
+export function contactVisible(
+  c: Pick<Contact, 'sharing' | 'createdByRole' | 'createdBy'>,
+  viewer: { sub: string; isBmg: boolean },
+): boolean {
+  if (c.createdBy === viewer.sub) return true;
+  const s = sharingOf(c);
+  return s === 'all' || (s === 'bmg' && viewer.isBmg);
 }
 
 export const fullName = (c: Pick<Contact, 'firstName' | 'lastName'>) =>
@@ -119,6 +148,8 @@ export function contactFor(c: Contact, isBmg: boolean, mine: boolean) {
     tags: c.tags,
     archived: !!c.archived,
     addedByArtist: c.createdByRole === 'artist',
+    sharing: sharingOf(c),
+    mine,
     canEdit: isBmg || mine,
     createdAt: c.createdAt,
   };
@@ -162,12 +193,21 @@ export function findDuplicate(
   return undefined;
 }
 
-/** Applies a patch; artists can't touch Blueprint's notes. */
-export function applyContactPatch(c: Contact, patch: ContactPatchInput, isBmg: boolean): Contact {
+/**
+ * Applies a patch; artists can't touch Blueprint's notes, and only the artist
+ * who added a contact decides who sees it.
+ */
+export function applyContactPatch(
+  c: Contact,
+  patch: ContactPatchInput,
+  isBmg: boolean,
+  mine = false,
+): Contact {
   const next: Contact = { ...c };
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
     if (k === 'bmgNotes' && !isBmg) continue;
+    if (k === 'sharing' && !(mine && c.createdByRole === 'artist')) continue;
     (next as unknown as Record<string, unknown>)[k] = k === 'tags' ? cleanTags(v as string[]) : v;
   }
   return next;
@@ -187,9 +227,8 @@ export const VenueBody = z
     website: Url.default(''),
     address: Text(300).default(''),
     suburb: Text(80).default(''),
-    /** The venue manager and booker are people in Contacts. */
-    managerContactId: ContactRef.nullable().default(null),
-    bookerContactId: ContactRef.nullable().default(null),
+    /** The venue's contact, a person in Contacts (rev 18: one, not a manager and a booker). */
+    contactId: ContactRef.nullable().default(null),
     /**
      * "Automatically get logo": when no logo was uploaded, look for one on the
      * venue's website. On by default.
@@ -203,6 +242,12 @@ export const VenuePatch = patchOf({ shape: { ...VenueBody.shape, archived: z.boo
 export type VenuePatchInput = Partial<VenueInput> & { archived?: boolean };
 
 export interface Venue extends VenueInput {
+  /**
+   * Before rev 18 a venue had a manager and a booker. They're read as the
+   * venue contact (the manager first) and dropped the next time it's saved.
+   */
+  managerContactId?: string | null;
+  bookerContactId?: string | null;
   venueId: string;
   createdBy: string;
   createdByRole: 'artist' | 'bmg';
@@ -227,12 +272,31 @@ export function contactCard(c: Contact | undefined) {
   };
 }
 
+/** The venue's contact id, reading the old manager and booker for older venues. */
+export const venueContactId = (
+  v: Pick<Venue, 'contactId' | 'managerContactId' | 'bookerContactId'>,
+): string | null => v.contactId ?? v.managerContactId ?? v.bookerContactId ?? null;
+
+/** Moves an older venue's manager or booker across to the one venue contact. */
+export function withVenueContact(v: Venue): Venue {
+  const next: Venue = { ...v, contactId: venueContactId(v) };
+  delete next.managerContactId;
+  delete next.bookerContactId;
+  return next;
+}
+
 export function venueFor(
   v: Venue,
   isBmg: boolean,
   mine: boolean,
   contacts: ReadonlyMap<string, Contact>,
+  /** Who's asking: a contact they can't see isn't shown (rev 18). */
+  viewerSub?: string,
 ) {
+  const cid = venueContactId(v);
+  const person = cid ? contacts.get(cid) : undefined;
+  const visible =
+    person && (viewerSub === undefined || contactVisible(person, { sub: viewerSub, isBmg }));
   const out: Record<string, unknown> = {
     venueId: v.venueId,
     name: v.name,
@@ -250,8 +314,7 @@ export function venueFor(
           ...(v.logo.sourceUrl ? { sourceUrl: v.logo.sourceUrl } : {}),
         }
       : null,
-    manager: contactCard(v.managerContactId ? contacts.get(v.managerContactId) : undefined),
-    booker: contactCard(v.bookerContactId ? contacts.get(v.bookerContactId) : undefined),
+    contact: contactCard(visible ? person : undefined),
     archived: !!v.archived,
     addedByArtist: v.createdByRole === 'artist',
     canEdit: isBmg || mine,
@@ -306,12 +369,22 @@ export function applyVenuePatch(v: Venue, patch: VenuePatchInput, isBmg: boolean
     if (k === 'bmgNotes' && !isBmg) continue;
     (next as unknown as Record<string, unknown>)[k] = val;
   }
-  return next;
+  // Setting (or clearing) the venue contact replaces an older manager and booker.
+  if (patch.contactId !== undefined) {
+    delete next.managerContactId;
+    delete next.bookerContactId;
+  }
+  return withVenueContact(next);
 }
 
-/** Venues that list this contact as manager or booker (a contact in use can't be deleted). */
+/** Venues that list this contact (a contact in use can't be deleted). */
 export const venuesUsing = (venues: readonly Venue[], contactId: string) =>
-  venues.filter((v) => v.managerContactId === contactId || v.bookerContactId === contactId);
+  venues.filter(
+    (v) =>
+      venueContactId(v) === contactId ||
+      v.managerContactId === contactId ||
+      v.bookerContactId === contactId,
+  );
 
 // ── Bookings per venue ──────────────────────────────────────────────────
 /** Gig statuses that mean the venue was actually booked (not an idea, pitch or cancellation). */

@@ -64,6 +64,10 @@ export interface Gig {
   /** Removed in rev 7 (set duration). Older gigs may still hold it; never returned. */
   setLength?: string;
   ticketUrl?: string;
+  /** The artist's Humanitix event for this gig (rev 18), picked from their Humanitix list. */
+  humanitixEventId?: string;
+  /** Tickets sold on Humanitix, from the hourly sync (rev 18). */
+  humanitix?: { ticketsSold: number; syncedAt: string };
   /** Tickets sold, takings and costs; absent until someone enters figures. */
   money?: Money;
   help?: {
@@ -187,6 +191,11 @@ export function durationMinutes(start?: string, end?: string): number | undefine
   return (m(end) - m(start) + 24 * 60) % (24 * 60) || undefined;
 }
 
+/** A Humanitix event id, as their API gives it. */
+export const HumanitixEventId = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{4,64}$/, 'Unknown Humanitix event');
+
 export const GigCreate = z.object({
   title: z.string().trim().min(1, 'Name the gig').max(120),
   date: IsoDate,
@@ -206,6 +215,8 @@ export const GigCreate = z.object({
     .url({ protocol: /^https$/ })
     .max(500)
     .optional(),
+  /** Rev 18: made from (or linked to) one of the artist's Humanitix events. */
+  humanitixEventId: HumanitixEventId.optional(),
   shared: z.boolean().default(true),
 });
 
@@ -230,6 +241,8 @@ export const GigPatch = z
       .url({ protocol: /^https$/ })
       .max(500)
       .optional(),
+    /** Rev 18: link the gig to one of the artist's Humanitix events, or unlink it (null). */
+    humanitixEventId: HumanitixEventId.nullable().optional(),
     shared: z.boolean().optional(),
     checklist: Checklist.optional(),
     money: Money.optional(),

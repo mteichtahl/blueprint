@@ -19,6 +19,8 @@ import { aiStates } from '../ai/prompts.ts';
 import {
   aiOffArtists,
   applyContentPatch,
+  artistMeeting,
+  artistSeesMeeting,
   artistsInvolved,
   canDeleteMeeting,
   CONSENT_WORDING,
@@ -28,6 +30,7 @@ import {
   MEETING_ID_PATTERN,
   MeetingPatch,
   MEETINGS_GSI3PK,
+  newArtistAttendees,
   parseSpaceParam,
   publicMeeting,
   spaceOf,
@@ -112,6 +115,62 @@ async function open(principal: Principal, space: MeetingSpace, meetingId: string
   return loadMeeting(space, meetingId);
 }
 
+/**
+ * Rev 18: the artist hears that they were in a meeting (they were added to its
+ * attendees). Just the title, when and who: never what was said.
+ */
+async function tellArtistsTheyWereIn(m: Meeting, artistIds: string[], bySub: string) {
+  if (!artistIds.length) return;
+  await events.send(
+    new PutEventsCommand({
+      Entries: [
+        {
+          EventBusName: env('EVENT_BUS'),
+          Source: 'bmg.workspace',
+          DetailType: 'meeting.withArtist',
+          Detail: JSON.stringify({
+            id: randomUUID(),
+            meetingId: m.meetingId,
+            artistIds,
+            title: m.title,
+            startedAt: m.startedAt,
+            withNames: m.attendees
+              .filter((a) => a.kind !== 'artist')
+              .map((a) => a.name)
+              .slice(0, 4),
+            bySub,
+          }),
+        },
+      ],
+    }),
+  );
+}
+
+/** Rev 18, the artist's My meetings: the ones they were in, and shared ones about them. */
+async function artistMeetings(artistId: string) {
+  const items: Meeting[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const res = await db.send(
+      new QueryCommand({
+        TableName: table(),
+        IndexName: 'GSI3',
+        KeyConditionExpression: 'GSI3PK = :pk',
+        ExpressionAttributeValues: { ':pk': MEETINGS_GSI3PK },
+        ScanIndexForward: false,
+        ...(start ? { ExclusiveStartKey: start } : {}),
+      }),
+    );
+    items.push(...((res.Items ?? []) as Meeting[]));
+    start = res.LastEvaluatedKey;
+  } while (start && items.length < 2000);
+  return items
+    .filter((m) => artistSeesMeeting(m, artistId))
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .slice(0, 200)
+    .map((m) => artistMeeting(m, artistId));
+}
+
 async function list(principal: Principal, artistId?: string) {
   const res = await db.send(
     new QueryCommand({
@@ -154,9 +213,14 @@ async function list(principal: Principal, artistId?: string) {
  */
 export const handler = handle(async (event: APIGatewayProxyEvent) => {
   const principal = await principalFor(authContext(event));
-  if (!isBlueprint(principal)) throw new HttpError(403, 'Meetings are for the Blueprint team');
   const parts = (event.pathParameters?.proxy ?? '').split('/').filter(Boolean);
   const method = event.httpMethod;
+  // Rev 18: an artist lists the meetings they were in (titles, dates and who; never the content).
+  if (principal.role === 'artist' && parts.join('/') === 'mine' && method === 'GET') {
+    if (!principal.artistId) throw new HttpError(403, 'Artists only');
+    return json(200, { meetings: await artistMeetings(principal.artistId) });
+  }
+  if (!isBlueprint(principal)) throw new HttpError(403, 'Meetings are for the Blueprint team');
 
   if (parts.length === 1 && parts[0] === 'items') {
     if (method === 'GET') {
@@ -401,6 +465,7 @@ async function create(event: APIGatewayProxyEvent, principal: Principal) {
   };
   await createMeeting(m);
   await audit(event, 'meeting.create', 'success', { ...ids(m), consent: true });
+  await tellArtistsTheyWereIn(m, newArtistAttendees([], m.attendees), principal.sub);
   const aiOff = await aiOffIn([m]);
   return json(201, { meeting: publicMeeting(m, principal, aiOff(m)) });
 }
@@ -453,6 +518,14 @@ async function patch(
     }
   }
   const next = { ...m, ...set, contentVersion };
+  // Artists added to the meeting afterwards hear about it too (rev 18).
+  if (body.attendees !== undefined) {
+    await tellArtistsTheyWereIn(
+      next,
+      newArtistAttendees(m.attendees, body.attendees),
+      principal.sub,
+    );
+  }
   const aiOff = await aiOffIn([next]);
   return json(200, { meeting: publicMeeting(next, principal, aiOff(next)) });
 }

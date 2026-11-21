@@ -639,3 +639,51 @@ export function publicMeeting(
     updatedAt: m.updatedAt,
   };
 }
+
+// ── What an artist sees (rev 18) ──────────────────────────────────────────
+/**
+ * An artist hears about, and can list, the meetings they were in: those where
+ * Blueprint put them in the attendees. A meeting about them that Blueprint
+ * shared shows too, with its note and recording. Nothing else of a meeting
+ * (the transcript, summaries, suggestions) ever reaches an artist.
+ */
+export const artistAttended = (m: Pick<Meeting, 'attendees'>, artistId: string) =>
+  m.attendees.some((a) => a.kind === 'artist' && a.id === artistId);
+
+export const artistSeesMeeting = (
+  m: Pick<Meeting, 'attendees' | 'artistId' | 'shared'>,
+  artistId: string,
+) => artistAttended(m, artistId) || (m.artistId === artistId && m.shared);
+
+/** The artist attendees in `after` who weren't in `before`: the ones to tell. */
+export function newArtistAttendees(before: readonly Attendee[], after: readonly Attendee[]) {
+  const was = new Set(before.filter((a) => a.kind === 'artist').map((a) => a.id));
+  return [
+    ...new Set(
+      after
+        .filter((a) => a.kind === 'artist' && ARTIST_ID_PATTERN.test(a.id) && !was.has(a.id))
+        .map((a) => a.id),
+    ),
+  ];
+}
+
+/** A meeting as the artist sees it in My meetings. */
+export function artistMeeting(m: Meeting, artistId: string) {
+  const aboutMe = m.artistId === artistId;
+  const shared = aboutMe && m.shared;
+  return {
+    meetingId: m.meetingId,
+    title: m.title,
+    startedAt: m.startedAt,
+    durationSec: m.durationSec ?? null,
+    /** Everyone else in it, by name. */
+    with: m.attendees.filter((a) => !(a.kind === 'artist' && a.id === artistId)).map((a) => a.name),
+    attended: artistAttended(m, artistId),
+    aboutMe,
+    shared,
+    recording: m.status === 'recording' || m.status === 'uploading',
+    /** The note and recording, in the artist's Library, once Blueprint shares the meeting. */
+    noteFileId: shared ? (m.noteFileId ?? null) : null,
+    audioFileId: shared ? (m.audioFileId ?? null) : null,
+  };
+}

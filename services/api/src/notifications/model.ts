@@ -201,6 +201,20 @@ export type DomainEvent =
       byName: string;
     }
   | {
+      /**
+       * Rev 18: artists Blueprint put in a meeting's attendees hear that it
+       * happened: the title, when, and who else (never what was said).
+       */
+      type: 'meeting.withArtist';
+      meetingId: string;
+      artistIds: string[];
+      title: string;
+      startedAt: string;
+      /** The other (non-artist) attendees, the first few. */
+      withNames: string[];
+      bySub: string;
+    }
+  | {
       /** A meeting's transcript is in, or it couldn't be made (rev 11). Only the recorder hears. */
       type: 'meeting.processed';
       meetingId: string;
@@ -533,6 +547,24 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
           title: `${title}: ${e.title}`,
           body,
           link: `meeting:${e.artistId ?? 'library'}/${e.meetingId}`,
+        },
+      };
+    }
+    case 'meeting.withArtist': {
+      const d = new Date(e.startedAt);
+      // "Fri 20 Nov", on Melbourne's calendar.
+      const when = Number.isNaN(d.getTime())
+        ? ''
+        : dueLabel(d.toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' }));
+      const who = e.withNames.length ? `with ${e.withNames.join(', ')}` : 'with Blueprint';
+      return {
+        to: artistsOf(e.artistIds).filter((r) => r.sub !== e.bySub),
+        draft: {
+          kind: 'meeting',
+          title: `You were in a meeting with Blueprint: ${e.title}`,
+          body: `${when ? `${when} · ` : ''}${who}. It's in My meetings.`,
+          link: 'meetings',
+          throttleKey: `meeting-${e.meetingId}`,
         },
       };
     }

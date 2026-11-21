@@ -59,8 +59,26 @@ Plus invitation tracking, finished reviews, and a smarter library.
   for one artist in a release week, say). Admins can change it for anyone
   in Access & permissions.
 
+- **My meetings** for artists: every meeting Blueprint records with you is
+  listed under My career, with when, how long and who was there, and you're
+  told when Blueprint adds you to one. When Blueprint shares a meeting about
+  you, its note and recording open from there.
+- **Humanitix tickets in My stats:** tickets sold for your upcoming gigs, a
+  count for each gig, and your Humanitix events with **Link** to a gig (the
+  one on the same day is suggested) or **Add as a gig**. Linked gigs show
+  their Humanitix count on the gig page and in Studio HQ's Tickets card.
+- **Ask for a change** beside Export to PDF on My plan: say what should
+  change, and it goes to your plan owner as a to-do. You're told when it's
+  done.
+
 ### Improved
 
+- **Your contacts are yours:** a contact an artist adds is only theirs until
+  they share it, with Blueprint or with Blueprint and the other artists.
+  Pick who can see it when adding it, or change it on the contact's page.
+  Artists can also delete contacts they added.
+- **One venue contact** instead of a venue manager and a venue booker.
+  Existing venues keep their manager (or else their booker) as the contact.
 - **Tap the whole row** to open a gig, folder, contact, venue, to-do or
   plan stage. Edit buttons and ⋯ menus have gone from the lists.
 - **One way to edit:** gigs, events, meetings, folders, contacts, venues and

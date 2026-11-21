@@ -885,6 +885,8 @@ export class ApiStack extends BmgStack {
           'connector.reminder',
           'connector.needsReauth',
           'meeting.processed',
+          // Rev 18: artists hear about the meetings they were in.
+          'meeting.withArtist',
           'plan.updated',
           // Rev 12: the 10-minute roll-up schedule, and a plan changing owner.
           'plan.digest',

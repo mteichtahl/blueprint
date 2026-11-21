@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
-import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import type { SessionRole } from '@bmg/crypto';
-import { EVENTS_PK, eventSk, type Gig } from '../events/model.ts';
+import { EVENTS_PK, eventSk, gigSk, type Gig } from '../events/model.ts';
 import { artistPk } from '../workspace/model.ts';
 import { db, env } from '../lib.ts';
 import { connectorFor, isoDay, type Snapshot } from './catalog.ts';
@@ -19,6 +19,7 @@ import {
 } from './store.ts';
 import {
   ensureCalendar,
+  humanitixEvents,
   humanitixTicketsSold,
   pullStats,
   refreshTokens,
@@ -138,15 +139,56 @@ export async function syncConnection(c: ConnectionItem, role: SessionRole): Prom
   return { connection: next, snapshots: written };
 }
 
-/** Linked BMG events get their ticket count; artists get a running total. */
+/** Where an artist's own Humanitix event list is kept (rev 18), read by My stats. */
+export const HUMANITIX_EVENTS_SK = 'HUMANITIX#events';
+/** Linked gigs keep syncing for a month after the night, so late sales and refunds land. */
+export const HUMANITIX_AFTER_DAYS = 30;
+
+/** The Humanitix event a gig is linked to: picked in the app, or read from its ticket link. */
+export const gigHumanitixId = (g: Pick<Gig, 'humanitixEventId' | 'ticketUrl'>) =>
+  g.humanitixEventId ?? humanitixIdOf(g.ticketUrl);
+
+/** Linked BMG events get their ticket count; artists get a count per linked gig and a total. */
 async function syncHumanitix(account: string, apiKey: string, today: string): Promise<number> {
   if (!isOrg(account)) {
-    // Artists: tickets across their upcoming gigs that carry a Humanitix id.
-    const gigs = await upcomingGigs(account, today);
+    // Rev 18: the artist's own Humanitix events, kept so My stats can offer to link them.
+    const events = await humanitixEvents(apiKey);
+    const syncedAt = new Date().toISOString();
+    await db.send(
+      new PutCommand({
+        TableName: table(),
+        Item: {
+          PK: artistPk(account),
+          SK: HUMANITIX_EVENTS_SK,
+          type: 'humanitix-events',
+          events: events.slice(0, 300),
+          syncedAt,
+        },
+      }),
+    );
+    // Each linked gig gets its own count (upcoming, or up to a month ago); the
+    // snapshot totals the upcoming ones, for the chart.
+    const from = daysAgo(today, HUMANITIX_AFTER_DAYS);
     let sold = 0;
-    for (const g of gigs) {
-      const id = humanitixIdOf(g.ticketUrl);
-      if (id) sold += await humanitixTicketsSold(apiKey, id);
+    for (const g of await allGigs(account)) {
+      const id = gigHumanitixId(g);
+      if (!id || g.date < from || g.status === 'cancelled') continue;
+      const n = await humanitixTicketsSold(apiKey, id);
+      if (g.date >= today) sold += n;
+      await db
+        .send(
+          new UpdateCommand({
+            TableName: table(),
+            Key: { PK: artistPk(account), SK: gigSk(g.gigId) },
+            UpdateExpression: 'SET humanitix = :h',
+            ConditionExpression: 'attribute_exists(PK)',
+            ExpressionAttributeValues: { ':h': { ticketsSold: n, syncedAt } },
+          }),
+        )
+        .catch((err: unknown) => {
+          // The gig was deleted meanwhile: nothing to update.
+          if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+        });
     }
     await writeSnapshots(account, [{ date: today, source: 'humanitix', ticketsSold: sold }]);
     return 1;
@@ -191,6 +233,24 @@ export function humanitixIdOf(url: string | undefined): string | undefined {
 
 /** Only gigs that are actually happening go in calendars and ticket totals. */
 const onCalendar = (g: Pick<Gig, 'status'>) => g.status === 'confirmed' || g.status === 'booked';
+
+function daysAgo(today: string, n: number) {
+  const d = new Date(`${today}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+async function allGigs(artistId: string): Promise<Gig[]> {
+  const res = await db.send(
+    new QueryCommand({
+      TableName: table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :g)',
+      ExpressionAttributeValues: { ':pk': artistPk(artistId), ':g': 'GIG#' },
+      Limit: 300,
+    }),
+  );
+  return (res.Items ?? []) as Gig[];
+}
 
 async function upcomingGigs(artistId: string, today: string): Promise<Gig[]> {
   const res = await db.send(
