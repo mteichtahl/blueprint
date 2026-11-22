@@ -8,7 +8,7 @@ const b64url = (s: string) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').re
  */
 const oneLine = (s: string): string =>
   s
-    .replace(/\r|\n/g, ' ')
+    .replace(/\n|\r/g, '')
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .slice(0, 200);
@@ -82,7 +82,9 @@ export function subscribeInbox(
     };
     ws.onclose = (ev) => {
       if (closed) return;
-      console.warn(`[realtime] ${channel} closed (${ev.code}${ev.reason ? ` ${ev.reason}` : ''})`);
+      console.warn(
+        `[realtime] ${channel} closed (${ev.code}${ev.reason ? ` ${oneLine(ev.reason)}` : ''})`,
+      );
       attempt = Math.min(attempt + 1, 6);
       timer = setTimeout(connect, 1000 * 2 ** attempt);
     };
