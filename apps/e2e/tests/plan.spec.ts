@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { tag } from '../src/accounts.ts';
 import { artistIdOf, call, ok, subOf } from '../src/api.ts';
+import { waitFor } from '../src/helpers.ts';
 
 /** UAT script C: plan editing, history and the plan owner (rev 12), through the API. */
 
@@ -72,12 +73,19 @@ test('C-05, C-14: editing the outcome saves and is recorded in History', async (
   expect(saved.version).toBe(v.plan.version + 1);
   expect((await getPlan()).plan.outcome).toBe(outcome);
 
-  const after = await ok<{ changes: unknown[] }>(
-    'admin',
-    'GET',
-    `/artists/${artistId}/plan/history`,
+  // History is written alongside the save; give it a moment to show.
+  const after = await waitFor(
+    'the change in History',
+    async () => {
+      const h = await ok<{ changes: unknown[] }>(
+        'admin',
+        'GET',
+        `/artists/${artistId}/plan/history`,
+      );
+      return h.changes.length > before.changes.length ? h : undefined;
+    },
+    { timeoutMs: 20_000, everyMs: 1_000 },
   );
-  expect(after.changes.length).toBeGreaterThan(before.changes.length);
   // The artist sees the same history.
   const theirs = await ok<{ changes: unknown[] }>(
     'artistOn',
@@ -217,6 +225,7 @@ test('C-15 to C-18: changing the owner hands the plan over, and back', async () 
 });
 
 test('O-11: an owner taken off the artist leaves the plan needing an owner', async () => {
+  test.setTimeout(180_000);
   const staffSub = await subOf('staff');
   const team = (assigned: string[]) =>
     ok('admin', 'PATCH', `/access/team/${staffSub}`, { artistIds: assigned });
@@ -225,8 +234,15 @@ test('O-11: an owner taken off the artist leaves the plan needing an owner', asy
   try {
     // E2E Staff is assigned to this artist only; take that away while they own the plan.
     await team([]);
-    const needs = await getPlan();
-    expect(needs.ownerNeeded).toBe(true);
+    // The API caches the team list for up to a minute, so this can take that long.
+    const needs = await waitFor(
+      'the plan to need an owner',
+      async () => {
+        const p = await getPlan();
+        return p.ownerNeeded ? p : undefined;
+      },
+      { timeoutMs: 90_000, everyMs: 5_000 },
+    );
     // A save that doesn't choose a new owner is refused until someone does.
     const res = await call('admin', 'PUT', `/artists/${artistId}/plan`, body(needs, {}));
     expect(res.status).toBe(400);

@@ -132,15 +132,19 @@ test('J-06, J-08, J-09: the nearest setting wins, and resetting falls back to th
   expect(after.because).toContain(top!.name);
 });
 
-test('J-10: "Don’t inherit" stops the parent’s setting', async () => {
+test('J-10: "Don’t inherit" keeps today’s access, and stops later changes above reaching it', async () => {
   test.skip(tree.length < 5, 'No tree was made');
   // Open the top to Blueprint again (its default), then cut Level 4 off from it.
   await access(tree[0]!.folderId, { 'g:team': null });
   expect((await check('staff', tree[1]!.folderId)).level).toBe('edit');
+  // Turning it on copies in what reached the folder, so nothing changes yet.
   await access(tree[3]!.folderId, undefined, false);
-  expect((await check('staff', tree[3]!.folderId)).level).toBe('none');
-  expect((await check('staff', tree[4]!.folderId)).level).toBe('none');
-  expect((await check('staff', tree[2]!.folderId)).level).toBe('edit');
+  expect((await check('staff', tree[3]!.folderId)).level).toBe('edit');
+  // Closing the top now reaches Level 2 but not Level 4 or the folder inside it.
+  await access(tree[0]!.folderId, { 'g:team': 'none' });
+  expect((await check('staff', tree[1]!.folderId)).level).toBe('none');
+  expect((await check('staff', tree[3]!.folderId)).level).toBe('edit');
+  expect((await check('staff', tree[4]!.folderId)).level).toBe('edit');
 });
 
 test('J-16: an empty folder deletes, and so does a tree of empty folders', async () => {
