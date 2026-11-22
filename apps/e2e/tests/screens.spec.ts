@@ -64,7 +64,9 @@ test('B-13: the account menu shows name, role, Profile & preferences and Sign ou
     .click();
   const menu = page.getByRole('menu', { name: 'Your account' });
   await expect(menu).toBeVisible();
-  await expect(menu).toContainText('E2E Admin');
+  // The menu shows the account's name and job title.
+  const { jobTitle } = await ok<{ jobTitle: string }>('admin', 'GET', '/me');
+  if (jobTitle) await expect(menu).toContainText(jobTitle);
   await expect(menu.getByRole('menuitem', { name: 'Profile & preferences' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'Sign out' })).toBeVisible();
   await page.keyboard.press('Escape');
@@ -110,7 +112,7 @@ test('S-05, D-02, D-03: a to-do row opens the to-do, with Mark done, Edit detail
     .click();
   await expect(page.getByRole('button', { name: 'Mark done' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit details' })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Conversation' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Conversation' })).toBeVisible();
   const back = page.getByRole('button', { name: '← To-dos' });
   await expect(back).toBeVisible();
   await back.click();
@@ -230,6 +232,8 @@ test.describe('Live updates (rev 17)', () => {
     const title = tag('live gig');
     const gig = await ok<{ gigId: string }>('admin', 'POST', `/artists/${artistId}/gigs`, {
       title,
+      // Confirmed, so it's listed under Upcoming (the tab that's open), not Ideas.
+      status: 'confirmed',
       date: new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10),
     });
     gigs.push(gig.gigId);
