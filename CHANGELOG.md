@@ -73,6 +73,14 @@ Plus invitation tracking, finished reviews, and a smarter library.
   link, and on a new gig **Use event details** fills the name, date, times
   and venue. Artists pick from their own Humanitix events, Blueprint from
   Blueprint's.
+- **Ticket analytics for Humanitix events:** **See ticket analytics** on a
+  linked gig or event (and **Analytics** in My stats) opens tickets sold,
+  revenue after fees, gross sales, refunds and check-ins, where the money
+  goes, sales over time against your usual pace, ticket types, when people
+  buy, how they paid, orders, discount codes, repeat fans and **Export CSV**.
+  A linked gig's ticket takings now fill in from Humanitix (net to you), with
+  **Use my own figure** to type your own. Artists can turn off **Share ticket
+  analytics with Blueprint** per gig. No buyer names or emails are kept.
 - **Ask for a change** beside Export to PDF on My plan: say what should
   change, and it goes to your plan owner as a to-do. You're told when it's
   done.

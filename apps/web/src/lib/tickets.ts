@@ -27,6 +27,8 @@ export interface TicketEvent {
   ticketPriceCents: number;
   takingsCents: number;
   humanitixEventId?: string;
+  /** Rev 20: net ticket takings from Humanitix, from the sync. */
+  humanitixNetCents?: number;
 }
 
 export interface TicketGig {
@@ -133,8 +135,8 @@ export function ticketRows({
       sold: e.ticketsSold,
       of,
       ofLabel: e.ticketTarget ? 'target' : e.capacity ? 'capacity' : '',
-      // Takings typed in win; else what the tickets sold at the set price come to.
-      takingsCents: e.takingsCents || e.ticketsSold * e.ticketPriceCents,
+      // Takings typed in win; then Humanitix's net (rev 20); else tickets × the set price.
+      takingsCents: e.takingsCents || (e.humanitixNetCents ?? e.ticketsSold * e.ticketPriceCents),
       source: e.humanitixEventId ? 'humanitix' : 'typed',
       behind: behindOn(e.ticketsSold, of, daysAway),
       daysAway,

@@ -640,6 +640,64 @@ export async function humanitixTicketsSold(apiKey: string, eventId: string): Pro
   return count;
 }
 
+/**
+ * Rev 20: one Humanitix call, waiting once when the account's 200-a-minute
+ * limit is hit (429 with Retry-After) rather than failing the whole sync.
+ */
+async function hxGet<T>(apiKey: string, path: string): Promise<T> {
+  try {
+    return await http<T>(`${HUMANITIX}${path}`, hx(apiKey));
+  } catch (err) {
+    if (!(err instanceof VendorError) || err.status !== 429) throw err;
+    await new Promise((r) => setTimeout(r, hxRetryWaitMs));
+    return http<T>(`${HUMANITIX}${path}`, hx(apiKey));
+  }
+}
+/** How long to wait after a 429 (tests set it to 0). */
+let hxRetryWaitMs = 15_000;
+export const setHumanitixRetryWait = (ms: number) => {
+  hxRetryWaitMs = ms;
+};
+
+/** A key without the Orders or Tickets scope gets 403 `scope_required`. */
+export const HUMANITIX_SCOPE_MESSAGE =
+  'Your Humanitix key needs Orders and Tickets read access. Create a new key with those scopes and paste it in.';
+
+async function hxPaged(apiKey: string, path: string, field: string, maxPages: number) {
+  const out: Record<string, unknown>[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const sep = path.includes('?') ? '&' : '?';
+    const r = await hxGet<Record<string, unknown>>(
+      apiKey,
+      `${path}${sep}page=${page}&pageSize=100`,
+    );
+    const list = Array.isArray(r[field]) ? (r[field] as Record<string, unknown>[]) : [];
+    out.push(...list);
+    if (list.length < 100) break;
+  }
+  return out;
+}
+
+/**
+ * Rev 20: everything the analytics need for one event: the event (ticket
+ * types, capacity), its orders and its tickets. Up to 5,000 of each.
+ */
+export async function humanitixEventData(apiKey: string, eventId: string) {
+  const id = encodeURIComponent(eventId);
+  try {
+    const event = await hxGet<Record<string, unknown>>(apiKey, `/events/${id}`);
+    const orders = await hxPaged(apiKey, `/events/${id}/orders`, 'orders', 50);
+    const tickets = await hxPaged(apiKey, `/events/${id}/tickets`, 'tickets', 50);
+    return { event, orders, tickets };
+  } catch (err) {
+    // 403 here is a missing scope, not a dead key (the event list still works):
+    // 424 keeps it from asking for a new sign-in.
+    if (err instanceof VendorError && err.status === 403)
+      throw new VendorError(424, HUMANITIX_SCOPE_MESSAGE);
+    throw err;
+  }
+}
+
 // ── Google Calendar: gigs and events in a "Blueprint" calendar ─────────────
 const GCAL = 'https://www.googleapis.com/calendar/v3';
 

@@ -48,6 +48,7 @@ import {
   type ConnectionItem,
 } from '../connectors/store.ts';
 import {
+  clearHumanitixStats,
   gigHumanitixId,
   HUMANITIX_AFTER_DAYS,
   HUMANITIX_EVENTS_SK,
@@ -55,6 +56,7 @@ import {
   syncConnection,
 } from '../connectors/sync.ts';
 import { humanitixView } from '../connectors/humanitix.ts';
+import { readAnalytics, syncAnalytics } from '../connectors/humanitix-access.ts';
 import type { HumanitixEvent } from '../connectors/vendors.ts';
 import { exchangeCode, humanitixEvents, VendorError } from '../connectors/vendors.ts';
 import { EVENTS_PK, eventSk, type Gig } from '../events/model.ts';
@@ -289,6 +291,8 @@ async function patchSettings(event: APIGatewayProxyEvent, account: Account, def:
 
 async function disconnect(event: APIGatewayProxyEvent, account: Account, def: ConnectorDef) {
   await deleteConnection(account, def.id);
+  // Rev 20: an event's ticket analytics go with the connection.
+  if (def.id === 'humanitix') await clearHumanitixStats(account);
   await audit(event, 'connector.disconnected', 'success', {
     connector: def.id,
     scope: account === 'bmg' ? 'bmg' : 'artist',
@@ -431,11 +435,18 @@ export const handler = handle(async (event) => {
     case 'POST /connectors/{connectorId}/sync': {
       ensureBmg(principal);
       const def = defParam(event, 'bmg');
+      // Rev 20: Sync now on the analytics page syncs that one event.
+      if (def.id === 'humanitix' && event.queryStringParameters?.analytics !== undefined)
+        return json(200, await syncAnalytics(principal, event.queryStringParameters));
       const c = await existing('bmg', def);
       return json(200, view((await syncConnection(c, principal.role)).connection));
     }
 
     case 'GET /connectors/humanitix/events': {
+      // Rev 20: ?analytics=1 gives a linked gig's (artistId, gigId) or Blueprint
+      // event's (eventId) ticket analytics, on this route to keep the API stack small.
+      if (event.queryStringParameters?.analytics !== undefined)
+        return json(200, await readAnalytics(principal, event.queryStringParameters));
       // Rev 19: ?artistId= gives the artist their own list (kept by the sync,
       // refreshed with Sync). Blueprint gets its own list, fetched live and kept
       // so the gig form's pick can be checked against it.
@@ -577,6 +588,14 @@ export const handler = handle(async (event) => {
     case 'POST /artists/{artistId}/connectors/{connectorId}/sync': {
       const artistId = artistParam(event);
       ensureArtist(principal, 'write', artistId);
+      if (
+        event.pathParameters?.connectorId === 'humanitix' &&
+        event.queryStringParameters?.analytics !== undefined
+      )
+        return json(
+          200,
+          await syncAnalytics(principal, { ...event.queryStringParameters, artistId }),
+        );
       const c = await existing(artistId, defParam(event, 'artist'));
       return json(200, view((await syncConnection(c, principal.role)).connection));
     }

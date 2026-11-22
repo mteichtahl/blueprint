@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
-import { PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import type { SessionRole } from '@bmg/crypto';
-import { EVENTS_PK, eventSk, gigSk, type Gig } from '../events/model.ts';
+import { EVENTS_PK, eventSk, gigSk, humanitixMoney, type Gig } from '../events/model.ts';
 import { artistPk } from '../workspace/model.ts';
 import { db, env } from '../lib.ts';
 import { connectorFor, isoDay, type Snapshot } from './catalog.ts';
+import { summarise, type HxStats } from './humanitix-analytics.ts';
 import { HUMANITIX_EVENTS_SK } from './humanitix-link.ts';
 import {
   clientCreds,
@@ -20,8 +21,10 @@ import {
 } from './store.ts';
 import {
   ensureCalendar,
+  humanitixEventData,
   humanitixEvents,
   humanitixTicketsSold,
+  HUMANITIX_SCOPE_MESSAGE,
   pullStats,
   refreshTokens,
   upsertCalendarEvent,
@@ -76,8 +79,11 @@ export async function syncConnection(c: ConnectionItem, role: SessionRole): Prom
       next = { ...next, sealed: await seal(account, c.connectorId, tokens, role) };
     }
 
+    let warning: string | undefined;
     if (def.id === 'humanitix') {
-      written = await syncHumanitix(account, tokens.apiKey!, today);
+      const r = await syncHumanitix(account, tokens.apiKey!, today);
+      written = r.written;
+      warning = r.warning;
     } else if (def.id === 'google' || def.id === 'gcal') {
       const calendarId = await ensureCalendar(tokens.accessToken!, next.settings?.calendarId);
       if (calendarId !== next.settings?.calendarId) {
@@ -109,6 +115,8 @@ export async function syncConnection(c: ConnectionItem, role: SessionRole): Prom
         ? { expiresAt: new Date(tokens.expiresAt).toISOString() }
         : {}),
     });
+    // Rev 20: synced, but something needs the person's attention (a key scope).
+    if (warning) next = { ...next, lastError: warning };
     delete next.reauthNotifiedAt;
   } catch (err) {
     const reauth = err instanceof VendorError && err.reauth;
@@ -150,43 +158,151 @@ export const HUMANITIX_AFTER_DAYS = 30;
 export const gigHumanitixId = (g: Pick<Gig, 'humanitixEventId' | 'ticketUrl'>) =>
   g.humanitixEventId ?? humanitixIdOf(g.ticketUrl);
 
+/** Rev 20: where an event's ticket analytics are kept, in the account's partition. */
+export const hxStatsSk = (eventId: string) => `HXSTATS#${eventId}`;
+
+/** One event's count and, where the key allows, its analytics. */
+interface EventSync {
+  sold: number;
+  stats: HxStats | null;
+  warning?: string;
+}
+
+/**
+ * Rev 20: pulls one event's orders and tickets and keeps its analytics (figures
+ * only). A key without Orders access still gets the plain ticket count.
+ */
+export async function syncEventStats(
+  account: string,
+  apiKey: string,
+  eventId: string,
+): Promise<EventSync> {
+  let data: Awaited<ReturnType<typeof humanitixEventData>>;
+  try {
+    data = await humanitixEventData(apiKey, eventId);
+  } catch (err) {
+    if (!(err instanceof VendorError) || err.status !== 424) throw err;
+    return {
+      sold: await humanitixTicketsSold(apiKey, eventId),
+      stats: null,
+      warning: HUMANITIX_SCOPE_MESSAGE,
+    };
+  }
+  const stats = summarise({ account, eventId, ...data, now: new Date() });
+  await db.send(
+    new PutCommand({
+      TableName: table(),
+      Item: { PK: humanitixEventsPk(account), SK: hxStatsSk(eventId), ...stats },
+    }),
+  );
+  return { sold: stats.sold, stats };
+}
+
+/** The gig's count, net and gross, and its money when that follows Humanitix. */
+export async function applyToGig(g: Gig, r: EventSync, onlyIfBmg = false) {
+  const syncedAt = new Date().toISOString();
+  const humanitix: NonNullable<Gig['humanitix']> = {
+    ticketsSold: r.sold,
+    syncedAt,
+    ...(r.stats ? { netCents: r.stats.money.netCents, grossCents: r.stats.money.grossCents } : {}),
+  };
+  const money = humanitixMoney(g.money, humanitix);
+  await db
+    .send(
+      new UpdateCommand({
+        TableName: table(),
+        Key: { PK: artistPk(g.artistId), SK: gigSk(g.gigId) },
+        UpdateExpression: money ? 'SET humanitix = :h, money = :m' : 'SET humanitix = :h',
+        ConditionExpression: onlyIfBmg
+          ? 'attribute_exists(PK) AND humanitixAccount = :bmg'
+          : 'attribute_exists(PK)',
+        ExpressionAttributeValues: {
+          ':h': humanitix,
+          ...(money ? { ':m': money } : {}),
+          ...(onlyIfBmg ? { ':bmg': 'bmg' } : {}),
+        },
+      }),
+    )
+    .catch((err: unknown) => {
+      // Deleted or relinked meanwhile: nothing to update.
+      if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+    });
+}
+
+/** A Blueprint event's count, synced time and net takings. */
+export async function applyToEvent(eventId: string, r: EventSync) {
+  await db.send(
+    new UpdateCommand({
+      TableName: table(),
+      Key: { PK: EVENTS_PK, SK: eventSk(eventId) },
+      UpdateExpression: r.stats
+        ? 'SET ticketsSold = :n, ticketsSyncedAt = :at, humanitixNetCents = :net'
+        : 'SET ticketsSold = :n, ticketsSyncedAt = :at',
+      ExpressionAttributeValues: {
+        ':n': r.sold,
+        ':at': new Date().toISOString(),
+        ...(r.stats ? { ':net': r.stats.money.netCents } : {}),
+      },
+    }),
+  );
+}
+
+/**
+ * Rev 20: analytics for events no longer linked are deleted, so nothing is
+ * kept about an event the account has let go of.
+ */
+async function pruneStats(account: string, keep: ReadonlySet<string>) {
+  const res = await db.send(
+    new QueryCommand({
+      TableName: table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :s)',
+      ExpressionAttributeValues: { ':pk': humanitixEventsPk(account), ':s': 'HXSTATS#' },
+      ProjectionExpression: 'PK, SK',
+    }),
+  );
+  for (const it of res.Items ?? []) {
+    if (keep.has(String(it.SK).slice('HXSTATS#'.length))) continue;
+    await db.send(new DeleteCommand({ TableName: table(), Key: { PK: it.PK, SK: it.SK } }));
+  }
+}
+
+/** Rev 20: on disconnecting Humanitix, the account's analytics go too. */
+export const clearHumanitixStats = (account: string) => pruneStats(account, new Set());
+
 /** Linked BMG events get their ticket count; artists get a count per linked gig and a total. */
-async function syncHumanitix(account: string, apiKey: string, today: string): Promise<number> {
+async function syncHumanitix(
+  account: string,
+  apiKey: string,
+  today: string,
+): Promise<{ written: number; warning?: string }> {
+  let warning: string | undefined;
+  const keep = new Set<string>();
   if (!isOrg(account)) {
     // Rev 18: the artist's own Humanitix events, kept so My stats can offer to link them.
-    const syncedAt = await saveHumanitixEvents(account, await humanitixEvents(apiKey));
+    await saveHumanitixEvents(account, await humanitixEvents(apiKey));
     // Each linked gig gets its own count (upcoming, or up to a month ago); the
     // snapshot totals the upcoming ones, for the chart.
     const from = daysAgo(today, HUMANITIX_AFTER_DAYS);
     let sold = 0;
     for (const g of await allGigs(account)) {
       const id = gigHumanitixId(g);
-      if (!id || g.date < from || g.status === 'cancelled') continue;
       // Rev 19: linked to Blueprint's Humanitix account, so Blueprint's sync counts it.
-      if (g.humanitixAccount === 'bmg') continue;
-      const n = await humanitixTicketsSold(apiKey, id);
-      if (g.date >= today) sold += n;
-      await db
-        .send(
-          new UpdateCommand({
-            TableName: table(),
-            Key: { PK: artistPk(account), SK: gigSk(g.gigId) },
-            UpdateExpression: 'SET humanitix = :h',
-            ConditionExpression: 'attribute_exists(PK)',
-            ExpressionAttributeValues: { ':h': { ticketsSold: n, syncedAt } },
-          }),
-        )
-        .catch((err: unknown) => {
-          // The gig was deleted meanwhile: nothing to update.
-          if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
-        });
+      if (!id || g.status === 'cancelled' || g.humanitixAccount === 'bmg') continue;
+      // Older gigs stop syncing but keep their analytics.
+      keep.add(id);
+      if (g.date < from) continue;
+      const r = await syncEventStats(account, apiKey, id);
+      warning ??= r.warning;
+      if (g.date >= today) sold += r.sold;
+      await applyToGig(g, r);
     }
     await writeSnapshots(account, [{ date: today, source: 'humanitix', ticketsSold: sold }]);
-    return 1;
+    await pruneStats(account, keep);
+    return { written: 1, ...(warning ? { warning } : {}) };
   }
   // Rev 19: Blueprint's own event list, for the gig form's picker and its checks.
   await saveHumanitixEvents('bmg', await humanitixEvents(apiKey));
-  await syncBmgLinkedGigs(apiKey, today);
+  warning = await syncBmgLinkedGigs(apiKey, today, keep);
   const res = await db.send(
     new QueryCommand({
       TableName: table(),
@@ -197,20 +313,19 @@ async function syncHumanitix(account: string, apiKey: string, today: string): Pr
   );
   let total = 0;
   for (const e of res.Items ?? []) {
-    if (!e.humanitixEventId || String(e.date) < today) continue;
-    const sold = await humanitixTicketsSold(apiKey, String(e.humanitixEventId));
-    total += sold;
-    await db.send(
-      new UpdateCommand({
-        TableName: table(),
-        Key: { PK: EVENTS_PK, SK: eventSk(String(e.eventId)) },
-        UpdateExpression: 'SET ticketsSold = :n, ticketsSyncedAt = :at',
-        ExpressionAttributeValues: { ':n': sold, ':at': new Date().toISOString() },
-      }),
-    );
+    if (!e.humanitixEventId) continue;
+    const hxId = String(e.humanitixEventId);
+    keep.add(hxId);
+    // Past events keep their last figures (a month after, for late refunds).
+    if (String(e.date) < daysAgo(today, HUMANITIX_AFTER_DAYS)) continue;
+    const r = await syncEventStats('bmg', apiKey, hxId);
+    warning ??= r.warning;
+    if (String(e.date) >= today) total += r.sold;
+    await applyToEvent(String(e.eventId), r);
   }
   await writeSnapshots('bmg', [{ date: today, source: 'humanitix', ticketsSold: total }]);
-  return 1;
+  await pruneStats('bmg', keep);
+  return { written: 1, ...(warning ? { warning } : {}) };
 }
 
 /** The partition an account's Humanitix event list lives in. */
@@ -242,36 +357,29 @@ export async function saveHumanitixEvents(
  * Rev 19: gigs Blueprint linked to its own Humanitix events get their count
  * from Blueprint's key. Blueprint only links gigs it can see, which are shared,
  * so the shared-gigs index finds them (upcoming, or up to a month ago).
+ * Rev 20: with their analytics, kept in Blueprint's partition.
  */
-async function syncBmgLinkedGigs(apiKey: string, today: string) {
+async function syncBmgLinkedGigs(apiKey: string, today: string, keep: Set<string>) {
   const gigs = await db.send(
     new QueryCommand({
       TableName: table(),
       IndexName: 'GSI3',
-      KeyConditionExpression: 'GSI3PK = :pk AND GSI3SK >= :d',
-      ExpressionAttributeValues: { ':pk': 'GIGS', ':d': daysAgo(today, HUMANITIX_AFTER_DAYS) },
-      Limit: 300,
+      KeyConditionExpression: 'GSI3PK = :pk',
+      ExpressionAttributeValues: { ':pk': 'GIGS' },
+      Limit: 500,
     }),
   );
-  const syncedAt = new Date().toISOString();
+  let warning: string | undefined;
+  const from = daysAgo(today, HUMANITIX_AFTER_DAYS);
   for (const g of (gigs.Items ?? []) as Gig[]) {
     if (g.humanitixAccount !== 'bmg' || !g.humanitixEventId || g.status === 'cancelled') continue;
-    const n = await humanitixTicketsSold(apiKey, g.humanitixEventId);
-    await db
-      .send(
-        new UpdateCommand({
-          TableName: table(),
-          Key: { PK: artistPk(g.artistId), SK: gigSk(g.gigId) },
-          UpdateExpression: 'SET humanitix = :h',
-          ConditionExpression: 'attribute_exists(PK) AND humanitixAccount = :bmg',
-          ExpressionAttributeValues: { ':h': { ticketsSold: n, syncedAt }, ':bmg': 'bmg' },
-        }),
-      )
-      .catch((err: unknown) => {
-        // Deleted or relinked meanwhile: nothing to update.
-        if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
-      });
+    keep.add(g.humanitixEventId);
+    if (g.date < from) continue;
+    const r = await syncEventStats('bmg', apiKey, g.humanitixEventId);
+    warning ??= r.warning;
+    await applyToGig(g, r, true);
   }
+  return warning;
 }
 
 /** A Humanitix event id from a ticket link, when the link is to Humanitix. */

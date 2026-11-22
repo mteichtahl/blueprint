@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Notice } from './ui.tsx';
+import { Button, Notice, Tag } from './ui.tsx';
 
 /**
  * Tickets sold, takings (tickets and door, plus merchandise) and costs, with
@@ -32,6 +32,11 @@ export interface MoneyFigures {
   /** Merchandise sold at the gig (missing on figures saved before it existed). */
   merchTakingsCents?: number;
   costs: CostRow[];
+  /**
+   * Rev 20: on a gig linked to Humanitix, tickets sold and ticket takings
+   * follow Humanitix (net to you) unless this is false.
+   */
+  takingsFromHumanitix?: boolean;
 }
 
 export const defaultMoney = (): MoneyFigures => ({
@@ -95,12 +100,23 @@ export function MoneyEditor({
   value,
   onSave,
   canEdit = true,
+  humanitix,
 }: {
   value: MoneyFigures | null | undefined;
   onSave: (m: MoneyFigures) => Promise<void>;
   canEdit?: boolean;
+  /** Rev 20: the linked gig's Humanitix figures, from the sync. */
+  humanitix?: { ticketsSold: number; netCents?: number } | undefined;
 }) {
-  const start = value ? withMerchRow(value) : defaultMoney();
+  const start = { ...(value ? withMerchRow(value) : defaultMoney()) };
+  // Humanitix brings net takings in once it has synced, unless the person chose their own.
+  const hxReady = humanitix?.netCents !== undefined;
+  const [own, setOwn] = useState(value?.takingsFromHumanitix === false);
+  const fromHx = hxReady && !own;
+  if (fromHx && humanitix) {
+    start.ticketsSold = humanitix.ticketsSold;
+    start.takingsCents = Math.max(0, humanitix.netCents ?? 0);
+  }
   const [tickets, setTickets] = useState(start.ticketsSold ? String(start.ticketsSold) : '');
   const [takings, setTakings] = useState(fromCents(start.takingsCents));
   const [merch, setMerch] = useState(fromCents(start.merchTakingsCents ?? 0));
@@ -124,6 +140,7 @@ export function MoneyEditor({
         ticketsSold: ticketsN!,
         takingsCents: takingsC!,
         merchTakingsCents: merchC!,
+        ...(hxReady ? { takingsFromHumanitix: !own } : {}),
         costs: rows.map((r, i) => ({
           id: r.id,
           label: r.label.trim(),
@@ -149,12 +166,49 @@ export function MoneyEditor({
   return (
     <div className="flex flex-col gap-3">
       {note && <Notice tone={note.tone}>{note.text}</Notice>}
+      {hxReady && (
+        <div className="flex flex-wrap items-center gap-2">
+          {fromHx ? (
+            <>
+              <Tag tone="n">Humanitix</Tag>
+              <span className="src">
+                Tickets sold and ticket takings (net to you) come from Humanitix.
+              </span>
+              {canEdit && (
+                <Button size="sm" variant="ghost" onClick={() => setOwn(true)}>
+                  Use my own figure
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="src">
+                Typed in. Humanitix says {humanitix!.ticketsSold} tickets,{' '}
+                {aud(Math.max(0, humanitix!.netCents ?? 0))} net.
+              </span>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setOwn(false);
+                    setTickets(String(humanitix!.ticketsSold || ''));
+                    setTakings(fromCents(Math.max(0, humanitix!.netCents ?? 0)));
+                  }}
+                >
+                  Use Humanitix again
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       <label className="flex flex-col gap-1.5">
         <span className="text-[15px] font-bold">Tickets sold</span>
         <input
           className={`${cell} max-w-[12rem]`}
           inputMode="numeric"
-          disabled={!canEdit}
+          disabled={!canEdit || fromHx}
           value={tickets}
           placeholder="0"
           aria-invalid={ticketsN === null}
@@ -169,7 +223,7 @@ export function MoneyEditor({
             <input
               className={cell}
               inputMode="decimal"
-              disabled={!canEdit}
+              disabled={!canEdit || fromHx}
               value={takings}
               placeholder="0"
               aria-invalid={takingsC === null}
