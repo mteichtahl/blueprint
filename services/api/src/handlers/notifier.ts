@@ -20,6 +20,8 @@ import {
   MESSAGE_EMAIL_THROTTLE_SECONDS,
   NOTIFICATION_TTL_SECONDS,
   notificationPk,
+  keepTestRunsQuiet,
+  isTestAccount,
   planGroups,
   Preferences,
   PREFS_SK,
@@ -326,7 +328,7 @@ export async function handler(event: { 'detail-type': string; detail: Record<str
   const e = await enrich({ ...event.detail, type: event['detail-type'] });
   if (!e) return;
   const all = await everyone();
-  const groups = planGroups(e, all).filter((g) => g.to.length > 0);
+  const groups = keepTestRunsQuiet(e, planGroups(e, all), all).filter((g) => g.to.length > 0);
   for (const g of groups) await deliver(e, g);
 }
 
@@ -355,6 +357,8 @@ async function deliver(e: DomainEvent, planned: Planned) {
     );
     await publish([`/inbox/user-${r.sub}`], { notification: id });
 
+    // Test accounts (docs/e2e.md) are told in the app only: no push, no email.
+    if (isTestAccount(r)) continue;
     const p = prefs[r.sub] ?? DEFAULT_PREFERENCES;
     const quiet = inQuietHours(p, now);
     if (p.push && !quiet) await push(r.sub, planned.draft);

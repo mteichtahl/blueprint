@@ -19,11 +19,25 @@ export const E2E_ACCOUNTS = {
 export type E2eAccountKey = keyof typeof E2E_ACCOUNTS;
 export const E2E_ACCOUNT_KEYS = Object.keys(E2E_ACCOUNTS) as E2eAccountKey[];
 
+/** What marks a test account's email; real people's addresses never contain it. */
+export const E2E_EMAIL_MARK = '+bmg-e2e-';
+
 /** `you@example.com` → `you+bmg-e2e-artiston@example.com`. */
 export function e2eEmail(base: string, key: E2eAccountKey): string {
   const at = base.lastIndexOf('@');
   if (at < 1) throw new Error(`"${base}" is not an email address`);
-  return `${base.slice(0, at)}+bmg-e2e-${key.toLowerCase()}${base.slice(at)}`.toLowerCase();
+  return `${base.slice(0, at)}${E2E_EMAIL_MARK}${key.toLowerCase()}${base.slice(at)}`.toLowerCase();
+}
+
+/**
+ * Whether an address belongs to one of the E2E test accounts. The notifier
+ * and the notify service use it so a test run never reaches a real person,
+ * and never sends the test accounts email or push (docs/e2e.md).
+ */
+export function isE2eEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const at = email.lastIndexOf('@');
+  return at > 0 && email.slice(0, at).toLowerCase().includes(E2E_EMAIL_MARK);
 }
 
 const Account = z.object({

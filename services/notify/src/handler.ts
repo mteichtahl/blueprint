@@ -4,6 +4,7 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { isE2eEmail } from '@bmg/config/e2e';
 import { appOrigin, sendMail } from '@bmg/email';
 import type { EventBridgeEvent } from 'aws-lambda';
 import {
@@ -119,6 +120,11 @@ export const handler = async (event: EventBridgeEvent<string, Detail>): Promise<
   const contact: { email?: string; displayName?: string } | undefined = stored?.email
     ? stored
     : { ...stored, ...(await contactFromUserPool(pk, artistId)) };
+  // E2E test artists (docs/e2e.md): nobody is emailed about them, Blueprint or the artist.
+  if (isE2eEmail(contact?.email)) {
+    log('notify.skipped', { type: event['detail-type'], artistId, reason: 'e2e' });
+    return;
+  }
   const profile = await get<{ displayName?: string }>(pk, 'PROFILE');
   const artistName = profile?.displayName ?? contact?.displayName;
   const todo = async (id: unknown) =>
