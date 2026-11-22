@@ -8,6 +8,7 @@ import {
   CognitoError,
   ok,
   startPasswordSignIn,
+  subOf,
 } from '../src/api.ts';
 import { wrongCode } from '../src/totp.ts';
 
@@ -46,7 +47,14 @@ test.describe('Sign-in', () => {
 
 test.describe('Roles', () => {
   test('artists can’t reach Blueprint-only areas', async () => {
-    for (const path of ['/access/team', '/ai/prompts', '/gigs', '/review-queue']) {
+    for (const path of [
+      '/access/team',
+      '/ai/prompts',
+      '/gigs',
+      '/review-queue',
+      '/events',
+      '/insights',
+    ]) {
       await test.step(path, async () => denied((await call('artistOn', 'GET', path)).status));
     }
     // A real refusal, not the 404 any request without the assistant's marker gets.
@@ -87,6 +95,107 @@ test.describe('Roles', () => {
       '/artists',
     );
     expect(artists.map((a) => a.artistId)).toEqual([id]);
+  });
+});
+
+test.describe('Staff see only the artists they look after', () => {
+  // E2E Staff is assigned to E2E Artist (AI on) only.
+  test('a team member’s roster and workspaces are their artists only', async () => {
+    const on = await artistIdOf('artistOn');
+    const off = await artistIdOf('artistOff');
+    const { artists } = await ok<{ artists: { artistId: string }[] }>('staff', 'GET', '/artists');
+    const ids = artists.map((a) => a.artistId);
+    expect(ids).toContain(on);
+    expect(ids).not.toContain(off);
+    expect(ids).not.toContain(await artistIdOf('artistOther'));
+    for (const path of [
+      `/artists/${off}/plan`,
+      `/artists/${off}/todos`,
+      `/artists/${off}/gigs`,
+      `/artists/${off}/files`,
+      `/artists/${off}/folders`,
+      `/artists/${off}/submissions`,
+    ]) {
+      await test.step(path, async () => denied((await call('staff', 'GET', path)).status));
+    }
+    const all = await ok<{ todos: { artistId: string }[] }>('staff', 'GET', '/todos');
+    expect(all.todos.some((t) => t.artistId === off)).toBe(false);
+  });
+
+  test('the team list hides email addresses from non-admins, and artists can’t see it', async () => {
+    const { team } = await ok<{ team: { email: string }[] }>('staff', 'GET', '/access/team');
+    expect(team.length).toBeGreaterThan(0);
+    expect(team.every((m) => m.email === '')).toBe(true);
+    denied((await call('artistOn', 'GET', '/access/team')).status);
+  });
+});
+
+test.describe('Admin-only settings', () => {
+  // Each write is sent with a body the server would reject, so a broken rule
+  // answers 400 and still changes nothing; a working one answers 403 first.
+
+  test('O-01: team members read AI prompts but can’t publish them', async () => {
+    const { prompts } = await ok<{ prompts: { id: string }[] }>('staff', 'GET', '/ai/prompts');
+    expect(prompts.length).toBeGreaterThan(0);
+    const res = await call('staff', 'POST', `/ai/prompts/${prompts[0]!.id}/publish`, { note: 5 });
+    expect(res.status).toBe(403);
+    denied((await call('artistOn', 'GET', '/ai/prompts')).status);
+  });
+
+  test('only an admin sets up connector apps', async () => {
+    denied((await call('staff', 'GET', '/connectors/apps')).status);
+    const res = await call('staff', 'PUT', '/connectors/apps/google', { clientId: '' });
+    expect(res.status).toBe(403);
+    denied((await call('artistOn', 'GET', '/connectors')).status);
+  });
+
+  test('the newsroom is Blueprint’s; only an admin changes its settings', async () => {
+    expect((await call('staff', 'GET', '/newsroom')).status).toBe(200);
+    denied((await call('artistOn', 'GET', '/newsroom')).status);
+    const res = await call('staff', 'PUT', '/newsroom/settings', { lookFor: 5 });
+    expect(res.status).toBe(403);
+  });
+
+  test('O-05: an admin changes a team member’s job title; a team member can’t', async () => {
+    const staffSub = await subOf('staff');
+    const title = async () =>
+      (
+        await ok<{ team: { sub: string; jobTitle: string }[] }>('admin', 'GET', '/access/team')
+      ).team.find((m) => m.sub === staffSub)?.jobTitle ?? '';
+    const before = await title();
+    try {
+      await ok('admin', 'PATCH', `/access/team/${staffSub}`, { jobTitle: 'E2E renamed by admin' });
+      expect(await title()).toBe('E2E renamed by admin');
+    } finally {
+      await ok('admin', 'PATCH', `/access/team/${staffSub}`, { jobTitle: before });
+    }
+    const res = await call('staff', 'PATCH', `/access/team/${await subOf('admin')}`, {
+      jobTitle: 5,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('O-06: an admin can’t change their own role', async () => {
+    // Refused before anything is written.
+    const res = await call('admin', 'PATCH', `/access/team/${await subOf('admin')}`, {
+      role: 'bmg-staff',
+    });
+    expect(res.status).toBe(409);
+    expect((await ok<{ role: string }>('admin', 'GET', '/me')).role).toBe('bmg-admin');
+  });
+
+  test('P-01, P-06: an artist’s job title is always “Artist”; Blueprint sets their own', async () => {
+    expect((await call('artistOn', 'PATCH', '/me', { jobTitle: 'Producer' })).status).toBe(403);
+    expect((await ok<{ jobTitle: string }>('artistOn', 'GET', '/me')).jobTitle).toBe('Artist');
+    const before = (await ok<{ jobTitle: string }>('staff', 'GET', '/me')).jobTitle;
+    try {
+      await ok('staff', 'PATCH', '/me', { jobTitle: 'E2E job title' });
+      expect((await ok<{ jobTitle: string }>('staff', 'GET', '/me')).jobTitle).toBe(
+        'E2E job title',
+      );
+    } finally {
+      await ok('staff', 'PATCH', '/me', { jobTitle: before });
+    }
   });
 });
 

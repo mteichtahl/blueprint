@@ -3,6 +3,8 @@ import {
   DEFAULT_PREFERENCES,
   emailText,
   inQuietHours,
+  isTestAccount,
+  keepTestRunsQuiet,
   plan,
   planGroups,
   type Recipient,
@@ -464,5 +466,62 @@ describe('meetings an artist was in (rev 18)', () => {
       body: "Fri 20 Nov · with Kyra. It's in My meetings.",
       link: 'meetings',
     });
+  });
+});
+
+describe('E2E test runs stay quiet (docs/e2e.md)', () => {
+  const T = 'art_e2eeeeeeeeee';
+  const withTests: Recipient[] = [
+    ...people,
+    { sub: 'e2e-admin', role: 'bmg-admin', email: 'marc+bmg-e2e-admin@x.com' },
+    {
+      sub: 'e2e-staff',
+      role: 'bmg-staff',
+      email: 'marc+bmg-e2e-staff@x.com',
+      assignedArtistIds: [T],
+    },
+    { sub: 'e2e-artist', role: 'artist', artistId: T, email: 'marc+bmg-e2e-artiston@x.com' },
+  ];
+  const quiet = (e: Parameters<typeof planGroups>[0]) =>
+    keepTestRunsQuiet(e, planGroups(e, withTests), withTests)
+      .flatMap((g) => g.to.map((r) => r.sub))
+      .sort();
+
+  it('recognises test accounts by their email, not their name', () => {
+    expect(isTestAccount({ email: 'Marc+BMG-E2E-admin@X.com' })).toBe(true);
+    expect(isTestAccount({ email: 'kyra@blueprintmusic.group' })).toBe(false);
+    expect(isTestAccount({ email: 'bmg-e2e@x.com' })).toBe(false);
+    expect(isTestAccount({})).toBe(false);
+  });
+
+  it('tells only test accounts about a test artist (real admins hear nothing)', () => {
+    expect(quiet({ type: 'submission.created', artistId: T, submissionId: 's' })).toEqual([
+      'e2e-admin',
+      'e2e-staff',
+    ]);
+  });
+
+  it('tells only test accounts when a test account acts, even with no artist', () => {
+    expect(
+      quiet({
+        type: 'message.created',
+        conversationId: 'c',
+        conversationType: 'staff-group',
+        artistIds: [],
+        staffSubs: ['e2e-admin', 'e2e-staff', 'kyra'],
+        senderSub: 'e2e-admin',
+        senderName: 'E2E Admin',
+      }),
+    ).toEqual(['e2e-staff']);
+  });
+
+  it('leaves real activity alone, including telling test artists in the app', () => {
+    const real = {
+      type: 'submission.created' as const,
+      artistId: A,
+      submissionId: 's',
+    };
+    expect(quiet(real)).toEqual(subs(plan(real, withTests)));
+    expect(quiet(real)).toContain('kyra');
   });
 });

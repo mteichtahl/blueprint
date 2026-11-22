@@ -4,6 +4,7 @@
  * unit-tested. Nothing here carries message text or file contents: emails
  * and notifications say what happened and link to the app.
  */
+import { isE2eEmail } from '@bmg/config/e2e';
 import { renderLayout, type Block as EmailBlock } from '@bmg/email';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -310,6 +311,37 @@ const bmgFor = (r: Recipient, artistIds: string[]) =>
 export interface Planned {
   to: Recipient[];
   draft: Draft;
+}
+
+/** Whether this recipient is one of the E2E test accounts (docs/e2e.md). */
+export const isTestAccount = (r: Pick<Recipient, 'email'>): boolean => isE2eEmail(r.email);
+
+/** Every string in an event, however deep (ids, subs, lists of them). */
+function strings(v: unknown, out: Set<string>, depth = 0): Set<string> {
+  if (typeof v === 'string') out.add(v);
+  else if (depth < 4 && Array.isArray(v)) for (const x of v) strings(x, out, depth + 1);
+  else if (depth < 4 && v && typeof v === 'object')
+    for (const x of Object.values(v)) strings(x, out, depth + 1);
+  return out;
+}
+
+/**
+ * Keeps E2E runs quiet: anything a test account did, or that is about a test
+ * artist, is told only to test accounts, so real people never hear about a
+ * test. (They are still told in the app, which the tests check; `deliver`
+ * never emails or pushes a test account.) Everything else is left as planned.
+ */
+export function keepTestRunsQuiet(
+  e: DomainEvent,
+  groups: Planned[],
+  everyone: Recipient[],
+): Planned[] {
+  const test = everyone.filter(isTestAccount);
+  if (test.length === 0) return groups;
+  const ids = new Set(test.flatMap((r) => [r.sub, ...(r.artistId ? [r.artistId] : [])]));
+  const mentioned = strings(e, new Set());
+  if (![...ids].some((id) => mentioned.has(id))) return groups;
+  return groups.map((g) => ({ ...g, to: g.to.filter(isTestAccount) }));
 }
 
 /** Picks recipients and words the notification. The actor is never notified. */

@@ -107,6 +107,86 @@ test('C-09: a stage can be added and removed', async () => {
   expect((await getPlan()).plan.phases.map((p) => p.id)).not.toContain(extra.id);
 });
 
+test('C-10: a plan can’t be left without stages', async () => {
+  const v = await getPlan();
+  // Sent with an old version too, so even a broken rule couldn't save an empty plan.
+  const empty = body(v, { phases: [], version: v.plan.version - 1 });
+  expect((await call('admin', 'PUT', `/artists/${artistId}/plan`, empty)).status).toBe(400);
+  expect((await getPlan()).plan.phases.length).toBeGreaterThan(0);
+});
+
+test('C-11: ticking a milestone done is saved and shows for the artist', async () => {
+  const v = await getPlan();
+  const milestone = { id: `m${Date.now()}`, title: tag('milestone'), done: false, measures: [] };
+  const stage: Phase = {
+    id: `e2e${Date.now()}`,
+    name: 'E2E stage',
+    goal: '',
+    milestones: [milestone],
+  };
+  await ok(
+    'admin',
+    'PUT',
+    `/artists/${artistId}/plan`,
+    body(v, { phases: [...v.plan.phases, stage] }),
+  );
+  try {
+    const added = await getPlan();
+    const ticked = added.plan.phases.map((p) =>
+      p.id === stage.id ? { ...p, milestones: p.milestones.map((m) => ({ ...m, done: true })) } : p,
+    );
+    await ok('admin', 'PUT', `/artists/${artistId}/plan`, body(added, { phases: ticked }));
+    const theirs = await ok<{ plan: PlanView['plan'] }>(
+      'artistOn',
+      'GET',
+      `/artists/${artistId}/plan`,
+    );
+    const m = theirs.plan.phases.find((p) => p.id === stage.id)?.milestones[0];
+    expect(m?.done).toBe(true);
+  } finally {
+    const now = await getPlan();
+    await ok(
+      'admin',
+      'PUT',
+      `/artists/${artistId}/plan`,
+      body(now, { phases: now.plan.phases.filter((p) => p.id !== stage.id) }),
+    );
+  }
+});
+
+test('C-02: an artist with no plan shows only "Start a new plan"', async () => {
+  const { artists } = await ok<{ artists: { artistId: string; hasPlan: boolean }[] }>(
+    'admin',
+    'GET',
+    '/artists',
+  );
+  const e2e = [await artistIdOf('artistOff'), await artistIdOf('artistOther')];
+  const none = artists.find((a) => e2e.includes(a.artistId) && !a.hasPlan);
+  test.skip(!none, 'Both other test artists have a plan');
+  const v = await ok<PlanView>('admin', 'GET', `/artists/${none!.artistId}/plan`);
+  expect(v.exists).toBe(false);
+  expect(v.owner).toBeNull();
+});
+
+test('Q-07: Artists & access shows terms, AI status and the plan owner', async () => {
+  const { artists } = await ok<{
+    artists: {
+      artistId: string;
+      termsAcceptedAt: string | null;
+      aiOptIn: boolean | null;
+      hasPlan: boolean;
+      planOwner: { sub: string } | null;
+      planOwnerNeeded: boolean;
+    }[];
+  }>('admin', 'GET', '/artists');
+  const row = artists.find((a) => a.artistId === artistId);
+  expect(row?.termsAcceptedAt).toBeTruthy();
+  expect(row?.aiOptIn).toBe(true);
+  expect(row?.hasPlan).toBe(true);
+  expect(row?.planOwner?.sub).toBe(adminSub);
+  expect(row?.planOwnerNeeded).toBe(false);
+});
+
 test('a stale save is refused, not lost', async () => {
   const v = await getPlan();
   const stale = body(v, { version: v.plan.version - 1, outcome: 'stale' });
@@ -134,4 +214,26 @@ test('C-15 to C-18: changing the owner hands the plan over, and back', async () 
     body(now, { ownerSub: adminSub }),
   );
   expect(back.owner.sub).toBe(adminSub);
+});
+
+test('O-11: an owner taken off the artist leaves the plan needing an owner', async () => {
+  const staffSub = await subOf('staff');
+  const team = (assigned: string[]) =>
+    ok('admin', 'PATCH', `/access/team/${staffSub}`, { artistIds: assigned });
+  const v = await getPlan();
+  await ok('admin', 'PUT', `/artists/${artistId}/plan`, body(v, { ownerSub: staffSub }));
+  try {
+    // E2E Staff is assigned to this artist only; take that away while they own the plan.
+    await team([]);
+    const needs = await getPlan();
+    expect(needs.ownerNeeded).toBe(true);
+    // A save that doesn't choose a new owner is refused until someone does.
+    const res = await call('admin', 'PUT', `/artists/${artistId}/plan`, body(needs, {}));
+    expect(res.status).toBe(400);
+  } finally {
+    await team([artistId]);
+    const now = await getPlan();
+    await ok('admin', 'PUT', `/artists/${artistId}/plan`, body(now, { ownerSub: adminSub }));
+  }
+  expect((await getPlan()).owner?.sub).toBe(adminSub);
 });
