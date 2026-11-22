@@ -3,6 +3,17 @@ import type { AppConfig } from './config.ts';
 const b64url = (s: string) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
+ * Server text for a console line: line breaks and other control characters
+ * removed (so it can't fake extra lines) and kept short.
+ */
+const oneLine = (s: string): string =>
+  s
+    .replace(/\r|\n/g, ' ')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .slice(0, 200);
+
+/**
  * Subscribes to one inbox channel on AppSync Events (design 7.4). Events
  * carry ids only; the caller refetches through the API. Reconnects with
  * backoff; returns a function that closes the connection.
@@ -42,9 +53,11 @@ export function subscribeInbox(
       if (data.type === 'subscribe_success') console.info(`[realtime] listening on ${channel}`);
       else if (/error/.test(data.type))
         console.warn(
-          `[realtime] ${data.type} on ${channel}: ${(data.errors ?? [])
-            .map((e) => [e.errorType, e.message].filter(Boolean).join(' '))
-            .join('; ')}`,
+          `[realtime] ${oneLine(data.type)} on ${channel}: ${oneLine(
+            (data.errors ?? [])
+              .map((e) => [e.errorType, e.message].filter(Boolean).join(' '))
+              .join('; '),
+          )}`,
         );
       if (data.type === 'connection_ack') {
         attempt = 0;
