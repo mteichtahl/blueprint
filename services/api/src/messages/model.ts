@@ -23,6 +23,7 @@
 import { DEFAULT_RULES, type AccessRules } from '../access/model.ts';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { artistChannel } from '../channels.ts';
 
 export type ConversationType =
   | 'bmg-artist'
@@ -145,9 +146,8 @@ export function members(c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs'
 export function channelsFor(c: Pick<Conversation, 'type' | 'artistIds' | 'staffSubs'>): string[] {
   if (isStaffType(c.type)) return [...new Set(c.staffSubs ?? [])].map(staffChannel);
   if (c.type === 'broadcast') return ['/inbox/bmg', '/inbox/all-artists'];
-  if (c.type === 'announcement')
-    return ['/inbox/bmg', ...c.artistIds.map((id) => `/inbox/artist-${id}`)];
-  const artists = c.artistIds.map((id) => `/inbox/artist-${id}`);
+  if (c.type === 'announcement') return ['/inbox/bmg', ...c.artistIds.map(artistChannel)];
+  const artists = c.artistIds.map(artistChannel);
   return c.type === 'artist-to-artist' ? artists : ['/inbox/bmg', ...artists];
 }
 

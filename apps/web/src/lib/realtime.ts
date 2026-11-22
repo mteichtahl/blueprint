@@ -98,10 +98,18 @@ export function subscribeInbox(
 }
 
 /**
+ * An artist's channel. AppSync Events allows only letters, digits and dashes
+ * in a channel segment, so the artist id's underscore (`art_…`) becomes a
+ * dash; the server (services/api/src/channels.ts) builds the same name.
+ */
+export const artistChannel = (artistId: string): string =>
+  `/inbox/artist-${artistId.split('_').join('-')}`;
+
+/**
  * The viewer's own channels: the artist's, or Blueprint's shared inbox plus
  * the person's own channel for team chats (rev 14).
  */
 export function inboxChannels(role: string, artistId: string | null, sub?: string): string[] {
-  if (role === 'artist') return artistId ? [`/inbox/artist-${artistId}`, '/inbox/all-artists'] : [];
+  if (role === 'artist') return artistId ? [artistChannel(artistId), '/inbox/all-artists'] : [];
   return sub ? ['/inbox/bmg', `/inbox/staff-${sub}`] : ['/inbox/bmg'];
 }

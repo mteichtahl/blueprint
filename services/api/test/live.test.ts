@@ -6,7 +6,7 @@ describe('live nudges', () => {
     expect(nudgeFor('ARTIST#art_abcdefghij', 'GIG#g1')).toEqual({
       topic: 'gigs',
       artistId: 'art_abcdefghij',
-      channels: ['/inbox/artist-art_abcdefghij', '/inbox/bmg'],
+      channels: ['/inbox/artist-art-abcdefghij', '/inbox/bmg'],
     });
     expect(nudgeFor('ARTIST#art_abcdefghij', 'TODO#t1')?.topic).toBe('todos');
     expect(nudgeFor('ARTIST#art_abcdefghij', 'TODOC#t1#2026#c1')?.topic).toBe('todos');

@@ -159,7 +159,7 @@ describe('team chats on the Chat screen (rev 14)', () => {
   it('listens on the person’s own team channel as well as Blueprint’s', () => {
     expect(inboxChannels('bmg-staff', null, SAM)).toEqual(['/inbox/bmg', `/inbox/staff-${SAM}`]);
     expect(inboxChannels('artist', 'art_x', 'whatever')).toEqual([
-      '/inbox/artist-art_x',
+      '/inbox/artist-art-x',
       '/inbox/all-artists',
     ]);
   });
