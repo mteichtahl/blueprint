@@ -222,13 +222,39 @@ test.describe('Artists on a computer (rev 16)', () => {
 });
 
 test.describe('Live updates (rev 17)', () => {
+  /**
+   * Reloads the artist's page while listening to the app's `[realtime]` console
+   * lines, waits until their own channel is subscribed, then opens a tab. If
+   * the update never shows, the failure lists every realtime line seen, so a
+   * refused subscription and a nudge that never arrives look different.
+   */
+  async function liveArtistPage(page: Page, tab: string) {
+    const lines: string[] = [];
+    page.on('console', (m) => {
+      if (m.text().startsWith('[realtime]')) lines.push(`${m.type()}: ${m.text()}`);
+    });
+    await page.reload();
+    await settle(page);
+    const channel = `/inbox/artist-${artistId}`;
+    await expect
+      .poll(() => lines.some((l) => l.includes(`listening on ${channel}`)), {
+        message: `the artist's live-update channel should subscribe.\n${lines.join('\n') || '(no [realtime] lines)'}`,
+        timeout: 20_000,
+      })
+      .toBe(true);
+    await page
+      .getByRole('navigation', { name: 'Tabs' })
+      .getByRole('button', { name: startsWith(tab) })
+      .click();
+    await settle(page);
+    return lines;
+  }
+
   test('a gig Blueprint adds appears in the artist’s Gigs without reloading', async ({
     pageAs,
   }) => {
     const page = await pageAs('artistOn');
-    const tabbar = page.getByRole('navigation', { name: 'Tabs' });
-    await tabbar.getByRole('button', { name: startsWith('Gigs') }).click();
-    await settle(page);
+    const lines = await liveArtistPage(page, 'Gigs');
     const title = tag('live gig');
     const gig = await ok<{ gigId: string }>('admin', 'POST', `/artists/${artistId}/gigs`, {
       title,
@@ -237,21 +263,25 @@ test.describe('Live updates (rev 17)', () => {
       date: new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10),
     });
     gigs.push(gig.gigId);
-    await expect(page.getByText(title).first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByText(title).first(),
+      `realtime lines seen:\n${lines.join('\n')}`,
+    ).toBeVisible({ timeout: 30_000 });
   });
 
   test('a to-do Blueprint adds appears in the artist’s To-do tab without reloading', async ({
     pageAs,
   }) => {
     const page = await pageAs('artistOn');
-    const tabbar = page.getByRole('navigation', { name: 'Tabs' });
-    await tabbar.getByRole('button', { name: startsWith('To-do') }).click();
-    await settle(page);
+    const lines = await liveArtistPage(page, 'To-do');
     const title = tag('live to-do');
     todos.push(
       (await ok<{ todoId: string }>('admin', 'POST', `/artists/${artistId}/todos`, { title }))
         .todoId,
     );
-    await expect(page.getByText(title).first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByText(title).first(),
+      `realtime lines seen:\n${lines.join('\n')}`,
+    ).toBeVisible({ timeout: 30_000 });
   });
 });

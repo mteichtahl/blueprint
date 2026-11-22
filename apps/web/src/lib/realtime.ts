@@ -31,7 +31,21 @@ export function subscribeInbox(
     ]);
     ws.onopen = () => ws?.send(JSON.stringify({ type: 'connection_init' }));
     ws.onmessage = (msg) => {
-      const data = JSON.parse(String(msg.data)) as { type: string; event?: string };
+      const data = JSON.parse(String(msg.data)) as {
+        type: string;
+        event?: string;
+        errors?: { errorType?: string; message?: string }[];
+      };
+      // Say what happened to the subscription in the browser console, so a
+      // refused one (wrong channel, missing claims) isn't silent. Channel
+      // names and error types only: never tokens or event content.
+      if (data.type === 'subscribe_success') console.info(`[realtime] listening on ${channel}`);
+      else if (/error/.test(data.type))
+        console.warn(
+          `[realtime] ${data.type} on ${channel}: ${(data.errors ?? [])
+            .map((e) => [e.errorType, e.message].filter(Boolean).join(' '))
+            .join('; ')}`,
+        );
       if (data.type === 'connection_ack') {
         attempt = 0;
         if (connected) onReconnect?.();
@@ -45,6 +59,7 @@ export function subscribeInbox(
           }),
         );
       } else if (data.type === 'data' && data.event) {
+        console.debug(`[realtime] nudge on ${channel}`);
         try {
           onEvent(JSON.parse(data.event));
         } catch {
@@ -52,8 +67,9 @@ export function subscribeInbox(
         }
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (closed) return;
+      console.warn(`[realtime] ${channel} closed (${ev.code}${ev.reason ? ` ${ev.reason}` : ''})`);
       attempt = Math.min(attempt + 1, 6);
       timer = setTimeout(connect, 1000 * 2 ** attempt);
     };
