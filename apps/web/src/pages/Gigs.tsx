@@ -22,6 +22,7 @@ import { MoneyEditor, type MoneyFigures } from '../components/Money.tsx';
 import { VenuePicker } from './Venues.tsx';
 import { GigMedia } from '../components/GigMedia.tsx';
 import { HumanitixPicker } from '../components/HumanitixPicker.tsx';
+import { TicketAnalytics } from '../components/TicketAnalytics.tsx';
 import { melbourneDay, melbourneTime, type HumanitixEvent } from '../lib/connectors.ts';
 import { useLive } from '../lib/live.ts';
 
@@ -48,7 +49,9 @@ export interface Gig {
   humanitixEventId?: string;
   /** Rev 19: 'bmg' when the event is in Blueprint's Humanitix account. */
   humanitixAccount?: 'bmg';
-  humanitix?: { ticketsSold: number; syncedAt: string };
+  humanitix?: { ticketsSold: number; syncedAt: string; netCents?: number; grossCents?: number };
+  /** Rev 20: false when the artist keeps the ticket analytics from Blueprint. */
+  shareTicketAnalytics?: boolean;
   money?: MoneyFigures;
   checklist: { id: string; title: string; done: boolean }[];
   plannedBy: 'artist' | 'bmg';
@@ -576,11 +579,26 @@ function GigPage({
 }) {
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
+  /** Rev 20: the Humanitix ticket analytics, open in place of the page. */
+  const [analytics, setAnalytics] = useState(false);
   const first = artistName.split(' ')[0];
   const phone = usePhone();
   useEffect(() => {
     if (phone) window.scrollTo?.({ top: 0 });
-  }, [phone, editing]);
+  }, [phone, editing, analytics]);
+  const linked = !!gig.humanitixEventId || !!gig.humanitix;
+  if (analytics && linked) {
+    return (
+      <TicketAnalytics
+        cfg={cfg}
+        token={token}
+        target={{ artistId: gig.artistId, gigId: gig.gigId }}
+        isArtist={isArtist}
+        title={gig.title}
+        back={{ to: gig.title, onClick: () => setAnalytics(false) }}
+      />
+    );
+  }
   if (editing) {
     return (
       <Card
@@ -640,13 +658,18 @@ function GigPage({
           Tickets
         </a>
       )}
-      {gig.humanitixEventId && (
-        <p className="src m-0">
-          {gig.humanitix
-            ? `Humanitix: ${gig.humanitix.ticketsSold.toLocaleString('en-AU')} tickets sold (synced ${new Date(gig.humanitix.syncedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}).`
-            : 'Linked to Humanitix. Ticket sales come in with the next sync.'}
-          {isArtist ? ' Link or unlink it in My stats.' : ''}
-        </p>
+      {linked && (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="src m-0">
+            {gig.humanitix
+              ? `Humanitix: ${gig.humanitix.ticketsSold.toLocaleString('en-AU')} tickets sold (synced ${new Date(gig.humanitix.syncedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}).`
+              : 'Linked to Humanitix. Ticket sales come in with the next sync.'}
+            {isArtist ? ' Link or unlink it in My stats.' : ''}
+          </p>
+          <Button size="sm" variant="ghost" onClick={() => setAnalytics(true)}>
+            See ticket analytics
+          </Button>
+        </div>
       )}
       {helpOpen &&
         (isArtist ? (
@@ -678,8 +701,9 @@ function GigPage({
       )}
       <WorkSection title="Tickets, takings and profit">
         <MoneyEditor
-          key={gig.gigId}
+          key={`${gig.gigId}:${gig.humanitix?.syncedAt ?? ''}:${gig.money?.takingsFromHumanitix ?? ''}`}
           value={gig.money}
+          humanitix={linked ? gig.humanitix : undefined}
           onSave={async (money) => {
             await api(cfg, token, 'PATCH', `/artists/${gig.artistId}/gigs/${gig.gigId}`, {
               money,

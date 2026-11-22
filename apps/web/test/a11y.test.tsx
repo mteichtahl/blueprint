@@ -297,7 +297,112 @@ const meetingContent = {
   },
 };
 
+/** Rev 20: a linked gig's ticket analytics (figures only). */
+const ANALYTICS = {
+  eventId: 'hxLaunch',
+  name: 'Single launch night',
+  startDate: '2026-12-12T09:00:00.000Z',
+  endDate: '2026-12-12T12:30:00.000Z',
+  url: null,
+  status: 'on-sale',
+  capacity: 220,
+  sold: 168,
+  money: {
+    ticketSalesCents: 435000,
+    discountsCents: 5000,
+    absorbedFeesCents: 9600,
+    refundsCents: 11200,
+    otherCents: 0,
+    netCents: 409200,
+    grossCents: 471200,
+    passedOnFeesCents: 41200,
+    taxesCents: 0,
+    donationsCents: 0,
+  },
+  avgTicketCents: 2560,
+  refunds: { tickets: 4, orders: 3, cents: 11200 },
+  checkedIn: null,
+  arrivals: [],
+  daily: [
+    { day: '2026-11-01', n: 30 },
+    { day: '2026-11-12', n: 31 },
+  ],
+  byDaysOut: Array.from({ length: 121 }, (_, d) => (d === 41 ? 137 : d === 30 ? 31 : 0)),
+  ticketTypes: [
+    {
+      id: 'e',
+      name: 'Early bird',
+      priceCents: 2000,
+      sold: 60,
+      quantity: 60,
+      revenueCents: 120000,
+      soldOut: true,
+      soldOutInDays: 4,
+    },
+    {
+      id: 'g',
+      name: 'General',
+      priceCents: 2800,
+      sold: 90,
+      quantity: 120,
+      revenueCents: 247000,
+      soldOut: false,
+      soldOutInDays: null,
+    },
+  ],
+  heat: [
+    [1, 2, 4, 2],
+    [1, 2, 5, 3],
+    [1, 3, 6, 3],
+    [2, 4, 14, 7],
+    [2, 3, 7, 4],
+    [3, 4, 3, 2],
+    [3, 5, 6, 1],
+  ],
+  leadTime: { sameDay: 0, d1to3: 0, d4to7: 0, w1to2: 0, w2plus: 168 },
+  channels: { online: 164, manual: 4 },
+  payment: [
+    { label: 'Card', tickets: 119 },
+    { label: 'Afterpay', tickets: 24 },
+  ],
+  orders: {
+    count: 97,
+    avgCents: 4433,
+    sizes: { one: 48, two: 36, threeFour: 11, fivePlus: 2 },
+    biggest: { tickets: 5, cents: 14000 },
+  },
+  codes: [{ code: 'FAMILY15', orders: 6, tickets: 12, discountCents: 5000, revenueCents: 28600 }],
+  autoDiscountCents: 0,
+  mailingList: { optedIn: 59, of: 97 },
+  syncedAt: now,
+  daysOut: 20,
+  pace: {
+    usual: Array.from({ length: 121 }, (_, d) => Math.max(0, 190 - d * 2)),
+    events: 2,
+    now: 168,
+    usualNow: 150,
+    diffPct: 12,
+  },
+  repeatFans: { fans: 38, of: 97 },
+  highlights: [
+    { label: 'Pace', text: '12% ahead of your usual pace, 20 days out' },
+    { label: 'Best code', text: 'FAMILY15 brought in $286' },
+  ],
+};
+
 function answer(method: string, path: string): [number, unknown] {
+  if (/[?&]analytics=1/.test(path))
+    return [
+      200,
+      {
+        connected: true,
+        analytics: ANALYTICS,
+        canSync: true,
+        canShare: true,
+        shared: true,
+        lastError: null,
+      },
+    ];
   const p = path.replace(/^\/v1/, '').split('?')[0]!;
   if (/^\/access\/recovery-codes$/.test(p)) {
     return method === 'POST'
@@ -1720,6 +1825,37 @@ describe('rev 16: the artist desktop layout', () => {
     expect(screen.getByRole('option', { name: /The Tote .*\(same day\)/ })).toBeTruthy();
     expect(screen.getByText('Linked to Corner Hotel')).toBeTruthy();
     expect(await violations()).toEqual([]);
+  });
+
+  it('rev 20: ticket analytics for a linked gig', async () => {
+    const { TicketAnalytics } = await import('../src/components/TicketAnalytics.tsx');
+    let back = 0;
+    render(
+      <main>
+        <TicketAnalytics
+          cfg={cfg}
+          token="t"
+          target={{ artistId: ARTIST, gigId: 'gig000000001' }}
+          isArtist
+          title="Single launch night"
+          back={{ to: 'Single launch night', onClick: () => back++ }}
+        />
+      </main>,
+    );
+    await settle();
+    expect(screen.getAllByText('$4,092')).toHaveLength(2); // the tile and the waterfall's net
+    expect(screen.getByText('of 220 · 76% sold')).toBeTruthy();
+    expect(screen.getByText('12% ahead of your usual pace, 20 days out')).toBeTruthy();
+    expect(screen.getByRole('list', { name: 'Where the money goes' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: /168 sold vs 150 usual/ })).toBeTruthy();
+    expect(screen.getByText('FAMILY15')).toBeTruthy();
+    expect(
+      screen.getByRole('checkbox', { name: /Share ticket analytics with Blueprint/ }),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sync now' })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: '← Single launch night' }));
+    expect(back).toBe(1);
   });
 
   it('rev 19: the gig form picks a Humanitix event, same-day first', async () => {

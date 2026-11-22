@@ -21,6 +21,7 @@ import { aud, PRESET_COSTS } from '../components/Money.tsx';
 import { VenuePicker, type Venue } from './Venues.tsx';
 import { ContactPicker } from './Contacts.tsx';
 import { useLive } from '../lib/live.ts';
+import { TicketAnalytics } from '../components/TicketAnalytics.tsx';
 
 /** BMG-only events (screen: Events · Industry Mixer Night). */
 
@@ -485,6 +486,8 @@ function EventDetail({
   const [adding, setAdding] = useState<Part | null>(null);
   const [editingSales, setEditingSales] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
+  /** Rev 20: the Humanitix ticket analytics, open in place of the page. */
+  const [analytics, setAnalytics] = useState(false);
   /** A line (guest, speaker, crew role, run sheet item, cost) open for editing. */
   const [line, setLine] = useState<{ part: Part; row: Row } | null>(null);
   const base = `/events/${eventId}`;
@@ -532,6 +535,18 @@ function EventDetail({
     );
   const { event: e, summary: s } = d;
   const days = daysTo(e.date);
+  if (analytics && e.humanitixEventId) {
+    return (
+      <TicketAnalytics
+        cfg={cfg}
+        token={token}
+        target={{ eventId }}
+        isArtist={false}
+        title={e.name}
+        back={{ to: e.name, onClick: () => setAnalytics(false) }}
+      />
+    );
+  }
   if (editingDetails) {
     return (
       <EventForm
@@ -616,6 +631,11 @@ function EventDetail({
                 </button>
               )}
             </span>
+          )}
+          {e.humanitixEventId && (
+            <Button size="sm" variant="ghost" className="w-fit" onClick={() => setAnalytics(true)}>
+              See ticket analytics
+            </Button>
           )}
           {!e.humanitixEventId && !editingSales && (
             <HumanitixLink

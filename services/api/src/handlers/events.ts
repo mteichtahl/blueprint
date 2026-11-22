@@ -27,6 +27,7 @@ import {
   gigGsi3Sk,
   gigMatches,
   GigPatch,
+  humanitixMoney,
   gigPatchAllowed,
   GIGS_GSI3PK,
   gigSk,
@@ -351,6 +352,11 @@ export const handler = handle(async (event) => {
           next.humanitixEventId = humanitixEventId;
           if (linkAccount) next.humanitixAccount = linkAccount;
         }
+      }
+      // Rev 20: money on a linked gig keeps Humanitix's figures unless the person typed their own.
+      if (fields.money) {
+        const m = humanitixMoney(fields.money, next.humanitix);
+        if (m) next.money = m;
       }
       if (venueId === null || (fields.venue !== undefined && !fields.venue)) delete next.venueId;
       else if (venueId !== undefined) next.venueId = venueId;

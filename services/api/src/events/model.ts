@@ -68,8 +68,10 @@ export interface Gig {
   humanitixEventId?: string;
   /** Rev 19: 'bmg' when Blueprint picked one of its own Humanitix events; else the artist's. */
   humanitixAccount?: 'bmg';
-  /** Tickets sold on Humanitix, from the hourly sync (rev 18). */
-  humanitix?: { ticketsSold: number; syncedAt: string };
+  /** Tickets sold on Humanitix, from the hourly sync (rev 18); net and gross (rev 20). */
+  humanitix?: { ticketsSold: number; syncedAt: string; netCents?: number; grossCents?: number };
+  /** Rev 20: false when the artist keeps the ticket analytics from Blueprint (counts and takings only). */
+  shareTicketAnalytics?: boolean;
   /** Tickets sold, takings and costs; absent until someone enters figures. */
   money?: Money;
   help?: {
@@ -85,6 +87,27 @@ export interface Gig {
 }
 
 // ── Money: tickets, takings, costs and profit (rev 7) ────────────────────
+/**
+ * Rev 20: a linked gig's money with Humanitix's figures in, unless the person
+ * chose their own. Returns the money unchanged (or undefined) when there's
+ * nothing to bring in yet.
+ */
+export function humanitixMoney(
+  money: Money | undefined,
+  hx: { ticketsSold: number; netCents?: number } | undefined,
+): Money | undefined {
+  if (!hx || hx.netCents === undefined) return money;
+  if (money?.takingsFromHumanitix === false) return money;
+  if (!money && hx.ticketsSold === 0 && hx.netCents === 0) return money;
+  const base = money ?? defaultMoney();
+  return {
+    ...base,
+    ticketsSold: hx.ticketsSold,
+    takingsCents: Math.max(0, hx.netCents),
+    takingsFromHumanitix: true,
+  };
+}
+
 /** The cost rows every gig starts with; any can be deleted and more added. */
 export const PRESET_COSTS = [
   'Venue',
@@ -111,6 +134,11 @@ export const Money = z
     /** Merchandise sold at the gig. */
     merchTakingsCents: cents.default(0),
     costs: z.array(CostRow).max(40).default([]),
+    /**
+     * Rev 20: on a gig linked to Humanitix, tickets sold and ticket takings
+     * follow Humanitix (net to the host) unless this is false ("Use my own figure").
+     */
+    takingsFromHumanitix: z.boolean().optional(),
   })
   .strict()
   .refine(
@@ -246,6 +274,8 @@ export const GigPatch = z
     /** Rev 18: link the gig to one of the artist's Humanitix events, or unlink it (null). */
     humanitixEventId: HumanitixEventId.nullable().optional(),
     shared: z.boolean().optional(),
+    /** Rev 20 (artist only): let Blueprint see this gig's full ticket analytics. */
+    shareTicketAnalytics: z.boolean().optional(),
     checklist: Checklist.optional(),
     money: Money.optional(),
     /** Ask Blueprint for help (artist): what with, and a note. Opens a request. */
@@ -270,6 +300,8 @@ export function gigPatchAllowed(
   if (patch.askHelp !== undefined && role !== 'artist') return 'Only the artist asks for help';
   if (patch.shared === false && gig.plannedBy === 'bmg') return 'Gigs Blueprint added stay shared';
   if (patch.shared !== undefined && role !== 'artist')
+    return 'Only the artist decides what to share';
+  if (patch.shareTicketAnalytics !== undefined && role !== 'artist')
     return 'Only the artist decides what to share';
   if (patch.helpDone && gig.help?.status !== 'open') return 'There is no open help request';
   return undefined;

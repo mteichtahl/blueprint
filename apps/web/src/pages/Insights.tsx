@@ -21,6 +21,7 @@ import {
   Tag,
   WaveLoader,
 } from '../components/ui.tsx';
+import { TicketAnalytics } from '../components/TicketAnalytics.tsx';
 
 /** Screens: X-Insights (Blueprint), the workspace Stats tab and the artist's My stats. */
 
@@ -459,6 +460,8 @@ export function HumanitixCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Rev 20: a linked gig's ticket analytics, open in place of the card. */
+  const [open, setOpen] = useState<{ gigId: string; title: string } | null>(null);
   const mine = hx.events !== undefined;
 
   async function run(key: string, done: string, step: () => Promise<unknown>) {
@@ -500,6 +503,17 @@ export function HumanitixCard({
       }),
     );
 
+  if (open)
+    return (
+      <TicketAnalytics
+        cfg={cfg}
+        token={token}
+        target={{ artistId, gigId: open.gigId }}
+        isArtist={mine}
+        title={open.title}
+        back={{ to: 'My stats', onClick: () => setOpen(null) }}
+      />
+    );
   return (
     <Card
       title={<span className="eyebrow">Tickets · Humanitix</span>}
@@ -540,11 +554,9 @@ export function HumanitixCard({
                 <tr>
                   <th scope="col">Gig</th>
                   <th scope="col">Tickets sold</th>
-                  {mine && (
-                    <th scope="col">
-                      <span className="sr-only">Link</span>
-                    </th>
-                  )}
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -558,18 +570,28 @@ export function HumanitixCard({
                       </span>
                     </td>
                     <td>{g.ticketsSold === null ? 'Syncing…' : n(g.ticketsSold)}</td>
-                    {mine && (
-                      <td>
+                    <td>
+                      <span className="flex flex-wrap justify-end gap-1.5">
                         <Button
                           size="sm"
                           variant="ghost"
-                          disabled={busy !== null}
-                          onClick={() => void unlink(g.gigId, g.title)}
+                          aria-label={`Ticket analytics for ${g.title}`}
+                          onClick={() => setOpen({ gigId: g.gigId, title: g.title })}
                         >
-                          Unlink
+                          Analytics
                         </Button>
-                      </td>
-                    )}
+                        {mine && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy !== null}
+                            onClick={() => void unlink(g.gigId, g.title)}
+                          >
+                            Unlink
+                          </Button>
+                        )}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
