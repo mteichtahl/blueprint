@@ -3,6 +3,17 @@ import type { AppConfig } from './config.ts';
 const b64url = (s: string) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
+ * Server text for a console line: line breaks and other control characters
+ * removed (so it can't fake extra lines) and kept short.
+ */
+const oneLine = (s: string): string =>
+  s
+    .replace(/\n|\r/g, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .slice(0, 200);
+
+/**
  * Subscribes to one inbox channel on AppSync Events (design 7.4). Events
  * carry ids only; the caller refetches through the API. Reconnects with
  * backoff; returns a function that closes the connection.
@@ -31,7 +42,23 @@ export function subscribeInbox(
     ]);
     ws.onopen = () => ws?.send(JSON.stringify({ type: 'connection_init' }));
     ws.onmessage = (msg) => {
-      const data = JSON.parse(String(msg.data)) as { type: string; event?: string };
+      const data = JSON.parse(String(msg.data)) as {
+        type: string;
+        event?: string;
+        errors?: { errorType?: string; message?: string }[];
+      };
+      // Say what happened to the subscription in the browser console, so a
+      // refused one (wrong channel, missing claims) isn't silent. Channel
+      // names and error types only: never tokens or event content.
+      if (data.type === 'subscribe_success') console.info(`[realtime] listening on ${channel}`);
+      else if (/error/.test(data.type))
+        console.warn(
+          `[realtime] ${oneLine(data.type)} on ${channel}: ${oneLine(
+            (data.errors ?? [])
+              .map((e) => [e.errorType, e.message].filter(Boolean).join(' '))
+              .join('; '),
+          )}`,
+        );
       if (data.type === 'connection_ack') {
         attempt = 0;
         if (connected) onReconnect?.();
@@ -45,6 +72,7 @@ export function subscribeInbox(
           }),
         );
       } else if (data.type === 'data' && data.event) {
+        console.debug(`[realtime] nudge on ${channel}`);
         try {
           onEvent(JSON.parse(data.event));
         } catch {
@@ -52,8 +80,11 @@ export function subscribeInbox(
         }
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (closed) return;
+      console.warn(
+        `[realtime] ${channel} closed (${ev.code}${ev.reason ? ` ${oneLine(ev.reason)}` : ''})`,
+      );
       attempt = Math.min(attempt + 1, 6);
       timer = setTimeout(connect, 1000 * 2 ** attempt);
     };
