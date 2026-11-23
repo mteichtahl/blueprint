@@ -18,7 +18,9 @@ export type LiveTopic =
   | 'artists'
   | 'contacts'
   | 'venues'
-  | 'events';
+  | 'events'
+  /** Consultation requests (rev 21). */
+  | 'enquiries';
 
 export interface LiveEvent {
   /** A topic, or '*' for "anything may have changed" (a reconnect, the tab coming back). */

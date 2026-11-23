@@ -3,7 +3,7 @@ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import type { SQSEvent } from 'aws-lambda';
 import nodemailer from 'nodemailer';
 import { pickAdminOrigin } from '@bmg/email';
-import { emailText, type Draft } from '../notifications/model.ts';
+import { emailText, enquiryAckEmail, type Draft } from '../notifications/model.ts';
 
 const secrets = new SecretsManagerClient({});
 const ssm = new SSMClient({});
@@ -70,14 +70,21 @@ export async function handler(event: SQSEvent) {
   });
   try {
     for (const record of event.Records) {
-      const { to, draft, team } = JSON.parse(record.body) as {
+      const { to, draft, team, enquiryAck } = JSON.parse(record.body) as {
         to: string;
-        draft: Draft;
+        draft?: Draft;
         /** The Blueprint team: links go to the admin address. */
         team?: boolean;
+        /** The public consultation form's "we've got it" (rev 21). */
+        enquiryAck?: { firstName: string };
       };
       const web = await webUrl();
-      const mail = emailText(draft, team ? pickAdminOrigin(web, process.env.ADMIN_ORIGIN) : web);
+      const mail = enquiryAck
+        ? enquiryAckEmail(enquiryAck.firstName, web)
+        : draft
+          ? emailText(draft, team ? pickAdminOrigin(web, process.env.ADMIN_ORIGIN) : web)
+          : undefined;
+      if (!mail) continue;
       await transport.sendMail({ from: creds.from, to, ...mail });
     }
     console.log(JSON.stringify({ level: 'info', event: 'mail.sent', count: event.Records.length }));

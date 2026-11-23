@@ -29,6 +29,7 @@ export const BrandKit = page(() => import('./BrandKit.tsx').then((m) => m.BrandK
 export const BmgConnectors = page(() => import('./Connectors.tsx').then((m) => m.BmgConnectors));
 export const MyConnectors = page(() => import('./Connectors.tsx').then((m) => m.MyConnectors));
 export const Contacts = page(() => import('./Contacts.tsx').then((m) => m.Contacts));
+export const Enquiries = page(() => import('./Enquiries.tsx').then((m) => m.Enquiries));
 export const Events = page(() => import('./Events.tsx').then((m) => m.Events));
 export const AllGigs = page(() => import('./Gigs.tsx').then((m) => m.AllGigs));
 export const ArtistGigs = page(() => import('./Gigs.tsx').then((m) => m.ArtistGigs));

@@ -12,9 +12,19 @@ export interface AppConfig {
   socialProviders?: string[];
   /** Text-message codes are on as a second factor. */
   smsMfa?: boolean;
+  /** The public consultation form's AWS WAF CAPTCHA (rev 21); absent until it's set up. */
+  captcha?: { scriptUrl: string; apiKey: string };
 }
 
 let cached: AppConfig | undefined;
+
+/** The settings without the sign-in checks, for public pages (the consultation form). */
+export async function loadPublicConfig(): Promise<Partial<AppConfig>> {
+  if (cached) return cached;
+  const res = await fetch('/config.json', { cache: 'no-store' });
+  if (!res.ok) return {};
+  return (await res.json()) as Partial<AppConfig>;
+}
 
 export async function loadConfig(): Promise<AppConfig> {
   if (cached) return cached;

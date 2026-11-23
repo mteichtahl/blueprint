@@ -12,6 +12,7 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import webpush from 'web-push';
 import {
@@ -325,11 +326,61 @@ async function enrich(
  * they were emailed about this conversation in the last 30 minutes.
  */
 export async function handler(event: { 'detail-type': string; detail: Record<string, unknown> }) {
+  if (event['detail-type'] === 'enquiry.pickedUp') return pickedUp(event.detail);
   const e = await enrich({ ...event.detail, type: event['detail-type'] });
   if (!e) return;
   const all = await everyone();
   const groups = keepTestRunsQuiet(e, planGroups(e, all), all).filter((g) => g.to.length > 0);
   for (const g of groups) await deliver(e, g);
+}
+
+/**
+ * A consultation request was picked up (rev 21): everyone else's "New
+ * consultation request" notification for it now says who has it and stops
+ * counting as unread. Nothing new is sent.
+ */
+async function pickedUp(d: Record<string, unknown>) {
+  const enquiryId = String(d.enquiryId ?? '');
+  const bySub = String(d.bySub ?? '');
+  if (!/^[a-z0-9]{12,40}$/.test(enquiryId)) return;
+  const byName = String(d.byName ?? 'Someone');
+  const name = String(d.name ?? 'Their');
+  const others = (await everyone()).filter(
+    (r) => (r.role === 'bmg-admin' || r.role === 'bmg-staff') && r.sub !== bySub,
+  );
+  for (const r of others) {
+    const res = await db.send(
+      new QueryCommand({
+        TableName: env('MAIN_TABLE'),
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :n)',
+        FilterExpression: '#ref = :ref',
+        ExpressionAttributeNames: { '#ref': 'ref' },
+        ExpressionAttributeValues: {
+          ':pk': notificationPk(r.sub),
+          ':n': 'N#',
+          ':ref': `enquiry:${enquiryId}`,
+        },
+        ScanIndexForward: false,
+        Limit: 300,
+      }),
+    );
+    for (const n of res.Items ?? []) {
+      await db.send(
+        new UpdateCommand({
+          TableName: env('MAIN_TABLE'),
+          Key: { PK: n.PK, SK: n.SK },
+          UpdateExpression: 'SET title = :t, body = :b, #read = :yes',
+          ExpressionAttributeNames: { '#read': 'read' },
+          ExpressionAttributeValues: {
+            ':t': `${byName} picked up ${name}’s consultation request`,
+            ':b': 'They’re looking after it. Open it to see where it’s at.',
+            ':yes': true,
+          },
+        }),
+      );
+      await publish([`/inbox/user-${r.sub}`], { notification: n.notificationId });
+    }
+  }
 }
 
 /** One wording to its recipients: in-app, realtime, push and email. */

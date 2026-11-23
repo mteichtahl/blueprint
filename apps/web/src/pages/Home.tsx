@@ -64,6 +64,7 @@ import {
   BmgConnectors,
   BrandKit,
   Contacts,
+  Enquiries,
   Events,
   Insights,
   Invitations,
@@ -81,6 +82,7 @@ import {
 } from './lazy.tsx';
 import { markdownToText } from '../lib/markdown.ts';
 import { TicketTracker } from '../components/TicketTracker.tsx';
+import { EnquiriesCard } from '../components/EnquiriesCard.tsx';
 import type { TicketGig } from '../lib/tickets.ts';
 import { FileThumb } from '../components/FileThumb.tsx';
 import { useLive } from '../lib/live.ts';
@@ -154,10 +156,14 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   // An event or gig opened from Studio HQ's Tickets card (n remounts the page).
   const [eventTarget, setEventTarget] = useState<{ id: string; n: number } | null>(null);
   const [gigTarget, setGigTarget] = useState<{ gig: Gig; n: number } | null>(null);
+  // Consultation requests (rev 21): how many are open, and one opened from a notification.
+  const [openEnquiries, setOpenEnquiries] = useState(0);
+  const [enquiryTarget, setEnquiryTarget] = useState<{ id: string; n: number } | null>(null);
   useEffect(() => {
     // Leaving the page drops the target, so the menu opens it as usual next time.
     if (view !== 'events') setEventTarget(null);
     if (view !== 'gigs') setGigTarget(null);
+    if (view !== 'enquiries') setEnquiryTarget(null);
   }, [view]);
 
   const load = useCallback(async () => {
@@ -176,6 +182,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   // Live updates (rev 17): the roster (an artist signing in), reviews, gigs and to-dos.
   const live = useLive(['artists', 'reviews', 'gigs', 'todos', 'plan']);
   useEffect(() => void load().catch(() => undefined), [load, live]);
+  const enquiriesLive = useLive(['enquiries']);
+  useEffect(() => {
+    api<{ open: number }>(cfg, token, 'GET', '/enquiries?summary=1')
+      .then((c) => setOpenEnquiries(c.open))
+      .catch(() => undefined);
+  }, [cfg, token, enquiriesLive]);
 
   const inbox = useInbox(cfg, token, me);
   const notes = useNotifications(cfg, token, me.sub);
@@ -229,6 +241,12 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     if (brand) return openWorkspace(brand[1]!, { tab: 'brand' });
     const assets = /^assets:(art_[a-z0-9]+)$/.exec(link);
     if (assets) return openWorkspace(assets[1]!, { tab: 'library', libKind: 'assets' });
+    // A consultation request (rev 21).
+    const enquiry = /^enquiry:([a-z0-9]+)$/.exec(link);
+    if (enquiry) {
+      setEnquiryTarget({ id: enquiry[1]!, n: Date.now() });
+      return setView('enquiries');
+    }
     setView(LINK_VIEWS[link] ?? 'overview');
   };
   useDeepLink(goTo);
@@ -239,7 +257,19 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
   const unread = inbox.unreadChats;
   const reviewsFor = (id: string) => openReviews.filter((s) => s.artistId === id).length;
   const sections: NavSection[] = [
-    { items: [{ id: 'overview', label: 'Overview', icon: 'home' }] },
+    {
+      items: [
+        { id: 'overview', label: 'Overview', icon: 'home' },
+        // Consultation requests from the public form (rev 21).
+        {
+          id: 'enquiries',
+          label: 'Enquiries',
+          icon: 'mail',
+          badge: openEnquiries || undefined,
+          urgent: { waiting: openEnquiries, priority: 5 },
+        },
+      ],
+    },
     {
       label: 'ARTIST WORKSPACES',
       // One searchable dropdown for every artist, instead of a row each.
@@ -335,6 +365,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
         current={view}
         onNavigate={(v) => {
           if (v === 'meetings') setMeetingsTarget({ kind: 'list' });
+          if (v === 'enquiries') setEnquiryTarget(null);
           setWsTarget(undefined);
           setReviewTarget(null);
           setView(v);
@@ -376,6 +407,26 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             />
           </>
         )}
+        {view === 'enquiries' && (
+          <>
+            <PageHeader
+              eyebrow="Studio HQ · Consultation requests"
+              title="Enquiries"
+              sub="Requests from the public consultation form. Pick one up to make it yours."
+            />
+            <Enquiries
+              key={enquiryTarget?.n ?? 0}
+              cfg={cfg}
+              token={token}
+              me={me}
+              artists={artists}
+              target={enquiryTarget}
+              onOpenArtist={(id) => setView(`artist:${id}`)}
+              onReauth={onReauth}
+              onInvited={() => void load()}
+            />
+          </>
+        )}
         {view === 'overview' && (
           <StudioHq
             cfg={cfg}
@@ -398,6 +449,10 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             onOpenGig={(gig) => {
               setGigTarget({ gig: gig as Gig, n: Date.now() });
               setView('gigs');
+            }}
+            onOpenEnquiry={(id) => {
+              setEnquiryTarget({ id, n: Date.now() });
+              setView('enquiries');
             }}
           />
         )}
@@ -686,6 +741,7 @@ function StudioHq({
   onOpenChat,
   onOpenEvent,
   onOpenGig,
+  onOpenEnquiry,
 }: {
   cfg: AppConfig;
   token: string;
@@ -702,6 +758,8 @@ function StudioHq({
   /** Tickets card: open an event, or a gig's page. */
   onOpenEvent: (eventId: string) => void;
   onOpenGig: (gig: TicketGig) => void;
+  /** Enquiries card (rev 21): open a consultation request. */
+  onOpenEnquiry: (enquiryId: string) => void;
 }) {
   const [plans, setPlans] = useState<Record<string, PlanResponse>>({});
   // "My plans" (rev 12): the artists whose plan this person owns.
@@ -953,6 +1011,12 @@ function StudioHq({
           onOpenEvent={onOpenEvent}
           onOpenGig={onOpenGig}
           onNavigate={onNavigate}
+        />
+        <EnquiriesCard
+          cfg={cfg}
+          token={token}
+          onOpen={onOpenEnquiry}
+          onAll={() => onNavigate('enquiries')}
         />
       </div>
 

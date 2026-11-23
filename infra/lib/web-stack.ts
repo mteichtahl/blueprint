@@ -52,6 +52,11 @@ export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly userPool: IUserPool;
   /** API Gateway REST API id; its `v1` stage is served under /v1/* on the same origin. */
   readonly restApiId: string;
+  /**
+   * The consultation requests API (rev 21): /v1/enquiries* and the public
+   * form's /public/enquiries go there instead.
+   */
+  readonly enquiriesApiId: string;
   /** The quarantine bucket the browser uploads to (presigned POST). */
   readonly uploadOrigin: string;
   /** Where downloads come from (artist-data and org-data buckets): asset thumbnails and previews. */
@@ -132,56 +137,66 @@ export class WebStack extends BmgStack {
     // is sent there to pick the provider, and swaps the code for tokens there.
     const social = props.socialProviders ?? [];
     const loginHost = `${names.cognitoDomainPrefix(cfg, env)}.auth.${this.region}.amazoncognito.com`;
-    const headers = new ResponseHeadersPolicy(this, 'SecurityHeaders', {
-      responseHeadersPolicyName: `${p}-web-security`,
-      securityHeadersBehavior: {
-        contentSecurityPolicy: {
-          override: true,
-          contentSecurityPolicy: [
-            "default-src 'self'",
-            "script-src 'self'",
-            "style-src 'self'",
-            "font-src 'self'",
-            `img-src 'self' data: blob: ${props.downloadOrigins.join(' ')}`,
-            // blob: lets the browser read a picked video locally to draw its preview.
-            `media-src 'self' blob: ${props.downloadOrigins.join(' ')}`,
-            // Download origins: the app reads images itself (brand kit PDF, profile pictures).
-            `connect-src 'self' ${cognitoIdp}${social.length ? ` https://${loginHost}` : ''} ${props.uploadOrigin} ${props.downloadOrigins.join(' ')} wss://${props.realtime.realtimeDns}`,
-            // Venue details show the address on an embedded Google map, and the
-            // venue's own website beside it (sandboxed; https sites only).
-            'frame-src https:',
-            "frame-ancestors 'none'",
-            "base-uri 'none'",
-            "form-action 'self'",
-            "object-src 'none'",
-          ].join('; '),
-        },
-        strictTransportSecurity: {
-          override: true,
-          accessControlMaxAge: Duration.days(365),
-          includeSubdomains: true,
-          preload: false,
-        },
-        contentTypeOptions: { override: true },
-        frameOptions: { override: true, frameOption: HeadersFrameOption.DENY },
-        referrerPolicy: { override: true, referrerPolicy: HeadersReferrerPolicy.NO_REFERRER },
-      },
-      // Phase 6 review (finding W2): turn off browser features the app never
-      // uses, and keep other sites' windows from holding a reference to ours.
-      customHeadersBehavior: {
-        customHeaders: [
-          {
-            header: 'Permissions-Policy',
-            value:
-              'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), browsing-topics=()',
+    /**
+     * The Content-Security-Policy. The public consultation form (/consult,
+     * rev 21) also loads the AWS WAF CAPTCHA script, which calls AWS WAF's
+     * own domains and styles the puzzle inline; only that page allows them.
+     */
+    const csp = (captcha = false) => {
+      const waf = captcha ? ' https://*.awswaf.com' : '';
+      return [
+        "default-src 'self'",
+        `script-src 'self'${waf}`,
+        `style-src 'self'${captcha ? " 'unsafe-inline'" : ''}`,
+        "font-src 'self'",
+        `img-src 'self' data: blob: ${props.downloadOrigins.join(' ')}${waf}`,
+        // blob: lets the browser read a picked video locally to draw its preview.
+        `media-src 'self' blob: ${props.downloadOrigins.join(' ')}${waf}`,
+        // Download origins: the app reads images itself (brand kit PDF, profile pictures).
+        `connect-src 'self' ${cognitoIdp}${social.length ? ` https://${loginHost}` : ''} ${props.uploadOrigin} ${props.downloadOrigins.join(' ')} wss://${props.realtime.realtimeDns}${waf}`,
+        // Venue details show the address on an embedded Google map, and the
+        // venue's own website beside it (sandboxed; https sites only).
+        'frame-src https:',
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "object-src 'none'",
+      ].join('; ');
+    };
+    const securityHeaders = (id: string, name: string, captcha = false) =>
+      new ResponseHeadersPolicy(this, id, {
+        responseHeadersPolicyName: name,
+        securityHeadersBehavior: {
+          contentSecurityPolicy: { override: true, contentSecurityPolicy: csp(captcha) },
+          strictTransportSecurity: {
             override: true,
+            accessControlMaxAge: Duration.days(365),
+            includeSubdomains: true,
+            preload: false,
           },
-          { header: 'Cross-Origin-Opener-Policy', value: 'same-origin', override: true },
-        ],
-      },
-    });
+          contentTypeOptions: { override: true },
+          frameOptions: { override: true, frameOption: HeadersFrameOption.DENY },
+          referrerPolicy: { override: true, referrerPolicy: HeadersReferrerPolicy.NO_REFERRER },
+        },
+        // Phase 6 review (finding W2): turn off browser features the app never
+        // uses, and keep other sites' windows from holding a reference to ours.
+        customHeadersBehavior: {
+          customHeaders: [
+            {
+              header: 'Permissions-Policy',
+              value:
+                'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), browsing-topics=()',
+              override: true,
+            },
+            { header: 'Cross-Origin-Opener-Policy', value: 'same-origin', override: true },
+          ],
+        },
+      });
+    const headers = securityHeaders('SecurityHeaders', `${p}-web-security`);
+    const consultHeaders = securityHeaders('ConsultHeaders', `${p}-web-consult`, true);
 
     const apiDomain = `${props.restApiId}.execute-api.${this.region}.amazonaws.com`;
+    const enquiriesDomain = `${props.enquiriesApiId}.execute-api.${this.region}.amazonaws.com`;
     // Single-page app routing at the edge, for the site only: paths without a
     // file extension (e.g. /auth/callback) load index.html. Distribution-level
     // error responses would also rewrite the API's own 403/404 answers into
@@ -262,6 +277,40 @@ export class WebStack extends BmgStack {
         ],
       },
       additionalBehaviors: {
+        // Consultation requests (rev 21): their own API, listed before /v1/*
+        // and /public/* so CloudFront picks them first.
+        '/v1/enquiries*': {
+          origin: new HttpOrigin(enquiriesDomain, {
+            protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY,
+          }),
+          viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+          cachePolicy: CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          responseHeadersPolicy: headers,
+        },
+        '/public/enquiries': {
+          // The stage is the origin path: /public/enquiries → /v1/public/enquiries.
+          origin: new HttpOrigin(enquiriesDomain, {
+            protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY,
+            originPath: '/v1',
+          }),
+          viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+          cachePolicy: CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          responseHeadersPolicy: headers,
+        },
+        // The public consultation form's page: the app, with the CAPTCHA allowed.
+        '/consult*': {
+          origin: S3BucketOrigin.withOriginAccessControl(site),
+          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          responseHeadersPolicy: consultHeaders,
+          compress: true,
+          functionAssociations: [
+            { function: spaRouting, eventType: FunctionEventType.VIEWER_REQUEST },
+          ],
+        },
         '/v1/*': {
           origin: new HttpOrigin(apiDomain, { protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY }),
           viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
@@ -418,6 +467,8 @@ export class WebStack extends BmgStack {
           socialProviders: social,
           smsMfa: !!props.sms,
           realtime: { http: props.realtime.httpDns, ws: props.realtime.realtimeDns },
+          // The public consultation form's CAPTCHA (rev 21), once `blueprint enquiries captcha-key` has run.
+          ...(cfg.environments[env].captcha ? { captcha: cfg.environments[env].captcha } : {}),
         }),
       ],
     });

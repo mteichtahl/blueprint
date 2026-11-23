@@ -912,6 +912,15 @@ a:hover {
 .dark :focus-visible {
   outline-color: #f1f4f7;
 }
+/* The searchable drop-down (rev 21): the focus ring goes round the whole
+   rounded search box, not a square inside it. */
+.ss-search:has(input:focus-visible) {
+  outline: 2px solid #011935;
+  outline-offset: 2px;
+}
+.ss-search input:focus-visible {
+  outline: none;
+}
 /* Focus not obscured (2.4.11): keep a focused control clear of the sticky
    desktop top bar (64px) and the phone's fixed bottom tab bar. */
 /* The skip link's target: focus moves there, but it isn't a control. */

@@ -8,6 +8,7 @@ import { expect, newContext, settle, signIn, shellOf, test, VERSION } from '../s
 
 const BMG_SCREENS = [
   'Overview',
+  'Enquiries',
   'Artist gigs',
   'Artists & applications',
   'Plan templates',

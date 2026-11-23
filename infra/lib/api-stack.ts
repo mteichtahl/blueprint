@@ -113,6 +113,8 @@ export const IMAGE_ROUTES: ReadonlyArray<readonly [string, string]> = [
 export class ApiStack extends BmgStack {
   readonly api: RestApi;
   readonly realtime: EventApi;
+  /** The token authorizer, reused by the enquiries API (rev 21). */
+  readonly authorizerFunctionArn: string;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     const env = props.envName;
@@ -407,6 +409,7 @@ export class ApiStack extends BmgStack {
     const putEvents = (f: BmgFunction) =>
       allow(f, 'PublishEvents', ['events:PutEvents'], [props.bus.eventBusArn]);
 
+    this.authorizerFunctionArn = authorizerFn.functionArn;
     allow(authorizerFn, 'ReadStepUpSessions', ['dynamodb:GetItem'], [sessions]);
     allow(
       authorizerFn,
@@ -850,6 +853,8 @@ export class ApiStack extends BmgStack {
         'dynamodb:GetItem',
         'dynamodb:Query',
         'dynamodb:DeleteItem',
+        // A consultation request picked up: others' notifications about it say who has it (rev 21).
+        'dynamodb:UpdateItem',
       ],
       [main],
     );
@@ -881,6 +886,10 @@ export class ApiStack extends BmgStack {
           'file.rejected',
           'gig.helpRequested',
           'todo.commented',
+          // Consultation requests from the public form (rev 21).
+          'enquiry.received',
+          'enquiry.pickedUp',
+          'enquiry.takenOver',
           // A meeting shared with the artist: the to-dos its actions made (rev 11 change).
           'todo.shared',
           // Rev 15: to-dos artists send their plan owner, sent back, and finished.

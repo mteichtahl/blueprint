@@ -7,6 +7,7 @@ import type { AppConfig } from '../src/lib/config.ts';
 import { Home } from '../src/pages/Home.tsx';
 import { SignIn } from '../src/pages/SignIn.tsx';
 import { NewsletterSignup } from '../src/pages/NewsletterSignup.tsx';
+import { Consult } from '../src/pages/Consult.tsx';
 import { ArtistTodosCard } from '../src/pages/Profile.tsx';
 import { AskOwner } from '../src/pages/Todos.tsx';
 
@@ -390,7 +391,36 @@ const ANALYTICS = {
   ],
 };
 
+/** Rev 21: a consultation request, open and from the public form. */
+const ENQUIRY = {
+  enquiryId: 'enq000000000000001',
+  status: 'in-progress',
+  name: 'Mia Torres',
+  email: 'mia@example.com',
+  country: 'AU',
+  countryName: 'Australia',
+  receivedAt: '2026-11-05T00:00:00.000Z',
+  updatedAt: now,
+  ownerSub: 'u1',
+  ownerName: 'Kyra Teichtahl',
+  resends: 1,
+};
+const ENQUIRY_DETAIL = {
+  ...ENQUIRY,
+  phone: '+61412345678',
+  aboutMe: 'Singer-songwriter in Brunswick.',
+  howCanWeHelp: 'Planning my first EP.',
+  pickedUpAt: now,
+  notes: [{ noteId: 'n1', bySub: 'u1', byName: 'Kyra Teichtahl', at: now, text: 'Booked a call.' }],
+  activity: [
+    { actId: 'a2', kind: 'pickedUp', at: now, bySub: 'u1', byName: 'Kyra Teichtahl' },
+    { actId: 'a1', kind: 'received', at: '2026-11-05T00:00:00.000Z' },
+  ],
+};
+
 function answer(method: string, path: string): [number, unknown] {
+  if (/\/enquiries\?summary=1/.test(path))
+    return [200, { open: 1, inProgress: 1, mine: 1, convertedRecently: 0, oldestOpenAt: now }];
   if (/[?&]analytics=1/.test(path))
     return [
       200,
@@ -417,6 +447,27 @@ function answer(method: string, path: string): [number, unknown] {
   }
   if (method !== 'GET') return [200, {}];
   const routes: [RegExp, unknown][] = [
+    // Rev 21: consultation requests.
+    [
+      /^\/enquiries$/,
+      {
+        enquiries: [
+          ENQUIRY,
+          {
+            ...ENQUIRY,
+            enquiryId: 'enq000000000000002',
+            status: 'open',
+            name: 'Jordan Lee',
+            country: 'NZ',
+            countryName: 'New Zealand',
+            ownerSub: undefined,
+            ownerName: undefined,
+            resends: 0,
+          },
+        ],
+      },
+    ],
+    [/^\/enquiries\/[a-z0-9]+$/, ENQUIRY_DETAIL],
     // Rev 18: the artist's meetings, Humanitix in My stats, and a private contact.
     [
       /^\/meetings\/mine$/,
@@ -1016,6 +1067,31 @@ describe('WCAG 2.2 AA (axe-core)', () => {
     expect(await violations()).toEqual([]);
   });
 
+  it('the public consultation form, with the country list open and an error', async () => {
+    render(<Consult cfg={{}} />);
+    await settle();
+    expect(screen.getByRole('heading', { name: 'Book a consultation' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Country/ }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search countries' }), {
+      target: { value: 'au' },
+    });
+    expect(await violations()).toEqual([]);
+  });
+
+  it('a consultation request: Mark converted, then Close', async () => {
+    render(<Home {...props('bmg-admin')} />);
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Enquiries/ })[0]!);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: /^All/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Mia Torres' })[0]!);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark converted' }));
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Close…' }));
+    expect(await violations()).toEqual([]);
+  });
+
   it('the public newsletter sign-up page', async () => {
     render(<NewsletterSignup />);
     await settle();
@@ -1039,6 +1115,7 @@ describe('WCAG 2.2 AA (axe-core)', () => {
     'Connectors',
     'Access & permissions',
     'AI prompts',
+    'Enquiries',
   ];
   it.each(BMG_VIEWS)('BMG desktop: %s', async (label) => {
     render(<Home {...props('bmg-admin')} />);

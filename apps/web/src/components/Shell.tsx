@@ -1004,18 +1004,21 @@ export function AuthFrame({
   eyebrow,
   title,
   sub,
+  ribbon = 'ARTISTS ONLY ★ ALL ACCESS',
   children,
 }: {
   eyebrow: string;
   title: string;
   sub?: string;
+  /** The tilted ribbon's words (the consultation form says its own, rev 21). */
+  ribbon?: string;
   children: ReactNode;
 }) {
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row">
       <aside className="bp flex flex-col gap-3 overflow-hidden px-6 pt-[calc(20px+env(safe-area-inset-top))] pb-6 md:w-[44%] md:justify-between md:p-12">
         <div className="flex flex-col gap-4">
-          <Ribbon text="ARTISTS ONLY ★ ALL ACCESS" className="-mx-12 md:-mx-16" />
+          <Ribbon text={ribbon} className="-mx-12 md:-mx-16" />
           <span className="flex justify-center">
             <Logo />
           </span>

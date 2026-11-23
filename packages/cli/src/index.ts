@@ -5,6 +5,7 @@ import { aiOptOut, aiStatus } from './commands/ai.ts';
 import { adminCreate } from './commands/admin.ts';
 import { bootstrap } from './commands/bootstrap.ts';
 import { dnsCert, dnsCheck, dnsRecordsCmd } from './commands/dns.ts';
+import { enquiriesCaptchaKey } from './commands/enquiries.ts';
 import { doctor } from './commands/doctor.ts';
 import { e2eSetup } from './commands/e2e.ts';
 import { connectorsSetup, connectorsStatus } from './commands/connectors.ts';
@@ -142,6 +143,13 @@ dns
   .description('check the records are live and the certificate is issued (read-only)')
   .option('--env <env>', 'staging or prod', 'staging')
   .action(wrap((o: { env: string }) => dnsCheck({ ...g(), ...o })));
+
+const enquiries = program.command('enquiries').description('the public consultation form (rev 21)');
+enquiries
+  .command('captcha-key')
+  .description("make the form's AWS WAF CAPTCHA key and record it in bmg.config.json")
+  .option('--env <env>', 'staging or prod', 'staging')
+  .action(wrap((o: { env: string }) => enquiriesCaptchaKey({ ...g(), ...o })));
 
 const pipeline = program.command('pipeline').description('CI/CD');
 pipeline
