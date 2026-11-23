@@ -53,13 +53,14 @@ export async function enquiriesCaptchaKey(opts: EnquiriesOptions): Promise<void>
     return;
   }
   const waf = new WAFV2Client({ region });
-  const acl = await waf.send(new GetWebACLCommand({ Name: name, Id: id, Scope: 'REGIONAL' }));
-  const integration = acl.ApplicationIntegrationURL;
-  if (!integration) throw new Error(`The web ACL ${name} has no CAPTCHA integration address yet.`);
-  const scriptUrl = captchaScriptUrl(integration);
+  // The web ACL must exist (it carries the CAPTCHA rule the page answers).
+  await waf.send(new GetWebACLCommand({ Name: name, Id: id, Scope: 'REGIONAL' }));
 
-  const existing = await waf.send(new ListAPIKeysCommand({ Scope: 'REGIONAL', Limit: 100 }));
-  let apiKey = existing.APIKeySummaries?.find((k) =>
+  // The CAPTCHA script address is the account's, per Region: ListAPIKeys
+  // returns it. (GetWebACL only gives one for Bot Control or Fraud Control.)
+  const listKeys = () => waf.send(new ListAPIKeysCommand({ Scope: 'REGIONAL', Limit: 100 }));
+  let keys = await listKeys();
+  let apiKey = keys.APIKeySummaries?.find((k) =>
     sameDomains(k.TokenDomains ?? [], domains),
   )?.APIKey;
   if (apiKey) ok(`Found a key for ${domains.join(', ')}`);
@@ -81,7 +82,14 @@ export async function enquiriesCaptchaKey(opts: EnquiriesOptions): Promise<void>
       opts,
     );
     if (!apiKey) return;
+    keys = await listKeys();
   }
+  const integration = keys.ApplicationIntegrationURL;
+  if (!integration)
+    throw new Error(
+      `AWS WAF gave no CAPTCHA integration address for ${region}. Try again in a minute.`,
+    );
+  const scriptUrl = captchaScriptUrl(integration);
 
   const was = cfg.environments[env].captcha;
   if (was?.apiKey === apiKey && was.scriptUrl === scriptUrl) {
