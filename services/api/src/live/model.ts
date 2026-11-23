@@ -5,6 +5,7 @@
  * data, the artist id — never item ids or content. Clients always refetch
  * through the API, which applies the access rules as usual.
  */
+import { artistChannel } from '../channels.ts';
 
 /** What changed, as screens listen for it. */
 export type LiveTopic =
@@ -63,7 +64,7 @@ export function nudgeFor(pk: string, sk: string): LiveNudge | undefined {
     const artistId = pk.slice('ARTIST#'.length);
     const topic = ARTIST_TOPICS[sk.split('#')[0] ?? ''];
     if (!artistId || !topic) return undefined;
-    return { topic, artistId, channels: [`/inbox/artist-${artistId}`, BMG] };
+    return { topic, artistId, channels: [artistChannel(artistId), BMG] };
   }
   const org = ORG_TOPICS[pk];
   if (org) return { topic: org.topic, channels: org.artists ? [BMG, ALL_ARTISTS] : [BMG] };

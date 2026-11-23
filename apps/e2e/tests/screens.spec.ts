@@ -235,7 +235,7 @@ test.describe('Live updates (rev 17)', () => {
     });
     await page.reload();
     await settle(page);
-    const channel = `/inbox/artist-${artistId}`;
+    const channel = `/inbox/artist-${artistId.split('_').join('-')}`;
     await expect
       .poll(() => lines.some((l) => l.includes(`listening on ${channel}`)), {
         message: `the artist's live-update channel should subscribe.\n${lines.join('\n') || '(no [realtime] lines)'}`,

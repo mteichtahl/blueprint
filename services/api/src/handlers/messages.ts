@@ -83,6 +83,7 @@ import {
 } from '../messages/model.ts';
 import { chatUseSk, fileUsePk } from '../files/model.ts';
 import { people, type Person } from '../files/people.ts';
+import { artistChannel } from '../channels.ts';
 import { publish } from '../realtime.ts';
 import { ROSTER_GSI1PK } from '../workspace/model.ts';
 import {
@@ -1600,7 +1601,7 @@ export const handler = handle(async (event) => {
         systemNote(leaving ? `${name} left` : `${who} removed ${name}`),
         who,
       );
-      await publish([`/inbox/artist-${artistId}`], { conversationId: conv.conversationId });
+      await publish([artistChannel(artistId)], { conversationId: conv.conversationId });
       await audit(event, 'chat.removeMember', 'success', { conversationId: conv.conversationId });
       return json(200, { removed: artistId });
     }

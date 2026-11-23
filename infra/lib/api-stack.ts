@@ -88,7 +88,10 @@ export function onSubscribe(ctx) {
   if (target === 'bmg' && bmg) return;
   if (bmg && ctx.identity && ctx.identity.sub && target === 'staff-' + ctx.identity.sub) return;
   if (ctx.identity && ctx.identity.sub && target === 'user-' + ctx.identity.sub) return;
-  if (claims.role === 'artist' && (target === 'all-artists' || target === 'artist-' + claims.artistId)) return;
+  // Channel segments allow only letters, digits and dashes: the artist id's
+  // underscore is a dash in its channel name (services/api/src/channels.ts).
+  const artist = claims.artistId ? 'artist-' + claims.artistId.split('_').join('-') : '';
+  if (claims.role === 'artist' && (target === 'all-artists' || (artist && target === artist))) return;
   util.unauthorized();
 }
 export function onPublish(ctx) {
