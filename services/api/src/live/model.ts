@@ -18,7 +18,9 @@ export type LiveTopic =
   | 'artists'
   | 'contacts'
   | 'venues'
-  | 'events';
+  | 'events'
+  /** Consultation requests (rev 21), Blueprint only. */
+  | 'enquiries';
 
 export interface LiveNudge {
   topic: LiveTopic;
@@ -53,6 +55,7 @@ const ORG_TOPICS: Record<string, { topic: LiveTopic; artists: boolean }> = {
   'ORG#library': { topic: 'files', artists: true },
   'ORG#events': { topic: 'events', artists: false },
   'ORG#meetings': { topic: 'meetings', artists: false },
+  'ORG#enquiries': { topic: 'enquiries', artists: false },
 };
 
 // The stream filter (infra/lib/notify-stack.ts, LIVE_PK_PREFIXES) passes only

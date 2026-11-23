@@ -84,6 +84,15 @@ Plus invitation tracking, finished reviews, and a smarter library.
 - **Ask for a change** beside Export to PDF on My plan: say what should
   change, and it goes to your plan owner as a to-do. You're told when it's
   done.
+- **Book a consultation:** a public form at `/consult` (no account needed)
+  where anyone can ask Blueprint for a consultation: name, email, country
+  (with search), an optional mobile, about them and how Blueprint can help,
+  behind a quick CAPTCHA. They get a short "we've got it" email.
+- **Enquiries** (Blueprint): everyone is told when a request comes in. The
+  Enquiries page lists them (Open first, oldest at the top) and a request
+  opens its page: **Pick up** makes it yours, then **Mark converted** (pick
+  the artist, or invite them as a new one) or **Close** with a reason. Notes
+  for the team, a history of who did what, and an Enquiries card on Studio HQ.
 
 ### Improved
 

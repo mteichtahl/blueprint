@@ -1174,3 +1174,101 @@ describe('CloudFront address redirect', () => {
     expect(run(spaRoutingCode('artist-beta.example.com'), req).uri).toBe('/index.html');
   });
 });
+
+describe('consultation requests (rev 21)', () => {
+  const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.enquiries));
+  const web = Template.fromStack(stacks.environments[1]!.web);
+
+  it('puts an AWS WAF CAPTCHA in front of the public form only', () => {
+    const acl = Object.values(prod!.findResources('AWS::WAFv2::WebACL'))[0]!.Properties;
+    const captcha = acl.Rules.find((r: { Name: string }) => r.Name === 'PublicFormCaptcha');
+    expect(captcha.Action).toEqual({ Captcha: {} });
+    const [method, path] = captcha.Statement.AndStatement.Statements;
+    expect(method.ByteMatchStatement.SearchString).toBe('POST');
+    expect(path.RegexMatchStatement.RegexString).toBe('^/(v1/)?public/enquiries/?$');
+    expect(acl.CaptchaConfig).toEqual({ ImmunityTimeProperty: { ImmunityTime: 300 } });
+    // Tokens come from the app's own addresses (the request arrives through CloudFront).
+    expect(acl.TokenDomains).toEqual([
+      names.webHost(cfg, 'prod', 'artist'),
+      names.webHost(cfg, 'prod', 'admin'),
+      cfg.domain.root,
+    ]);
+    expect(acl.Rules.map((r: { Name: string }) => r.Name)).toEqual(
+      expect.arrayContaining([
+        'RateLimitPerIp',
+        'AWSManagedRulesCommonRuleSet',
+        'AWSManagedRulesAmazonIpReputationList',
+        'BodySizeLimit',
+      ]),
+    );
+    prod!.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
+  });
+
+  it('needs a sign-in on every route but the public form', () => {
+    const methods = Object.values(prod!.findResources('AWS::ApiGateway::Method')).map(
+      (m) => m.Properties,
+    );
+    const open = methods.filter(
+      (m) => m.HttpMethod !== 'OPTIONS' && m.AuthorizationType === 'NONE',
+    );
+    expect(open).toHaveLength(1);
+    expect(open[0]!.HttpMethod).toBe('POST');
+    expect(
+      methods.filter((m) => m.AuthorizationType === 'CUSTOM').map((m) => m.HttpMethod),
+    ).toEqual(expect.arrayContaining(['GET', 'ANY']));
+    // The same token authorizer function as the main API.
+    prod!.hasResourceProperties('AWS::ApiGateway::Authorizer', {
+      Type: 'REQUEST',
+      AuthorizerResultTtlInSeconds: 0,
+    });
+  });
+
+  it('seals with the platform key and can only send to the mail queue', () => {
+    const json = JSON.stringify(prod!.findResources('AWS::IAM::Policy'));
+    expect(json).toContain('kms:GenerateDataKey');
+    expect(json).toContain('bmg-prod-mail');
+    expect(json).not.toContain('sqs:*');
+    expect(json).not.toContain('dynamodb:Scan');
+  });
+
+  it('is reached through CloudFront before /v1/* and /public/*', () => {
+    const dist = Object.values(web.findResources('AWS::CloudFront::Distribution'))[0]!;
+    const paths = dist.Properties.DistributionConfig.CacheBehaviors.map(
+      (b: { PathPattern: string }) => b.PathPattern,
+    );
+    expect(paths.indexOf('/v1/enquiries*')).toBeLessThan(paths.indexOf('/v1/*'));
+    expect(paths.indexOf('/public/enquiries')).toBeLessThan(paths.indexOf('/public/*'));
+    expect(paths).toContain('/consult*');
+    const origins = JSON.stringify(dist.Properties.DistributionConfig.Origins);
+    expect(origins).toContain('"OriginPath":"/v1"');
+  });
+
+  it('lets only the /consult page load AWS WAF’s CAPTCHA script', () => {
+    const policies = Object.values(web.findResources('AWS::CloudFront::ResponseHeadersPolicy')).map(
+      (p) => p.Properties.ResponseHeadersPolicyConfig,
+    );
+    const csp = (name: string) =>
+      JSON.stringify(
+        policies.find((p) => p.Name === name)!.SecurityHeadersConfig.ContentSecurityPolicy
+          .ContentSecurityPolicy,
+      );
+    expect(csp('bmg-prod-web-security')).not.toContain('awswaf.com');
+    expect(csp('bmg-prod-web-consult')).toContain('https://*.awswaf.com');
+    expect(csp('bmg-prod-web-consult')).toContain("frame-ancestors 'none'");
+  });
+
+  it('tells the notifier about requests, and the team’s screens refresh live', () => {
+    const api = Template.fromStack(stacks.environments[1]!.api);
+    api.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: Match.objectLike({
+        'detail-type': Match.arrayWith([
+          'enquiry.received',
+          'enquiry.pickedUp',
+          'enquiry.takenOver',
+        ]),
+      }),
+    });
+    expect(LIVE_PK_PREFIXES).toContain('ORG#');
+    expect(staging).toBeTruthy();
+  });
+});

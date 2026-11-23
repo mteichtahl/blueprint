@@ -74,7 +74,7 @@ export function Card({
   );
 }
 
-const control =
+export const control =
   'min-h-12 w-full min-w-0 rounded-[14px] border-2 border-input bg-white px-3.5 text-base outline-none focus:ring-[3px] focus:ring-[rgba(1,25,53,0.22)]';
 
 export function Field({

@@ -259,6 +259,28 @@ export type DomainEvent =
       bySub: string;
       moved: number;
       summary: string[];
+    }
+  | {
+      /**
+       * A consultation request came in on the public form (rev 21). Every
+       * Blueprint person hears; the answers stay in the app.
+       */
+      type: 'enquiry.received';
+      enquiryId: string;
+      name: string;
+      countryName: string;
+      /** Sent from an E2E test address: told to test accounts only. */
+      test?: boolean;
+    }
+  | {
+      /** An admin took over a request someone else had (rev 21): that person hears. */
+      type: 'enquiry.takenOver';
+      enquiryId: string;
+      fromSub: string;
+      bySub: string;
+      byName: string;
+      name: string;
+      test?: boolean;
     };
 
 export interface Draft {
@@ -276,13 +298,17 @@ export interface Draft {
     /** An artist's plan, for its Blueprint owner (rev 12). */
     | 'artistPlan'
     /** Sign-in and security: a recovery code was used. */
-    | 'account';
+    | 'account'
+    /** Consultation requests from the public form (rev 21). */
+    | 'enquiry';
   title: string;
   body: string;
   /** App view to open, e.g. `review`, `submit`, `chat:<id>`, `messages`. */
   link: string;
   /** Messages are throttled per conversation for email. */
   throttleKey?: string;
+  /** What it's about, so a later change can update it (`enquiry:<id>`, rev 21). */
+  ref?: string;
 }
 
 const HELP_LABEL: Record<string, string> = {
@@ -336,6 +362,8 @@ export function keepTestRunsQuiet(
   groups: Planned[],
   everyone: Recipient[],
 ): Planned[] {
+  // Sent from a test address on the public form (rev 21): only test accounts hear.
+  if ('test' in e && e.test) return groups.map((g) => ({ ...g, to: g.to.filter(isTestAccount) }));
   const test = everyone.filter(isTestAccount);
   if (test.length === 0) return groups;
   const ids = new Set(test.flatMap((r) => [r.sub, ...(r.artistId ? [r.artistId] : [])]));
@@ -630,6 +658,29 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
               : docLink({ fileId: e.id, ...(e.space === 'library' ? {} : { artistId: e.space }) }),
         },
       };
+    case 'enquiry.received':
+      return {
+        to: everyone.filter(isBmg),
+        draft: {
+          kind: 'enquiry',
+          title: `New consultation request from ${e.name} · ${e.countryName}`,
+          body: 'Open it to read it and pick it up.',
+          link: `enquiry:${e.enquiryId}`,
+          // At most one email every 30 minutes; the bell shows each one.
+          throttleKey: 'enquiries',
+          ref: `enquiry:${e.enquiryId}`,
+        },
+      };
+    case 'enquiry.takenOver':
+      return {
+        to: everyone.filter((r) => isBmg(r) && r.sub === e.fromSub && r.sub !== e.bySub),
+        draft: {
+          kind: 'enquiry',
+          title: `${e.byName} took over ${e.name}’s consultation request`,
+          body: `${e.byName} looks after it from now on.`,
+          link: `enquiry:${e.enquiryId}`,
+        },
+      };
     case 'plan.updated':
     case 'plan.ownerChanged':
     case 'file.versionAdded':
@@ -825,7 +876,39 @@ const EYEBROW: Record<Draft['kind'], string> = {
   plan: 'Your plan',
   artistPlan: 'Artist plan',
   account: 'Sign-in & security',
+  enquiry: 'Consultation request',
 };
+
+/**
+ * "Thanks, we've got your request" (rev 21), to the person who sent the
+ * public form. No copy of what they wrote, so the form can't be used to send
+ * mail to someone else, and no link into the app.
+ */
+export function enquiryAckEmail(
+  name: string,
+  appUrl: string,
+): { subject: string; text: string; html: string } {
+  const origin = appUrl.replace(/\/$/, '');
+  return renderLayout(
+    {
+      subject: 'Thanks, we’ve got your request',
+      preheader: 'Someone from Blueprint will be in touch soon.',
+      eyebrow: 'Consultation request',
+      heading: `Thanks, ${name}`,
+      blocks: [
+        { kind: 'p', text: 'We’ve got your consultation request.' },
+        {
+          kind: 'p',
+          text: 'Someone from the Blueprint team will read it and get back to you by email soon. If you’d like to add anything, just reply to this email.',
+        },
+      ],
+      cta: { label: 'Visit blueprintmusic.group', url: 'https://blueprintmusic.group' },
+      footerNote:
+        'You’re getting this because this address was used on Blueprint’s consultation form. If that wasn’t you, you can ignore it.',
+    },
+    { logoUrl: `${origin}/brand/bmg-logo-white-on-navy.png` },
+  );
+}
 
 /**
  * A notification body as email blocks: "• " lines become lists, other lines

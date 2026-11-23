@@ -6,6 +6,7 @@ import { ApiStack } from './api-stack.ts';
 import { AuditStack } from './audit-stack.ts';
 import { AccountGuardrailsStack } from './account-guardrails-stack.ts';
 import { DataStack } from './data-stack.ts';
+import { EnquiriesStack } from './enquiries-stack.ts';
 import { EnvFoundationStack } from './env-foundation-stack.ts';
 import { FilesStack } from './files-stack.ts';
 import { AiStack } from './ai-stack.ts';
@@ -43,6 +44,7 @@ export interface BuildAppOptions {
  *   bmg-<env>-meetings      home region  pipeline-deployed (meeting transcription: work bucket, worker)
  *   bmg-<env>-ai            home region  pipeline-deployed (assistant runtime, guardrail, action key)
  *   bmg-<env>-api           home region  pipeline-deployed (REST API, authorizer, WAF)
+ *   bmg-<env>-enquiries     home region  pipeline-deployed (consultation requests: API, WAF CAPTCHA)
  *   bmg-<env>-notify        home region  pipeline-deployed (branded notification email)
  *   bmg-<env>-web           home region  pipeline-deployed (web app on CloudFront, web client)
  * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
@@ -187,6 +189,17 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       meetingsFunctionArn: meetings.api.functionArn,
       description: `BMG ${envName} REST API: authorizer, consent, step-up, invites`,
     });
+    const enquiries = new EnquiriesStack(app, `${cfg.project}-${envName}-enquiries`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      mainTable: data.tables.main,
+      bus: audit.bus,
+      userPool: identity.userPool,
+      authorizerFunctionArn: api.authorizerFunctionArn,
+      description: `BMG ${envName} consultation requests: public form, team routes, WAF CAPTCHA`,
+    });
     const notify = new NotifyStack(app, `${cfg.project}-${envName}-notify`, {
       config: cfg,
       env: home,
@@ -210,6 +223,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       platformKey: foundation.platformKey,
       bus: audit.bus,
       restApiId: api.api.restApiId,
+      enquiriesApiId: enquiries.api.restApiId,
       realtime: { httpDns: api.realtime.httpDns, realtimeDns: api.realtime.realtimeDns },
       uploadOrigin: `https://${names.bucket(cfg, envName, 'quarantine')}.s3.${cfg.account.homeRegion}.amazonaws.com`,
       downloadOrigins: (['artist-data', 'org-data'] as const).map(
@@ -230,6 +244,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       meetings,
       ai,
       api,
+      enquiries,
       notify,
       web,
     };

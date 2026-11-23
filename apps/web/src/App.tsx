@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Me } from './lib/api.ts';
 import {
   currentSession,
@@ -9,7 +9,7 @@ import {
   type Session,
 } from './lib/auth.ts';
 import { finishSocial, isSocialCallback } from './lib/social.ts';
-import { loadConfig, type AppConfig } from './lib/config.ts';
+import { loadConfig, loadPublicConfig, type AppConfig } from './lib/config.ts';
 import { captureCallback } from './lib/connectors.ts';
 import { Notice, WaveLoader } from './components/ui.tsx';
 import { ReauthPrompt } from './components/ReauthPrompt.tsx';
@@ -20,11 +20,15 @@ import { NewsletterSignup } from './pages/NewsletterSignup.tsx';
 import { SignIn, type SignInReason } from './pages/SignIn.tsx';
 import { StepUp } from './pages/StepUp.tsx';
 
+// The public consultation form (rev 21) loads on its own, with its phone-number rules.
+const Consult = lazy(() => import('./pages/Consult.tsx').then((m) => ({ default: m.Consult })));
+
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'signedOut'; cfg: AppConfig; reason?: SignInReason; problem?: string }
   | { kind: 'public' }
+  | { kind: 'consult'; cfg: Partial<AppConfig> }
   | { kind: 'ready'; cfg: AppConfig; token: string; me: Me; userName: string };
 
 function nameOf(s: Session): string {
@@ -75,6 +79,9 @@ export function App() {
       try {
         // The public newsletter sign-up page needs no account.
         if (/^\/newsletter\/?$/.test(window.location.pathname)) return setState({ kind: 'public' });
+        // The public consultation form (rev 21): no account, and only the CAPTCHA settings.
+        if (/^\/consult(\/thanks)?\/?$/.test(window.location.pathname))
+          return setState({ kind: 'consult', cfg: await loadPublicConfig().catch(() => ({})) });
         // A connector's sign-in returns here; keep its code for the Connectors page.
         captureCallback();
         const cfg = await loadConfig();
@@ -107,6 +114,18 @@ export function App() {
     );
   }
   if (state.kind === 'public') return <NewsletterSignup />;
+  if (state.kind === 'consult')
+    return (
+      <Suspense
+        fallback={
+          <div className="grid min-h-dvh place-items-center">
+            <WaveLoader size={88} />
+          </div>
+        }
+      >
+        <Consult cfg={state.cfg} />
+      </Suspense>
+    );
   if (state.kind === 'error') {
     return (
       <main className="mx-auto max-w-md p-8">

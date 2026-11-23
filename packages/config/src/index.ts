@@ -56,6 +56,22 @@ const environmentSchema = z.object({
    * sandbox (production access) for the account and region first.
    */
   smsMfa: z.boolean().default(false),
+  /**
+   * The public consultation form's AWS WAF CAPTCHA (rev 21), written by
+   * `blueprint enquiries captcha-key`. Not secret: the page sends the key.
+   */
+  captcha: z
+    .object({
+      /** The web ACL's JavaScript integration address (ends .captcha-sdk.awswaf.com/...). */
+      scriptUrl: z
+        .string()
+        .regex(
+          /^https:\/\/[a-z0-9.-]+\.awswaf\.com\/[A-Za-z0-9/._-]+\/jsapi\.js$/,
+          'must be the web ACL’s CAPTCHA jsapi.js address',
+        ),
+      apiKey: z.string().min(20),
+    })
+    .optional(),
 });
 
 export const BmgConfigSchema = z.object({
