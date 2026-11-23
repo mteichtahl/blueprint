@@ -16,6 +16,6 @@
     "otpauth": "^9.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0"
+    "@playwright/test": "^1.65.1"
   }
 }
