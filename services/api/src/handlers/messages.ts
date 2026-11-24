@@ -504,6 +504,8 @@ async function activeTeam(): Promise<Map<string, Person>> {
 }
 
 const FORMER = 'No longer at Blueprint';
+/** Rev 22: how a deleted artist is shown in chats. */
+const FORMER_ARTIST = 'Former artist';
 const teamName = (team: Map<string, Person>, sub: string) => team.get(sub)?.displayName ?? FORMER;
 
 /**
@@ -512,9 +514,11 @@ const teamName = (team: Map<string, Person>, sub: string) => team.get(sub)?.disp
  */
 function teamSendBlock(
   viewer: Viewer,
-  c: Pick<Conversation, 'type' | 'staffSubs'>,
+  c: Pick<Conversation, 'type' | 'staffSubs' | 'closedReason'>,
   team: Map<string, Person>,
 ): string | null {
+  // Rev 22: a private chat whose other artist was deleted is kept read-only.
+  if (c.closedReason) return `${c.closedReason}. You can still read this chat.`;
   if (c.type !== 'staff-direct') return null;
   const other = (c.staffSubs ?? []).find((s) => s !== viewer.sub);
   return other && !team.has(other) ? `${FORMER}. You can still read this chat.` : null;
@@ -645,8 +649,8 @@ function titleFor(
   if (c.type === 'group') return c.title ?? 'Group';
   if (c.type === 'announcement') return c.title ?? 'Announcement';
   if (c.type === 'bmg-artist')
-    return viewer.role === 'artist' ? 'Blueprint' : (names[c.artistIds[0]!] ?? 'Artist');
-  return names[c.artistIds.find((id) => id !== viewer.artistId)!] ?? 'Artist';
+    return viewer.role === 'artist' ? 'Blueprint' : (names[c.artistIds[0]!] ?? FORMER_ARTIST);
+  return names[c.artistIds.find((id) => id !== viewer.artistId)!] ?? FORMER_ARTIST;
 }
 
 /** How a Blueprint person is shown in chats with artists (decided 13 Nov 2026): "Kyra · Blueprint". */
@@ -1258,7 +1262,7 @@ export const handler = handle(async (event) => {
             description: await describe(viewer, c),
             artists: c.artistIds.map((id) => ({
               artistId: id,
-              displayName: names[id] ?? 'Artist',
+              displayName: names[id] ?? FORMER_ARTIST,
             })),
             access: access(viewer, c),
             canSend: canSend(viewer, c) && !teamSendBlock(viewer, c, team),
@@ -1724,7 +1728,9 @@ export const handler = handle(async (event) => {
       const body = parseBody(event, NewMessage);
       const refused =
         sendRefused(viewer, conv, body.attachment?.kind, await accessRules(viewer)) ??
-        (conv.type === 'staff-direct' ? teamSendBlock(viewer, conv, await activeTeam()) : null);
+        (conv.type === 'staff-direct' || conv.closedReason
+          ? teamSendBlock(viewer, conv, await activeTeam())
+          : null);
       if (refused) throw new HttpError(403, refused);
       if (body.attachment?.kind === 'file' && !canShareFiles(viewer, conv))
         throw new HttpError(403, 'Artists can’t share files in this group');

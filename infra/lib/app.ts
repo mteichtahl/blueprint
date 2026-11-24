@@ -16,6 +16,7 @@ import { MeetingsStack } from './meetings-stack.ts';
 import { IdentityStack } from './identity-stack.ts';
 import { KeysStack } from './keys-stack.ts';
 import { NotifyStack } from './notify-stack.ts';
+import { OffboardingStack } from './offboarding-stack.ts';
 import { WebStack } from './web-stack.ts';
 import { ToolingStack } from './tooling-stack.ts';
 
@@ -200,6 +201,23 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       authorizerFunctionArn: api.authorizerFunctionArn,
       description: `BMG ${envName} consultation requests: public form, team routes, WAF CAPTCHA`,
     });
+    // Rev 22: deleting an artist (archive, knowledge base, chats, login).
+    const offboarding = new OffboardingStack(app, `${cfg.project}-${envName}-offboarding`, {
+      config: cfg,
+      env: home,
+      envName,
+      platformKey: foundation.platformKey,
+      mainTable: data.tables.main,
+      bus: audit.bus,
+      userPool: identity.userPool,
+      alarmTopic: foundation.alarmTopic,
+      description: `BMG ${envName} offboarding: delete and archive an artist`,
+      ...(opts.version ? { version: opts.version } : {}),
+    });
+    // The worker opens artist sessions on the data-access role (keys stack) and
+    // relies on the archive permissions and lifecycle rule in the files stack.
+    offboarding.addDependency(keys);
+    offboarding.addDependency(files);
     const notify = new NotifyStack(app, `${cfg.project}-${envName}-notify`, {
       config: cfg,
       env: home,
@@ -245,6 +263,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       ai,
       api,
       enquiries,
+      offboarding,
       notify,
       web,
     };

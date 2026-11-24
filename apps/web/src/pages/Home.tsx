@@ -1,3 +1,4 @@
+import { DeleteArtistPage, DeletedArtists } from './DeleteArtist.tsx';
 import { useCallback, useEffect, useState } from 'react';
 import { AvatarProvider, useOwnAvatar } from '../components/avatars.tsx';
 import {
@@ -98,6 +99,8 @@ export interface HomeProps {
   token: string;
   me: Me;
   userName: string;
+  /** Rev 22: you changed your own name in Profile. */
+  onRenamed?: (name: string) => void;
   onSignOut: () => void;
   onReauth: () => void;
 }
@@ -123,7 +126,7 @@ function greeting(): string {
 
 // ═════════════════════════════ BMG desktop ═════════════════════════════
 
-function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
+function BmgApp({ cfg, token, me, userName, onRenamed, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme();
   const [jobTitle, setJobTitle] = useState(me.jobTitle ?? '');
   const [avatar, setAvatar] = useState(me.avatar ?? null);
@@ -197,6 +200,8 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
     setView('messages');
   };
   const LINK_VIEWS: Record<string, string> = {
+    // Rev 22: a deletion finished (Artists & applications shows the Deleted list).
+    artists: 'artists',
     review: 'review',
     library: 'library',
     submit: 'review',
@@ -481,6 +486,22 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
             onOpenMeeting={(m) =>
               openMeetings({ kind: 'open', space: m.space, meetingId: m.meetingId })
             }
+            onRenamed={() => void load()}
+            onDelete={() => setView(`delete:${openArtist.artistId}`)}
+          />
+        )}
+        {/* Rev 22: deleting an artist (admins). */}
+        {view.startsWith('delete:') && me.role === 'bmg-admin' && (
+          <DeleteArtistPage
+            cfg={cfg}
+            token={token}
+            artistId={view.slice('delete:'.length)}
+            onBack={() => setView(`artist:${view.slice('delete:'.length)}`)}
+            onReauth={onReauth}
+            onStarted={() => {
+              void load();
+              setView('artists');
+            }}
           />
         )}
         {view === 'insights' && (
@@ -532,6 +553,7 @@ function BmgApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
               onReauth={onReauth}
               onJobTitle={setJobTitle}
               onAvatar={setAvatar}
+              onName={onRenamed}
             />
           </>
         )}
@@ -1263,6 +1285,12 @@ function ArtistsPage({
             <InviteArtist cfg={cfg} token={token} onReauth={onReauth} onInvited={onInvited} />
           </div>
         )}
+        {/* Rev 22: deleted artists, how each deletion went, and mentions to review. */}
+        {me.role === 'bmg-admin' && (
+          <div className="flex-[2_1_520px]">
+            <DeletedArtists cfg={cfg} token={token} />
+          </div>
+        )}
       </div>
     </>
   );
@@ -1372,7 +1400,7 @@ type ArtistView =
   | 'contacts'
   | 'meetings';
 
-function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps) {
+function ArtistApp({ cfg, token, me, userName, onRenamed, onSignOut, onReauth }: HomeProps) {
   const [theme, setTheme] = useTheme('dark');
   const [avatar, setAvatar] = useState(me.avatar ?? null);
   useOwnAvatar(me.sub, me.artistId, avatar);
@@ -1755,6 +1783,7 @@ function ArtistApp({ cfg, token, me, userName, onSignOut, onReauth }: HomeProps)
           onSignOut={onSignOut}
           onReauth={onReauth}
           onAvatar={setAvatar}
+          onName={onRenamed}
           compact={!desktop}
         />
       )}

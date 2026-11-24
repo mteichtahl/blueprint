@@ -648,11 +648,15 @@ function EditMember({
   onCancel: () => void;
 }) {
   const [role, setRole] = useState<TeamRole>(member.role);
+  const [displayName, setDisplayName] = useState(member.displayName);
   const [jobTitle, setJobTitle] = useState(member.jobTitle);
   const [artistIds, setArtistIds] = useState<string[]>(member.artistIds);
   const first = member.displayName.split(' ')[0];
   const patch: Record<string, unknown> = {};
   if (role !== member.role) patch.role = role;
+  // Rev 22: admins can fix a team member's name.
+  const tidyName = displayName.replace(/\s+/g, ' ').trim();
+  if (tidyName && tidyName !== member.displayName) patch.displayName = tidyName;
   if (jobTitle.trim() !== member.jobTitle) patch.jobTitle = jobTitle.trim();
   if (
     role === 'bmg-staff' &&
@@ -699,6 +703,12 @@ function EditMember({
       }
     >
       <div className="grid gap-3 sm:grid-cols-2">
+        <Field
+          label="Name"
+          value={displayName}
+          maxLength={100}
+          onChange={(e) => setDisplayName(e.target.value)}
+        />
         <Field
           label="Job title"
           value={jobTitle}
