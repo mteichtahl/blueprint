@@ -66,7 +66,7 @@ export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
 /**
  * The REST API for one environment (design 7.2). Phase 2 routes:
  *   GET  /me                    who you are, step-up state, latest consent
- *   PATCH /me                   your job title (Blueprint people; artists are "Artist")
+ *   PATCH /me                   your name (rev 22), job title (Blueprint people; artists are "Artist")
  *   GET  /avatars               profile pictures for ?artists=… and ?users=… (missing ones left out)
  *   GET  /consent, POST /consent  append-only consent ledger (F1 step 4)
  *   POST /step-up/totp/setup|verify   app-level MFA for social sign-ins (6.2)
@@ -447,7 +447,8 @@ export class ApiStack extends BmgStack {
       [main],
     );
     // Invite artist page: the roster (GSI1 `ARTISTS`), to list every invitation and its status.
-    allow(artists, 'ReadRoster', ['dynamodb:Query'], [`${main}/index/GSI1`]);
+    // Rev 22: also the Deleted list (GSI1 `DELETIONS`), and an artist's items for the delete preview.
+    allow(artists, 'ReadRoster', ['dynamodb:Query'], [`${main}/index/GSI1`, main]);
     allow(artists, 'ReadSmtpSecret', ['secretsmanager:GetSecretValue'], [smtpSecretArn]);
     allow(
       artists,
@@ -743,6 +744,8 @@ export class ApiStack extends BmgStack {
     // Job title (rev 7) and profile picture live on USER#<sub> / PROFILE.
     // BatchGetItem: GET /avatars (profile pictures on USER#<sub> / PROFILE and ARTIST#<id> / AVATAR).
     allow(me, 'ReadProfile', ['dynamodb:GetItem', 'dynamodb:BatchGetItem'], [main]);
+    // Rev 22: name changes are written to the audit archive.
+    putEvents(me);
     props.platformKey.grant(me, 'kms:Decrypt');
     new Rule(this, 'AiConsentChanges', {
       eventBus: props.bus,
@@ -912,6 +915,9 @@ export class ApiStack extends BmgStack {
           'file.editorsAdded',
           // Rev 10: "shared with you" (access given, or a library document shared).
           'item.shared',
+          // Rev 22: Blueprint renamed an artist; an artist's deletion finished.
+          'artist.renamed',
+          'artist.deleted',
         ],
       },
       targets: [

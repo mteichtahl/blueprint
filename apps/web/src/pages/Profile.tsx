@@ -38,6 +38,7 @@ export function Profile({
   onReauth,
   onJobTitle,
   onAvatar,
+  onName,
   compact = false,
 }: {
   cfg: AppConfig;
@@ -51,6 +52,8 @@ export function Profile({
   onReauth?: () => void;
   onJobTitle?: (t: string) => void;
   onAvatar?: (avatar: string | null) => void;
+  /** Rev 22: you changed your name. */
+  onName?: ((name: string) => void) | undefined;
   compact?: boolean;
 }) {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
@@ -88,6 +91,7 @@ export function Profile({
         userName={userName}
         onJobTitle={onJobTitle}
         onAvatar={onAvatar}
+        onName={onName}
       />
       <Card className="flex-[1_1_320px] self-stretch" title="Notifications">
         {!prefs ? (
@@ -502,6 +506,7 @@ function AboutYou({
   userName,
   onJobTitle,
   onAvatar,
+  onName,
 }: {
   cfg: AppConfig;
   token: string;
@@ -509,6 +514,7 @@ function AboutYou({
   userName: string;
   onJobTitle?: ((t: string) => void) | undefined;
   onAvatar?: ((avatar: string | null) => void) | undefined;
+  onName?: ((name: string) => void) | undefined;
 }) {
   const [avatar, setAvatar] = useState(me.avatar ?? null);
   const isArtist = me.role === 'artist';
@@ -542,9 +548,17 @@ function AboutYou({
         }}
       />
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
-      <p className="m-0">
-        <b>{userName}</b>
-      </p>
+      <YourName
+        cfg={cfg}
+        token={token}
+        name={userName}
+        isArtist={isArtist}
+        onSaved={(n) => {
+          onName?.(n);
+          setMsg({ tone: 'success', text: 'Name saved. It shows like this across the app.' });
+        }}
+        onError={(text) => setMsg({ tone: 'error', text })}
+      />
       {isArtist ? (
         <p className="m-0">
           Job title: <b>Artist</b>
@@ -567,6 +581,102 @@ function AboutYou({
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * Rev 22: your name, as everyone in the app sees it. Shown as text with Edit;
+ * Edit opens the field in place with Save and Cancel (Escape cancels).
+ */
+function YourName({
+  cfg,
+  token,
+  name,
+  isArtist,
+  onSaved,
+  onError,
+}: {
+  cfg: AppConfig;
+  token: string;
+  name: string;
+  isArtist: boolean;
+  onSaved: (name: string) => void;
+  onError: (text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const [busy, setBusy] = useState(false);
+  const cancel = () => {
+    setDraft(name);
+    setEditing(false);
+  };
+  async function save() {
+    setBusy(true);
+    try {
+      const res = await api<{ displayName: string }>(cfg, token, 'PATCH', '/me', {
+        displayName: draft,
+      });
+      setEditing(false);
+      onSaved(res.displayName);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!editing)
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="m-0 flex-1">
+          <span className="src block">{isArtist ? 'Artist name' : 'Name'}</span>
+          <b>{name}</b>
+        </p>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            setDraft(name);
+            setEditing(true);
+          }}
+        >
+          Edit name
+        </Button>
+      </div>
+    );
+  const trimmed = draft.replace(/\s+/g, ' ').trim();
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') cancel();
+      }}
+    >
+      <div className="min-w-0 flex-[1_1_260px]">
+        <Field
+          label={isArtist ? 'Artist name' : 'Name'}
+          value={draft}
+          maxLength={100}
+          autoFocus
+          autoComplete={isArtist ? 'off' : 'name'}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <span className="src block">
+          {isArtist
+            ? 'Your stage or artist name. Blueprint and other artists see it.'
+            : 'Artists and the Blueprint team see it.'}
+        </span>
+      </div>
+      <Button type="submit" variant="navy" disabled={busy || !trimmed || trimmed === name}>
+        Save
+      </Button>
+      <Button type="button" variant="ghost" onClick={cancel}>
+        Cancel
+      </Button>
+    </form>
   );
 }
 

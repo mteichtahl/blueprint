@@ -11,7 +11,17 @@ import {
 import type { AppConfig } from '../lib/config.ts';
 import { phaseProgress } from '../lib/plan.ts';
 import { markdownToText } from '../lib/markdown.ts';
-import { Avatar, Bar, Button, Card, Chips, Icon, shortDate, Tag } from '../components/ui.tsx';
+import {
+  Avatar,
+  Bar,
+  Button,
+  Card,
+  Chips,
+  Field,
+  Icon,
+  shortDate,
+  Tag,
+} from '../components/ui.tsx';
 import { GigsTab } from './Gigs.tsx';
 import { AssetLibrary } from './Assets.tsx';
 import { BrandKit } from './BrandKit.tsx';
@@ -24,6 +34,7 @@ import { ArtistTodos } from './Todos.tsx';
 import { LatestMeetingCard, PlanSuggestionsBanner, useArtistMeetings } from './Meetings.tsx';
 import type { Meeting } from '../lib/meetings.ts';
 import { useLive } from '../lib/live.ts';
+import { DangerArea, EditDialog } from '../components/patterns.tsx';
 
 /**
  * Workspace tabs (screens doc rev 9): four tabs, each with a section switch
@@ -168,11 +179,17 @@ export function ArtistWorkspace({
   onOpenMeeting,
   target,
   chatUnread = 0,
+  onRenamed,
+  onDelete,
 }: {
   cfg: AppConfig;
   token: string;
   me: Me;
   artist: ArtistSummary;
+  /** Rev 22: Blueprint renamed the artist (the roster reloads). */
+  onRenamed?: (name: string) => void;
+  /** Rev 22, admins: open the Delete artist page. */
+  onDelete?: () => void;
   /** Opens a Studio HQ view (chat attachment cards). */
   onNavigate?: (view: string) => void;
   /** "Open in Chat": the full Chat page on this conversation. */
@@ -200,6 +217,7 @@ export function ArtistWorkspace({
   }, []);
   const [libKind, setLibKind] = useState<LibraryKind>('all');
   const [chatOpen, setChatOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const narrow = useNarrow();
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [startPlan, setStartPlan] = useState(false);
@@ -263,6 +281,23 @@ export function ArtistWorkspace({
 
   return (
     <>
+      {editing && onRenamed && (
+        <EditArtistDetails
+          cfg={cfg}
+          token={token}
+          artist={artist}
+          canDelete={me.role === 'bmg-admin' && !!onDelete}
+          onSaved={(name) => {
+            setEditing(false);
+            onRenamed(name);
+          }}
+          onDelete={() => {
+            setEditing(false);
+            onDelete?.();
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      )}
       <header className="page-head flex flex-wrap items-center gap-[18px]">
         <Avatar name={artist.displayName} artistId={artist.artistId} size={64} />
         <div className="flex min-w-[min(300px,100%)] flex-1 flex-col gap-1">
@@ -271,6 +306,16 @@ export function ArtistWorkspace({
             <h1 className="poster m-0 min-w-0 flex-1 text-[48px] max-sm:text-[36px]">
               {artist.displayName}
             </h1>
+            {me.role !== 'artist' && onRenamed && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0"
+                onClick={() => setEditing(true)}
+              >
+                Artist details
+              </Button>
+            )}
             {onRecordMeeting && (
               <Button size="sm" className="shrink-0" onClick={onRecordMeeting}>
                 <Icon name="record" size={16} /> Record meeting
@@ -554,5 +599,76 @@ function WorkspaceOverview({
         {todos.length === 0 && <p className="src">No open to-dos.</p>}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Rev 22: Edit artist details (Blueprint). The artist's name, and for admins
+ * Delete artist… in the danger area, which opens the full Delete page.
+ */
+function EditArtistDetails({
+  cfg,
+  token,
+  artist,
+  canDelete,
+  onSaved,
+  onDelete,
+  onCancel,
+}: {
+  cfg: AppConfig;
+  token: string;
+  artist: ArtistSummary;
+  canDelete: boolean;
+  onSaved: (name: string) => void;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(artist.displayName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const tidy = name.replace(/\s+/g, ' ').trim();
+  return (
+    <EditDialog
+      title={`Edit ${artist.displayName}`}
+      busy={busy}
+      error={error}
+      canSave={!!tidy && tidy !== artist.displayName}
+      onCancel={onCancel}
+      onSave={async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          await api(cfg, token, 'PATCH', `/access/artists/${artist.artistId}`, {
+            displayName: tidy,
+          });
+          onSaved(tidy);
+        } catch (e) {
+          setError((e as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      danger={
+        canDelete ? (
+          <DangerArea
+            title={`Delete ${artist.displayName}`}
+            action="Delete artist…"
+            what="Opens a page that shows what will be archived and what stays, before anything is deleted."
+            onConfirm={async () => onDelete()}
+          />
+        ) : undefined
+      }
+    >
+      <Field
+        label="Artist name"
+        value={name}
+        maxLength={100}
+        autoComplete="off"
+        onChange={(e) => setName(e.target.value)}
+      />
+      <span className="src">
+        Shown everywhere in the app. {artist.displayName.split(' ')[0]} is told when you change it.
+      </span>
+    </EditDialog>
   );
 }
