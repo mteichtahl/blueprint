@@ -29,6 +29,8 @@ import {
 } from '../access/model.ts';
 import { audit, authContext, db, env, HttpError, json, parseBody, principalFor } from '../lib.ts';
 import { settingsFrom, settingsKey } from '../workspace/owner-todos.ts';
+import { renameUser } from '../people/names.ts';
+import { artistAccessRoutes } from '../offboarding/routes.ts';
 import { saveArtistTodos } from '../workspace/owner-todos-store.ts';
 
 /**
@@ -40,6 +42,12 @@ import { saveArtistTodos } from '../workspace/owner-todos-store.ts';
  *   POST  /access/team               admin: invite a team member
  *   PATCH /access/team/{sub}         admin: role, job title, artists, on/off
  *   POST  /access/team/{sub}/resend  admin: new temporary password and email
+ *   PATCH /access/artists/{id}       rev 22: assigned staff and admins rename an artist
+ *   GET   /access/artists/{id}/delete    admin: what deleting them would archive
+ *   POST  /access/artists/{id}/delete    admin, fresh step-up: delete (archive) the artist
+ *   GET   /access/deletions          admin: deleted artists
+ *   GET   /access/deletions/{id}     admin: one deletion, its steps and mentions
+ *   POST  /access/deletions/{id}/retry   admin: carry on after a paused step
  *
  * One proxy route on the artists function (which already manages Cognito
  * users), to keep the API stack well under CloudFormation's resource limit.
@@ -255,6 +263,11 @@ export async function accessRoutes(event: APIGatewayProxyEvent, temporaryPasswor
     });
   }
 
+  // ── Artists: names and deletion (rev 22) ──
+  if (path.startsWith('artists/') || path === 'deletions' || path.startsWith('deletions/')) {
+    return artistAccessRoutes(event, principal, path, method);
+  }
+
   // ── Team ──
   if (path === 'team' && method === 'GET') {
     if (!isBmg(principal)) throw new HttpError(403, 'The team list is for Blueprint');
@@ -397,6 +410,7 @@ export async function accessRoutes(event: APIGatewayProxyEvent, temporaryPasswor
         }),
       );
     }
+    if (patch.displayName !== undefined) await renameUser(target.sub, patch.displayName);
     if (patch.jobTitle !== undefined) {
       await db.send(
         new UpdateCommand({

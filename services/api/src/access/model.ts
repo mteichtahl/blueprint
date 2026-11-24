@@ -1,4 +1,5 @@
 import { ArtistTodosSettings } from '../workspace/owner-todos.ts';
+import { DisplayName } from '../people/names.ts';
 import { z } from 'zod';
 
 /**
@@ -71,6 +72,8 @@ export const TeamInvite = z
 
 export const TeamPatch = z
   .object({
+    /** Rev 22: the person's name, as everyone at Blueprint sees it. */
+    displayName: DisplayName.optional(),
     role: z.enum(TEAM_ROLES).optional(),
     artistIds: ArtistIds.optional(),
     jobTitle: z.string().trim().max(80).optional(),
