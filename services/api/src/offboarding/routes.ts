@@ -42,9 +42,24 @@ const profileKey = (artistId: string) => ({ PK: `ARTIST#${artistId}`, SK: 'PROFI
 
 const RenameBody = z.object({ displayName: DisplayName }).strict();
 
-function requireAdmin(principal: Principal) {
-  const d = authorize(principal, 'admin', { kind: 'org-admin' });
-  if (!d.allow) throw new HttpError(403, 'Only a Blueprint admin can delete an artist');
+/**
+ * Looking (the preview, the Deleted list, one deletion) needs an admin.
+ * Acting (delete, retry) is an admin action, which also needs a sign-in in the
+ * last 5 minutes; its refusal keeps authz's reason ("… needs a fresh step-up"),
+ * so the app offers to sign in again instead of saying you're not an admin.
+ */
+export function adminRefusal(principal: Principal, acting: boolean): string | null {
+  if (principal.role !== 'bmg-admin') return 'Only a Blueprint admin can delete an artist';
+  const d = acting
+    ? authorize(principal, 'admin', { kind: 'org-admin' })
+    : authorize(principal, 'read', { kind: 'org-admin' });
+  if (d.allow) return null;
+  return /step-up/.test(d.reason) ? 'Deleting an artist needs a fresh step-up' : d.reason;
+}
+
+function requireAdmin(principal: Principal, acting = false) {
+  const refused = adminRefusal(principal, acting);
+  if (refused) throw new HttpError(403, refused);
 }
 
 async function profile(artistId: string) {
@@ -143,8 +158,8 @@ export async function artistAccessRoutes(
     if (method !== 'POST') throw new HttpError(404, 'Not found');
     if (principal.secondsSinceAuth > DELETE_STEP_UP_SECONDS) {
       await audit(event, 'artist.delete', 'denied', { artistId, reason: 'step-up' });
-      throw new HttpError(403, 'Deleting an artist needs a fresh step-up');
     }
+    requireAdmin(principal, true);
     const body = parseBody(event, DeleteBody);
     const look = await preview(artistId);
     if (look.status === 'deleting' || look.status === 'deleted')
@@ -187,6 +202,7 @@ export async function artistAccessRoutes(
     if (!rec) throw new HttpError(404, 'No such deletion');
     if (parts.length === 2 && method === 'GET') return json(200, publicDeletion(rec));
     if (parts.length === 3 && parts[2] === 'retry' && method === 'POST') {
+      requireAdmin(principal, true);
       if (rec.status !== 'paused')
         throw new HttpError(409, 'Only a paused deletion can be retried');
       await db.send(
