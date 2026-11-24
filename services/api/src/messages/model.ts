@@ -80,6 +80,11 @@ export interface Conversation {
   admins?: string[];
   /** Set when Blueprint deletes a group or announcement. */
   deletedAt?: string;
+  /**
+   * Rev 22: set on a private chat when one of its two artists was deleted. The
+   * other artist keeps it read-only; this is the reason shown.
+   */
+  closedReason?: string;
   /** Artists in the conversation (empty for the broadcast, which reaches all artists). */
   artistIds: string[];
   /** Wrapped conversation key: `platform` for chats with Blueprint, else per artist. */

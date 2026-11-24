@@ -2,7 +2,8 @@ import { BatchGetCommand, GetCommand, QueryCommand, UpdateCommand } from '@aws-s
 import { z } from 'zod';
 import { projectAiState } from '../ai/state.ts';
 import { LOGO_MAX_BYTES, parseLogoDataUrl } from '../address-book/logo.ts';
-import { authContext, db, env, handle, HttpError, json, parseBody } from '../lib.ts';
+import { audit, authContext, db, env, handle, HttpError, json, parseBody } from '../lib.ts';
+import { DisplayName, renameArtist, renameUser, shownName } from '../people/names.ts';
 import { ArtistTodosSettings, settingsFrom, settingsKey } from '../workspace/owner-todos.ts';
 import { saveArtistTodos } from '../workspace/owner-todos-store.ts';
 
@@ -53,6 +54,8 @@ async function batchAvatars(keys: { PK: string; SK: string }[]): Promise<Map<str
 }
 export const ProfilePatch = z
   .object({
+    /** Rev 22: your own name. Artists change their roster name; Blueprint people their profile. */
+    displayName: DisplayName.optional(),
     jobTitle: z.string().trim().max(80, 'Keep the job title under 80 characters').optional(),
     /**
      * Profile picture: a small square image the browser has already cropped and
@@ -68,7 +71,11 @@ export const ProfilePatch = z
   })
   .strict()
   .refine(
-    (p) => p.jobTitle !== undefined || p.avatar !== undefined || p.artistTodos !== undefined,
+    (p) =>
+      p.displayName !== undefined ||
+      p.jobTitle !== undefined ||
+      p.avatar !== undefined ||
+      p.artistTodos !== undefined,
     'Nothing to change',
   );
 
@@ -118,14 +125,30 @@ export const handler = handle(async (event) => {
   }
 
   if (event.httpMethod === 'PATCH') {
-    const { jobTitle, avatar, artistTodos } = parseBody(event, ProfilePatch);
+    const { displayName, jobTitle, avatar, artistTodos } = parseBody(event, ProfilePatch);
     if (jobTitle !== undefined && ctx.role === 'artist')
       throw new HttpError(403, `Artists' job title is always "${ARTIST_JOB_TITLE}"`);
+    if (displayName !== undefined) {
+      if (ctx.role === 'artist' && !ctx.artistId)
+        throw new HttpError(403, 'No artist on this login');
+      const changed =
+        ctx.role === 'artist'
+          ? await renameArtist(ctx.artistId!, displayName)
+          : await renameUser(ctx.sub, displayName);
+      if (changed.before !== changed.after)
+        await audit(event, 'profile.rename', 'success', {
+          ...(ctx.artistId ? { artistId: ctx.artistId } : { sub: ctx.sub }),
+          self: true,
+        });
+      if (jobTitle === undefined && avatar === undefined && artistTodos === undefined)
+        return json(200, { displayName });
+    }
     if (artistTodos !== undefined) {
       if (ctx.role === 'artist')
         throw new HttpError(403, 'Only Blueprint people take to-dos from artists');
       await saveArtistTodos(ctx.sub, artistTodos);
-      if (jobTitle === undefined && avatar === undefined) return json(200, { artistTodos });
+      if (jobTitle === undefined && avatar === undefined)
+        return json(200, { artistTodos, ...(displayName !== undefined ? { displayName } : {}) });
     }
     const sets = ['updatedAt = :at', '#type = :type'];
     const removes: string[] = [];
@@ -157,13 +180,14 @@ export const handler = handle(async (event) => {
     );
     if (stored !== undefined && ctx.artistId) await mirrorArtistAvatar(ctx.artistId, stored);
     return json(200, {
+      ...(displayName !== undefined ? { displayName } : {}),
       ...(jobTitle !== undefined ? { jobTitle } : {}),
       ...(stored !== undefined ? { avatar: stored } : {}),
       ...(artistTodos !== undefined ? { artistTodos } : {}),
     });
   }
 
-  const [latest, profile, todoSettings] = await Promise.all([
+  const [latest, profile, todoSettings, artistProfile] = await Promise.all([
     db.send(
       new QueryCommand({
         TableName: env('CONSENT_TABLE'),
@@ -177,6 +201,14 @@ export const handler = handle(async (event) => {
     ctx.role === 'artist'
       ? Promise.resolve(undefined)
       : db.send(new GetCommand({ TableName: env('MAIN_TABLE'), Key: settingsKey(ctx.sub) })),
+    ctx.artistId
+      ? db.send(
+          new GetCommand({
+            TableName: env('MAIN_TABLE'),
+            Key: { PK: `ARTIST#${ctx.artistId}`, SK: 'PROFILE' },
+          }),
+        )
+      : Promise.resolve(undefined),
   ]);
   const consent = latest.Items?.[0];
   // An artist who has signed in has accepted their invitation: show them as
@@ -201,6 +233,7 @@ export const handler = handle(async (event) => {
     role: ctx.role,
     artistId: ctx.artistId ?? null,
     jobTitle: jobTitleFor(ctx.role, profile.Item?.jobTitle),
+    displayName: shownName(ctx.role, artistProfile?.Item, profile.Item),
     avatar,
     mfaLevel: ctx.mfaLevel,
     ...(ctx.role === 'artist' ? {} : { artistTodos: settingsFrom(todoSettings?.Item) }),

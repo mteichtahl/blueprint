@@ -61,6 +61,8 @@ export interface Me {
   artistId: string | null;
   /** Always "Artist" for artists; Blueprint people set their own (rev 7). */
   jobTitle?: string;
+  /** Rev 22: your name as the app shows it (null when never set: the sign-in name is used). */
+  displayName?: string | null;
   /** Profile picture as a data URL, or null when there isn't one. */
   avatar?: string | null;
   mfaLevel: 'cognito' | 'federated';
