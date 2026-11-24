@@ -293,7 +293,14 @@ function filterParam(event: APIGatewayProxyEvent): TodoFilter | undefined {
   return f as TodoFilter;
 }
 
+/** Rev 22: an artist being deleted is off every roster straight away. */
+const onRoster = (i: Record<string, unknown>) => i.status !== 'deleting' && i.status !== 'deleted';
+
 async function roster(principal: Principal) {
+  return (await rosterItems(principal)).filter(onRoster);
+}
+
+async function rosterItems(principal: Principal) {
   if (principal.role === 'artist') {
     const res = await db.send(
       new GetCommand({

@@ -24,6 +24,16 @@ Plus invitation tracking, finished reviews, and a smarter library.
 
 ### New
 
+- **Change your name.** Everyone can change their own name in Profile ›
+  About you (artists: your artist name). Blueprint can fix an artist's name
+  from their workspace (**Artist details**), and the artist is told. Admins
+  can change a team member's name in Access & permissions.
+- **Delete an artist** (admins). From **Artist details**, the Delete page
+  shows what will be archived and what stays, and asks for a reason and the
+  artist's name. Their login is turned off at once; their files, chats,
+  plan, to-dos and gigs are archived for 7 years and removed from the app,
+  and they're taken out of the knowledge base. Artists & applications lists
+  deleted artists, with any Blueprint documents that still mention them.
 - **Artists get a desktop layout** on computers and on iPads held sideways:
   a menu down the side, Ask BMG at the top, a dashboard Home, the full
   three-pane Chat, the library table with its folder tree, a gigs table and

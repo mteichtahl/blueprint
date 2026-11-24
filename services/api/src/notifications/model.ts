@@ -281,6 +281,22 @@ export type DomainEvent =
       byName: string;
       name: string;
       test?: boolean;
+    }
+  | {
+      /** Rev 22: Blueprint changed an artist's name. The artist hears. */
+      type: 'artist.renamed';
+      artistId: string;
+      name: string;
+      bySub: string;
+      byName: string;
+    }
+  | {
+      /** Rev 22: a deletion finished. Every admin hears (the archive is ready). */
+      type: 'artist.deleted';
+      artistId: string;
+      name: string;
+      bySub: string;
+      mentions: number;
     };
 
 export interface Draft {
@@ -679,6 +695,30 @@ export function plan(e: DomainEvent, everyone: Recipient[]): Planned | undefined
           title: `${e.byName} took over ${e.name}’s consultation request`,
           body: `${e.byName} looks after it from now on.`,
           link: `enquiry:${e.enquiryId}`,
+        },
+      };
+    case 'artist.renamed':
+      return {
+        to: artistsOf([e.artistId]),
+        draft: {
+          kind: 'account',
+          title: `${e.byName} updated your name to ${e.name}`,
+          body: 'It shows like this across the app. You can change it in Profile.',
+          link: 'profile',
+        },
+      };
+    case 'artist.deleted':
+      return {
+        // Every admin, including the one who started it: they may have left the page.
+        to: everyone.filter((r) => r.role === 'bmg-admin'),
+        draft: {
+          kind: 'account',
+          title: `${e.name} was deleted. Archive ready.`,
+          body:
+            e.mentions > 0
+              ? `${e.mentions} Blueprint document${e.mentions === 1 ? '' : 's'} still mention${e.mentions === 1 ? 's' : ''} them. Open the deletion to review.`
+              : 'Their data is archived and they’re out of the knowledge base.',
+          link: 'artists',
         },
       };
     case 'plan.updated':

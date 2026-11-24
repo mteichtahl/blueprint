@@ -52,7 +52,14 @@ export function App() {
 
   const enter = useCallback(async (cfg: AppConfig, session: Session) => {
     const me = await api<Me>(cfg, session.accessToken, 'GET', '/me');
-    setState({ kind: 'ready', cfg, token: session.accessToken, me, userName: nameOf(session) });
+    setState({
+      kind: 'ready',
+      cfg,
+      token: session.accessToken,
+      me,
+      // Rev 22: the name people set in the app wins over the sign-in token's.
+      userName: me.displayName || nameOf(session),
+    });
     // Swap in a fresh access token a minute before this one expires.
     clearTimeout(timer.current);
     timer.current = setTimeout(
@@ -173,6 +180,7 @@ export function App() {
         token={token}
         me={me}
         userName={userName}
+        onRenamed={(name) => setState((s) => (s.kind === 'ready' ? { ...s, userName: name } : s))}
         onSignOut={() => leave('signedOut')}
         // Admin actions need a sign-in within 5 minutes (design 6.3): sign in again on our screens.
         onReauth={() => leave('reauth')}
