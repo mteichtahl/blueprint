@@ -16,6 +16,7 @@ import {
   without,
   type DeletionRecord,
 } from '../src/offboarding/model.ts';
+import { adminRefusal } from '../src/offboarding/routes.ts';
 
 const A = 'art_abcdefghij123456';
 const B = 'art_zyxwvutsrq654321';
@@ -186,5 +187,25 @@ describe('what admins see', () => {
       stepCount: STEPS.length,
       reasonLabel: 'Left Blueprint',
     });
+  });
+});
+
+describe('who may delete (fix: admins were always refused)', () => {
+  const admin = (secondsSinceAuth: number) => ({
+    sub: 's',
+    role: 'bmg-admin' as const,
+    mfaSatisfied: true,
+    secondsSinceAuth,
+  });
+  it('lets an admin look at any time, and act only after a recent sign-in', () => {
+    expect(adminRefusal(admin(3600), false)).toBeNull();
+    expect(adminRefusal(admin(60), true)).toBeNull();
+    // The step-up wording is what makes the app offer "Sign in again".
+    expect(adminRefusal(admin(3600), true)).toMatch(/fresh step-up/);
+  });
+  it('refuses staff and artists either way', () => {
+    const staff = { ...admin(10), role: 'bmg-staff' as const };
+    expect(adminRefusal(staff, false)).toMatch(/Only a Blueprint admin/);
+    expect(adminRefusal(staff, true)).toMatch(/Only a Blueprint admin/);
   });
 });
