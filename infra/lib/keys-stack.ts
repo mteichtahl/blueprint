@@ -51,6 +51,8 @@ export const DATA_ACCESS_CALLERS = [
   // Meeting notes (rev 11): content under the artist's key, recordings to transcribe.
   'api-meetings',
   'api-meetings-worker',
+  // Rev 22: deleting an artist copies their files into the archive under their own key.
+  'api-offboarding',
 ] as const;
 
 /** Functions that open team chat keys in a Blueprint person's own session (decided 13 Nov 2026). */

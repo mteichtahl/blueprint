@@ -368,3 +368,33 @@ export function cognitoEmail(
       );
   }
 }
+
+/**
+ * Rev 22: sent only when the admin ticks "Email them that their account has
+ * been closed". It says a copy is kept, and for how long, but lists no content.
+ */
+export function accountClosedEmail(
+  ctx: BrandContext,
+  i: { displayName: string; retainYears: number },
+): RenderedEmail {
+  return renderLayout(
+    {
+      subject: 'Your Blueprint account has been closed',
+      preheader: 'You can no longer sign in to the BMG app.',
+      eyebrow: 'Blueprint Music Group',
+      heading: `Hi ${i.displayName}, your account has been closed`,
+      blocks: [
+        {
+          kind: 'p',
+          text: 'Blueprint Music Group has closed your account in the BMG app, so you can no longer sign in.',
+        },
+        {
+          kind: 'p',
+          text: `A copy of your account is kept securely for ${i.retainYears} years, for Blueprint’s records, and then deleted. To ask about it, or to have it deleted sooner, reply to this email.`,
+        },
+      ],
+      footerNote: 'If you think this is a mistake, reply to this email and Blueprint will help.',
+    },
+    layout(ctx),
+  );
+}
