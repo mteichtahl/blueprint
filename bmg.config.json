@@ -18,21 +18,29 @@
     "staging": {
       "qualifier": "bmgstg",
       "subdomain": "staging",
-      "cognitoPlan": "ESSENTIALS",
       "hosts": {
         "artist": "artist-beta",
         "admin": "admin-beta"
       },
-      "certificateArn": "arn:aws:acm:us-east-1:346073464284:certificate/16ef12ce-c422-48e4-975d-d107787e779c"
+      "certificateArn": "arn:aws:acm:us-east-1:346073464284:certificate/16ef12ce-c422-48e4-975d-d107787e779c",
+      "cognitoPlan": "ESSENTIALS",
+      "socialProviders": [],
+      "smsMfa": false,
+      "captcha": {
+        "scriptUrl": "https://84c6ac84642a.ap-southeast-2.captcha-sdk.awswaf.com/84c6ac84642a/jsapi.js",
+        "apiKey": "o0ObfQUHh9mQ2NkDZHbEzL5/a/e7OO5rOZBwdrLhdXmwk4X6qNTuj8sGXyYN+rAjE4JzW70X1IIXoehshi7pQakGEIbJFZLK+n5renxxe2EIEq/6bcVDRRSM7SQea7pGw73LaptQcTvE5mW4qWVoHwgXApbu1oLg2rbhOfE9Z9yuXlnxFuMSm59N4Ui74ZY91nv5vm29uSbVIhiVY9V4pqbOR9W6u2ywLZs2pHz6W1omyqRuHm5qc34yfo+h4V19WUq36X0a8qYuDzCnIUPjg4T4Vh8nJ/yWZ80o0IGrAmqyCuX0ro4huYWfVQgM4U2Zhc1n65avmphOVHPkmpDbnpixO53kO4n+4jus0qLnTWUHQyZ41iKTuFGB2YD5G8UQGAAStjLSA/nuYOkcNfll0t5vwhWEPBC8Moi86+bwffCXgY46uEdVReEUHhN4p5AUK9WhlBEZVakqyxhhh8g4K7GV04N0lumq4vo9/MBG/vkiejPcepA9WOX4D5+3+9Ki/92ycaQWAPNAPAESKcZrj+2G+JWWE2Es4r8gr0nzE2nvfhFkZvjqYF+/OCzOeVIEMYMwyhaYXm5/ndXO2pAILFFPesxHOHl0ADorDxu8SH1lurn8axh6JHLh8VbzmRMkCmIrX5LAD/d3FzDQ1Dx8xrjmE3+rq4zRiVS8Evz1G4M=_0_1"
+      }
     },
     "prod": {
       "qualifier": "bmgprd",
       "subdomain": "",
-      "cognitoPlan": "PLUS",
       "hosts": {
         "artist": "artist",
         "admin": "admin"
-      }
+      },
+      "cognitoPlan": "PLUS",
+      "socialProviders": [],
+      "smsMfa": false
     }
   },
   "domain": {

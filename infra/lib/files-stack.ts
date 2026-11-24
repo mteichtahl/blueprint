@@ -145,7 +145,15 @@ export class FilesStack extends BmgStack {
           maxAge: 3600,
         },
       ],
-      lifecycleRules: [{ noncurrentVersionExpiration: Duration.days(35) }],
+      lifecycleRules: [
+        { noncurrentVersionExpiration: Duration.days(35) },
+        // Rev 22: a deleted artist's archive is kept for 7 years, then deleted.
+        {
+          id: 'DeletedArtistArchives',
+          tagFilters: { 'bmg-archive': 'artist-deletion' },
+          expiration: Duration.days(2557),
+        },
+      ],
       removalPolicy: RemovalPolicy.RETAIN,
     });
     this.artistData.addToResourcePolicy(
@@ -201,7 +209,8 @@ export class FilesStack extends BmgStack {
         new PolicyStatement({
           sid: 'OwnArtistObjects',
           // Delete: artists remove their own uploads (versioned bucket, so recoverable for 35 days).
-          actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+          // PutObjectTagging (rev 22): archived copies carry the tag the 7-year lifecycle rule matches.
+          actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject', 's3:PutObjectTagging'],
           resources: [this.artistData.arnForObjects(prefix)],
         }),
         new PolicyStatement({
