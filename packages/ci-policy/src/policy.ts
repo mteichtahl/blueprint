@@ -13,6 +13,10 @@ import { parse } from 'yaml';
  *  6. A workflow with a production job starts only from a release tag push or by
  *     hand (no branch pushes, no pull requests), so production gets releases,
  *     not every merge (docs/releases.md).
+ *  7. Only jobs bound to the `staging` or `production` environment may ask for
+ *     an OIDC token (`id-token: write`): that token is what buys AWS deploy
+ *     rights (tools/ci/aws-oidc.mjs, security review H1). The AWS trust
+ *     policies enforce this anyway; the check keeps workflows honest.
  */
 
 export interface Violation {
@@ -40,6 +44,12 @@ function triggerNames(on: unknown): string[] {
   if (Array.isArray(on)) return on.map(String);
   const rec = asRecord(on);
   return rec ? Object.keys(rec) : [];
+}
+
+/** True when a `permissions` value lets the job request an OIDC token. */
+function wantsIdToken(permissions: unknown): boolean {
+  if (permissions === 'write-all') return true;
+  return asRecord(permissions)?.['id-token'] === 'write';
 }
 
 function environmentName(env: unknown): string | undefined {
@@ -87,6 +97,12 @@ export function checkWorkflow(file: string, source: string): Violation[] {
   if (doc.permissions === undefined) {
     add('explicit-permissions', 'set top-level `permissions:` explicitly (least privilege)');
   }
+  if (wantsIdToken(doc.permissions)) {
+    add(
+      'id-token-deploy-jobs-only',
+      'grant `id-token: write` on deploy jobs only, not the workflow',
+    );
+  }
 
   const jobs = asRecord(doc.jobs);
   if (!jobs || Object.keys(jobs).length === 0) {
@@ -103,6 +119,17 @@ export function checkWorkflow(file: string, source: string): Violation[] {
   for (const [jobId, rawJob] of Object.entries(jobs)) {
     const job = asRecord(rawJob);
     if (!job) continue;
+
+    if (typeof job.uses !== 'string' && wantsIdToken(job.permissions)) {
+      const env = environmentName(job.environment);
+      if (env !== 'staging' && env !== 'production') {
+        add(
+          'id-token-deploy-jobs-only',
+          '`id-token: write` is only for jobs in the staging or production environment',
+          jobId,
+        );
+      }
+    }
 
     if (typeof job.uses === 'string') {
       // Reusable workflow call: only local workflows, which are checked themselves.

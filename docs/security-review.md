@@ -25,7 +25,7 @@
   - Deletion is denied except to the offboarding role.
   - There are no wildcard actions, and the key admin has no data actions.
 - **CDK-managed keys** keep the default root statement, so IAM in the account can manage them. IAM is limited by the permission boundary, which denies key deletion, security-service tampering, IAM users and access keys, roles without the boundary, and crossing environments.
-- **Runner roles:** CodeBuild only, with the boundary attached. Only the prod runner can assume the prod bootstrap roles. No AWS secrets are stored in GitHub.
+- **Runner roles:** CodeBuild only, with the boundary attached. Since the 25 Nov review (H1) no runner role can deploy; deploy jobs assume `bmg-github-deploy-<target>` with their GitHub OIDC token, which only a job in the matching GitHub environment gets. No AWS secrets are stored in GitHub.
 - **Cognito:**
   - Invite-only (admin create).
   - MFA required (TOTP), plus passkeys.

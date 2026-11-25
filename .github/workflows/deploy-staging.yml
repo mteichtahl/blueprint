@@ -8,7 +8,8 @@ name: Deploy staging
 # groups, so a release waiting for approval never holds up staging, and
 # several merged PRs ship to production together as one release
 # (docs/releases.md). AWS credentials come only from each CodeBuild project's
-# IAM role; no AWS secret is stored in GitHub (design 16).
+# deploy role, reached with the job's GitHub OIDC token; no AWS secret is
+# stored in GitHub (design 16, security review H1).
 
 on:
   push:
@@ -38,6 +39,10 @@ jobs:
     needs: checks
     runs-on: codebuild-bmg-deploy-staging-${{ github.run_id }}-${{ github.run_attempt }}
     environment: staging
+    permissions:
+      contents: read
+      # The job's OIDC token buys the deploy role (tools/ci/aws-oidc.mjs).
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +61,9 @@ jobs:
           BMG_ENV: staging
           BMG_VERSION: ${{ github.sha }}
         run: npm run build -w @bmg/web
+      # AWS rights only from here on, so install scripts and the build never hold them.
+      - name: AWS credentials (staging deploy role)
+        run: node tools/ci/aws-oidc.mjs staging
       - name: cdk deploy (staging)
         working-directory: infra
         env:
@@ -78,3 +86,4 @@ jobs:
     uses: ./.github/workflows/e2e.yml
     permissions:
       contents: read
+      id-token: write

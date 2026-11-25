@@ -204,6 +204,9 @@ export const names = {
   ) => `cdk-${qualifierValue}-${kind}-role-${cfg.account.id}-${cfg.account.homeRegion}`,
   runnerProject: (cfg: BmgConfig, kind: 'ci' | 'deploy-staging' | 'deploy-prod') =>
     `${cfg.project}-${kind}`,
+  /** The role a GitHub deploy job assumes with its OIDC token (security review H1). */
+  githubDeployRole: (cfg: BmgConfig, target: 'staging' | 'prod') =>
+    `${cfg.project}-github-deploy-${target}`,
   runnerLogGroup: (cfg: BmgConfig, kind: 'ci' | 'deploy-staging' | 'deploy-prod') =>
     `/aws/codebuild/${cfg.project}-${kind}`,
   agentRepository: (cfg: BmgConfig) => `${cfg.project}-agent`,

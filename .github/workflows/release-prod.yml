@@ -48,6 +48,10 @@ jobs:
     needs: guard
     runs-on: codebuild-bmg-deploy-prod-${{ github.run_id }}-${{ github.run_attempt }}
     environment: production
+    permissions:
+      contents: read
+      # The job's OIDC token buys the deploy role (tools/ci/aws-oidc.mjs).
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,6 +67,9 @@ jobs:
           BMG_ENV: prod
           BMG_VERSION: ${{ github.sha }}
         run: npm run build -w @bmg/web
+      # AWS rights only from here on, so install scripts and the build never hold them.
+      - name: AWS credentials (production deploy role)
+        run: node tools/ci/aws-oidc.mjs prod
       - name: cdk deploy (prod)
         working-directory: infra
         env:
