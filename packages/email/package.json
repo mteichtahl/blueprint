@@ -12,8 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.1168.0",
-    "@aws-sdk/client-ssm": "^3.1168.0",
+    "@aws-sdk/client-secrets-manager": "^3.1173.0",
+    "@aws-sdk/client-ssm": "^3.1173.0",
     "nodemailer": "^10.4.0"
   },
   "devDependencies": {
