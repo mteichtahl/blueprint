@@ -162,6 +162,7 @@ export class ApiStack extends BmgStack {
     const consent = fn('Consent', 'consent', 'consent ledger');
     const stepUp = fn('StepUp', 'step-up', 'TOTP step-up for social sign-in', {
       PLATFORM_KEY_ARN: props.platformKey.keyArn,
+      USER_POOL_ID: props.userPool.userPoolId,
     });
     // ── To-do reminders: one EventBridge Scheduler one-off per to-do ──
     // It puts `todo.reminder` straight on the env bus; the notifier sends it.
@@ -439,6 +440,9 @@ export class ApiStack extends BmgStack {
       [sessions],
     );
     putEvents(stepUp);
+    // Security review M2: a social sign-in may only add the first authenticator
+    // for an account that never signed in another way (its Cognito status).
+    allow(stepUp, 'NativeAccountStatus', ['cognito-idp:ListUsers'], [props.userPool.userPoolArn]);
     allow(
       artists,
       'Invites',

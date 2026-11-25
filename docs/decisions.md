@@ -906,3 +906,12 @@ Marc asked that people and Blueprint staff can change names, and that an artist 
 - **Not built yet:** the artist's KMS key isn't scheduled for deletion (the key policy gives no role `ScheduleKeyDeletion`, and the archive needs the key for 7 years); the CLI `blueprint archive list|export|purge` and early purge; Object Lock on the archive; revoking connector tokens at each provider (the sealed tokens are deleted, not archived); a name scan of document contents (only names and sharing are checked); moving contacts the artist added to Blueprint (they stay, unchanged); e2e script R.
 - **Web:** Profile › About you › **Edit name**; Access & permissions team editor gets **Name**; the workspace header has **Artist details** (`EditArtistDetails`: the name, and for admins **Delete artist…** in the danger area) opening `pages/DeleteArtist.tsx`; Artists & applications shows **Deleted artists** (progress, Retry, mentions). Chats show a deleted artist as "Former artist".
 - **Tests:** `offboarding.test.ts` and `names.test.ts` (API), `delete-artist.test.tsx` (web), and the infra data-access trust test.
+
+## App authenticator enrolment for social sign-in (25 Nov 2026, security review M2)
+
+Social sign-in (Google, Apple, Facebook) is built but off in both environments. The review found that, once on, a social sign-in could add the first app authenticator for any account that hadn't got one, so whoever held someone's Google account could skip their real second factor. Fixed before it's switched on:
+
+- **Who may enrol from a social sign-in:** only an account that has never signed in another way (Cognito status `FORCE_CHANGE_PASSWORD`: an invited artist who joined with Google). Everyone else gets a 403 and adds the authenticator from a password or passkey sign-in, which already passed Cognito MFA: Profile › Security › **Authenticator for social sign-in** (shown only when social providers are on). `POST /step-up/totp/setup` and `/verify` now accept native sessions for this; a native verify confirms the authenticator and marks no session.
+- **Wrong codes are counted per person**, on `USER#<sub> / TOTP` (5 an hour, across every session), as well as per session.
+- **Each code works once:** the accepted TOTP time step is stored (`lastStep`) with a conditional write, so a code can't be replayed inside its window or sent twice at once.
+- The step-up function gains `cognito-idp:ListUsers` on the pool (to read the account's status) and `USER_POOL_ID`.
