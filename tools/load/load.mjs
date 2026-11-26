@@ -8,11 +8,12 @@
 // The mix is the web app shell, its config and a JS bundle (CloudFront), and
 // unauthenticated API calls, which still go through the WAF, API Gateway and
 // the token authorizer Lambda (no authorizer cache), so they load the real
-// per-request path. The API WAF blocks after 1,000 API requests per 5 minutes
-// per key, so the default 5/s (3/s to the API, 900 per 5 minutes) stays under.
+// per-request path. CloudFront's WAF (edge stack) blocks after 1,000 API
+// requests per 5 minutes per visitor, so the default 5/s (3/s to the API, 900
+// per 5 minutes) stays under.
 //
-// --waf-check runs last and on purpose goes over the limit, to prove the WAF
-// rate rule blocks. It leaves the runner's IP blocked for a few minutes.
+// --waf-check runs last and on purpose goes over the limit, to prove the edge
+// WAF rate rule blocks. It leaves the runner's IP blocked for a few minutes.
 import { appendFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -120,7 +121,7 @@ async function wafProbe() {
   lines.push(
     pass
       ? `Blocked with 403 after about ${firstBlock} requests in ${Math.round((performance.now() - start) / 1000)} s: the rate rule works.`
-      : `**Not blocked** after ${sent} requests in 4 minutes: check the API WAF rate rule.`,
+      : `**Not blocked** after ${sent} requests in 4 minutes: check the edge WAF rate rule (RateLimitApiPerIp).`,
     '',
   );
   return { lines, failed: !pass };
