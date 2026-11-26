@@ -141,9 +141,9 @@ describe('tooling (CodeBuild runners)', () => {
     }
   });
 
-  it('attaches the permission boundary to every runner role', () => {
+  it('attaches the permission boundary to every runner and deploy role', () => {
     const roles = t.findResources('AWS::IAM::Role');
-    expect(Object.keys(roles)).toHaveLength(3);
+    expect(Object.keys(roles)).toHaveLength(5);
     for (const role of Object.values(roles)) {
       expect(JSON.stringify(role.Properties.PermissionsBoundary)).toContain(
         'bmg-permission-boundary',
@@ -151,21 +151,67 @@ describe('tooling (CodeBuild runners)', () => {
     }
   });
 
-  it('only lets the prod runner assume prod bootstrap roles', () => {
+  // Security review H1: a workflow on any branch can pick any runner by its
+  // label, so no runner role may deploy. Deploy rights come from roles that
+  // only a GitHub job in the matching environment can assume.
+  it('gives no runner role any deploy rights', () => {
+    const policies = Object.values(t.findResources('AWS::IAM::Policy')).map((p) =>
+      JSON.stringify(p.Properties),
+    );
+    const runnerPolicies = policies.filter((p) => /(Ci|DeployStaging|DeployProd)Role/.test(p));
+    for (const p of runnerPolicies) {
+      expect(p).not.toMatch(/cdk-bmg(stg|prd)-(deploy|file-publishing|image-publishing)-role/);
+      expect(p).not.toContain('e2e-accounts');
+    }
+    const ci = runnerPolicies.filter((p) => p.includes('CiRole'));
+    expect(ci.join()).toContain('cdk-bmgstg-lookup-role');
+  });
+
+  it('trusts the GitHub OIDC provider for the deploy roles, per environment only', () => {
+    t.hasResourceProperties('AWS::IAM::OIDCProvider', {
+      Url: 'https://token.actions.githubusercontent.com',
+      ClientIdList: ['sts.amazonaws.com'],
+    });
+    for (const [target, env] of [
+      ['prod', 'production'],
+      ['staging', 'staging'],
+    ] as const) {
+      t.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: names.githubDeployRole(cfg, target),
+        MaxSessionDuration: 7200,
+        Tags: Match.arrayWith([{ Key: 'bmg:deploy-target', Value: target }]),
+        AssumeRolePolicyDocument: {
+          Statement: [
+            Match.objectLike({
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+                  'token.actions.githubusercontent.com:sub': `repo:${cfg.github.owner}/${cfg.github.repo}:environment:${env}`,
+                },
+              },
+            }),
+          ],
+        },
+      });
+    }
+  });
+
+  it('only lets the production deploy role assume prod bootstrap roles', () => {
     const roles = t.findResources('AWS::IAM::Policy');
     const byRole = Object.values(roles).map((p) => JSON.stringify(p.Properties));
     const prodPolicies = byRole.filter((p) => p.includes('cdk-bmgprd-deploy-role'));
     expect(prodPolicies).toHaveLength(1);
-    expect(prodPolicies[0]).toContain('DeployProdRole');
+    expect(prodPolicies[0]).toContain('GitHubDeployProd');
   });
 
-  it('lets only the staging runner read the E2E accounts secret', () => {
+  it('lets only the staging deploy role read the E2E accounts secret', () => {
     const policies = Object.values(t.findResources('AWS::IAM::Policy')).map((p) =>
       JSON.stringify(p.Properties),
     );
     const readers = policies.filter((p) => p.includes('bmg/staging/e2e-accounts'));
     expect(readers).toHaveLength(1);
-    expect(readers[0]).toContain('DeployStagingRole');
+    expect(readers[0]).toContain('GitHubDeployStaging');
     expect(readers[0]).toContain('secretsmanager:GetSecretValue');
   });
 
@@ -189,15 +235,13 @@ describe('tooling (CodeBuild runners)', () => {
     }
   });
 
-  it('tags runner roles with their deploy target for the boundary', () => {
-    t.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'bmg-deploy-prod-runner',
-      Tags: Match.arrayWith([{ Key: 'bmg:deploy-target', Value: 'prod' }]),
-    });
-    t.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'bmg-ci-runner',
-      Tags: Match.arrayWith([{ Key: 'bmg:deploy-target', Value: 'none' }]),
-    });
+  it('tags every runner role as no deploy target, so the boundary refuses deploy roles', () => {
+    for (const kind of ['ci', 'deploy-staging', 'deploy-prod']) {
+      t.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: `bmg-${kind}-runner`,
+        Tags: Match.arrayWith([{ Key: 'bmg:deploy-target', Value: 'none' }]),
+      });
+    }
   });
 });
 
@@ -654,6 +698,54 @@ describe('environment web app', () => {
     expect(dist).toContain('/public/*');
     t.hasResourceProperties('AWS::CloudFront::OriginAccessControl', {
       OriginAccessControlConfig: Match.objectLike({ OriginAccessControlOriginType: 'lambda' }),
+    });
+  });
+});
+
+describe('edge WAF (security review M1)', () => {
+  const env = stacks.environments[1]!;
+  const edge = Template.fromStack(env.edge);
+
+  it('is CloudFront scoped, in us-east-1, with per-visitor limits and the reputation list', () => {
+    expect(env.edge.region).toBe('us-east-1');
+    const acl = Object.values(edge.findResources('AWS::WAFv2::WebACL'))[0]!.Properties;
+    expect(acl.Scope).toBe('CLOUDFRONT');
+    expect(acl.Rules.map((r: { Name: string }) => r.Name)).toEqual([
+      'AWSManagedRulesAmazonIpReputationList',
+      'RateLimitPublicFormsPerIp',
+      'RateLimitApiPerIp',
+      'RateLimitAllPerIp',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+    ]);
+    for (const r of acl.Rules.filter((r: { Name: string }) => r.Name.startsWith('RateLimit'))) {
+      expect(r.Action).toEqual({ Block: {} });
+      expect(r.Statement.RateBasedStatement.AggregateKeyType).toBe('IP');
+    }
+  });
+
+  it('is attached to the distribution, which signs its API requests', () => {
+    const web = Template.fromStack(env.web);
+    const dist = Object.values(web.findResources('AWS::CloudFront::Distribution'))[0]!;
+    expect(dist.Properties.DistributionConfig.WebACLId).toBeDefined();
+    const origins = JSON.stringify(dist.Properties.DistributionConfig.Origins);
+    expect(origins).toContain('x-bmg-origin-verify');
+  });
+
+  it('leaves the regional WAFs rate limiting only requests that skip CloudFront', () => {
+    for (const stack of [env.api, env.enquiries]) {
+      const acl = Object.values(Template.fromStack(stack).findResources('AWS::WAFv2::WebACL'))[0]!
+        .Properties;
+      const rule = acl.Rules.find((r: { Name: string }) => r.Name === 'RateLimitPerIp');
+      const scope = rule.Statement.RateBasedStatement.ScopeDownStatement;
+      expect(scope.NotStatement.Statement.ByteMatchStatement.FieldToMatch).toEqual({
+        SingleHeader: { Name: 'x-bmg-origin-verify' },
+      });
+    }
+  });
+
+  it('keeps the shared header value in the foundation stack', () => {
+    Template.fromStack(env.foundation).hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: names.originVerifySecret(cfg, 'prod'),
     });
   });
 });

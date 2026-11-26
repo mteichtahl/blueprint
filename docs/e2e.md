@@ -111,8 +111,9 @@ the inbox.
 
 ## Setting up (once)
 
-1. Deploy the runner change: `blueprint pipeline deploy` (lets the
-   deploy-staging runner read `bmg/staging/e2e-accounts`).
+1. Deploy the tooling stack: `blueprint pipeline deploy` (lets the staging
+   GitHub deploy role, `bmg-github-deploy-staging`, read
+   `bmg/staging/e2e-accounts`; the E2E job assumes it with its OIDC token).
 2. Create the accounts: `blueprint e2e setup --email you@example.com`.
    It invites the artists and the team member through the app's own API (so
    they're real accounts with their own keys), sets known passwords, sets up

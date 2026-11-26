@@ -97,6 +97,35 @@ describe('workflow policy', () => {
     });
   });
 
+  describe('OIDC tokens (id-token: write)', () => {
+    const job = (extra: string) =>
+      wf(
+        `jobs:\n  a:\n    runs-on: ${label('deploy-staging')}\n${extra}    steps:\n      - run: echo\n`,
+      );
+    const rules = (src: string) => checkWorkflow('t.yml', src).map((v) => v.rule);
+
+    it('allows it on a job in the staging environment', () => {
+      const src = job(
+        '    environment: staging\n    permissions:\n      contents: read\n      id-token: write\n',
+      );
+      expect(rules(src)).toEqual([]);
+    });
+
+    it('refuses it on a job outside a deploy environment', () => {
+      const src = job('    permissions:\n      contents: read\n      id-token: write\n');
+      expect(rules(src)).toContain('id-token-deploy-jobs-only');
+    });
+
+    it('refuses write-all on a job outside a deploy environment', () => {
+      expect(rules(job('    permissions: write-all\n'))).toContain('id-token-deploy-jobs-only');
+    });
+
+    it('refuses it at the workflow level', () => {
+      const src = `name: t\non: [pull_request]\npermissions:\n  contents: read\n  id-token: write\njobs:\n  a:\n    runs-on: ${label('ci')}\n    steps:\n      - run: echo\n`;
+      expect(rules(src)).toContain('id-token-deploy-jobs-only');
+    });
+  });
+
   it("passes on the repo's own workflows", () => {
     const dir = resolve(import.meta.dirname, '../../../.github/workflows');
     const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));

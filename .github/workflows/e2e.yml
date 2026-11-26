@@ -4,8 +4,9 @@ name: Staging E2E
 # every deploy, so each merge to main is tested where it runs. It can also be
 # run by hand against whatever staging runs now.
 #
-# It runs on the deploy-staging runner because only that role can read the test
-# accounts (Secrets Manager, bmg/staging/e2e-accounts, under the tooling key).
+# It runs on the deploy-staging runner, and reads the test accounts (Secrets
+# Manager, bmg/staging/e2e-accounts, under the tooling key) through the staging
+# GitHub deploy role, which only a job in the staging environment can assume.
 # Nothing about the accounts is stored in GitHub. The tests only touch data the
 # E2E accounts own.
 
@@ -30,6 +31,10 @@ jobs:
     name: Staging E2E
     runs-on: codebuild-bmg-deploy-staging-${{ github.run_id }}-${{ github.run_attempt }}
     environment: staging
+    permissions:
+      contents: read
+      # The job's OIDC token buys the deploy role (tools/ci/aws-oidc.mjs).
+      id-token: write
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,6 +59,8 @@ jobs:
             liberation-fonts google-noto-sans-fonts
           npm run browsers -w @bmg/e2e
 
+      - name: AWS credentials (staging deploy role)
+        run: node tools/ci/aws-oidc.mjs staging
       - name: Run the tests
         env:
           CI: 'true'
