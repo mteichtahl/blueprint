@@ -24,6 +24,7 @@ import type { Construct } from 'constructs';
 import { names, type EnvironmentName } from '@bmg/config';
 import { acknowledge, BmgStack, type BmgStackProps } from './common.ts';
 import { BmgFunction } from './function.ts';
+import { directRateLimit, originVerifyValue } from './origin-verify.ts';
 
 export interface EnquiriesStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   readonly envName: EnvironmentName;
@@ -264,10 +265,11 @@ export class EnquiriesStack extends BmgStack {
       captchaConfig: { immunityTimeProperty: { immunityTime: 300 } },
       rules: [
         {
+          // Direct calls only (security review M1); CloudFront's WAF limits visitors.
           name: 'RateLimitPerIp',
           priority: 0,
           action: { block: {} },
-          statement: { rateBasedStatement: { limit: 500, aggregateKeyType: 'IP' } },
+          statement: directRateLimit(500, originVerifyValue(cfg, env)),
           visibilityConfig: visibility('RateLimitPerIp'),
         },
         managed('AWSManagedRulesCommonRuleSet', 1, ['SizeRestrictions_BODY']),

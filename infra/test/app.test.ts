@@ -658,6 +658,54 @@ describe('environment web app', () => {
   });
 });
 
+describe('edge WAF (security review M1)', () => {
+  const env = stacks.environments[1]!;
+  const edge = Template.fromStack(env.edge);
+
+  it('is CloudFront scoped, in us-east-1, with per-visitor limits and the reputation list', () => {
+    expect(env.edge.region).toBe('us-east-1');
+    const acl = Object.values(edge.findResources('AWS::WAFv2::WebACL'))[0]!.Properties;
+    expect(acl.Scope).toBe('CLOUDFRONT');
+    expect(acl.Rules.map((r: { Name: string }) => r.Name)).toEqual([
+      'AWSManagedRulesAmazonIpReputationList',
+      'RateLimitPublicFormsPerIp',
+      'RateLimitApiPerIp',
+      'RateLimitAllPerIp',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+    ]);
+    for (const r of acl.Rules.filter((r: { Name: string }) => r.Name.startsWith('RateLimit'))) {
+      expect(r.Action).toEqual({ Block: {} });
+      expect(r.Statement.RateBasedStatement.AggregateKeyType).toBe('IP');
+    }
+  });
+
+  it('is attached to the distribution, which signs its API requests', () => {
+    const web = Template.fromStack(env.web);
+    const dist = Object.values(web.findResources('AWS::CloudFront::Distribution'))[0]!;
+    expect(dist.Properties.DistributionConfig.WebACLId).toBeDefined();
+    const origins = JSON.stringify(dist.Properties.DistributionConfig.Origins);
+    expect(origins).toContain('x-bmg-origin-verify');
+  });
+
+  it('leaves the regional WAFs rate limiting only requests that skip CloudFront', () => {
+    for (const stack of [env.api, env.enquiries]) {
+      const acl = Object.values(Template.fromStack(stack).findResources('AWS::WAFv2::WebACL'))[0]!
+        .Properties;
+      const rule = acl.Rules.find((r: { Name: string }) => r.Name === 'RateLimitPerIp');
+      const scope = rule.Statement.RateBasedStatement.ScopeDownStatement;
+      expect(scope.NotStatement.Statement.ByteMatchStatement.FieldToMatch).toEqual({
+        SingleHeader: { Name: 'x-bmg-origin-verify' },
+      });
+    }
+  });
+
+  it('keeps the shared header value in the foundation stack', () => {
+    Template.fromStack(env.foundation).hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: names.originVerifySecret(cfg, 'prod'),
+    });
+  });
+});
+
 describe('environment notifications and branded email', () => {
   const [staging, prod] = stacks.environments.map((e) => Template.fromStack(e.notify));
 

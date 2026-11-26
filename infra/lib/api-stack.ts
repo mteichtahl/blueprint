@@ -39,6 +39,7 @@ import type { Construct } from 'constructs';
 import { names, TAG_ENV, type EnvironmentName } from '@bmg/config';
 import { acknowledge, BmgStack, KMS_GRANT_FINDINGS, type BmgStackProps } from './common.ts';
 import { BmgFunction } from './function.ts';
+import { directRateLimit, originVerifyValue } from './origin-verify.ts';
 
 export interface ApiStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   readonly envName: EnvironmentName;
@@ -1383,10 +1384,12 @@ export class ApiStack extends BmgStack {
       },
       rules: [
         {
+          // Direct calls only (security review M1): via CloudFront every visitor
+          // shares an edge address, and the edge WAF limits them there.
           name: 'RateLimitPerIp',
           priority: 0,
           action: { block: {} },
-          statement: { rateBasedStatement: { limit: 1000, aggregateKeyType: 'IP' } },
+          statement: directRateLimit(1000, originVerifyValue(cfg, env)),
           visibilityConfig: {
             cloudWatchMetricsEnabled: true,
             sampledRequestsEnabled: true,

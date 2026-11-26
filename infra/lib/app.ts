@@ -17,6 +17,7 @@ import { IdentityStack } from './identity-stack.ts';
 import { KeysStack } from './keys-stack.ts';
 import { NotifyStack } from './notify-stack.ts';
 import { OffboardingStack } from './offboarding-stack.ts';
+import { EdgeStack } from './edge-stack.ts';
 import { WebStack } from './web-stack.ts';
 import { ToolingStack } from './tooling-stack.ts';
 
@@ -47,6 +48,7 @@ export interface BuildAppOptions {
  *   bmg-<env>-api           home region  pipeline-deployed (REST API, authorizer, WAF)
  *   bmg-<env>-enquiries     home region  pipeline-deployed (consultation requests: API, WAF CAPTCHA)
  *   bmg-<env>-notify        home region  pipeline-deployed (branded notification email)
+ *   bmg-<env>-edge          us-east-1    pipeline-deployed (CloudFront's WAF: per-visitor rate limits)
  *   bmg-<env>-web           home region  pipeline-deployed (web app on CloudFront, web client)
  * where <env> is staging (bmg-deploy-staging runner) or prod (bmg-deploy-prod).
  */
@@ -230,9 +232,21 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       realtime: api.realtime,
       description: `BMG ${envName} notifications: branded email for workspace events, live updates`,
     });
+    // CloudFront's WAF must live in us-east-1 (security review M1). Its ARN
+    // reaches the web stack through CDK's cross-region references (an SSM
+    // parameter written into the home region).
+    const edgeStack = new EdgeStack(app, `${cfg.project}-${envName}-edge`, {
+      config: cfg,
+      env: edge,
+      envName,
+      crossRegionReferences: true,
+      description: `BMG ${envName} edge: CloudFront WAF with per-visitor rate limits`,
+    });
     const web = new WebStack(app, `${cfg.project}-${envName}-web`, {
       config: cfg,
       env: home,
+      crossRegionReferences: true,
+      webAclArn: edgeStack.webAcl.attrArn,
       envName,
       userPool: identity.userPool,
       socialProviders: identity.socialProviderNames,
@@ -265,6 +279,7 @@ export function buildApp(app: App, cfg: BmgConfig, opts: BuildAppOptions = {}) {
       enquiries,
       offboarding,
       notify,
+      edge: edgeStack,
       web,
     };
   });

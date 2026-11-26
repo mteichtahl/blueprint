@@ -1,13 +1,14 @@
 import { CfnOutput, RemovalPolicy } from 'aws-cdk-lib';
 import { ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Topic } from 'aws-cdk-lib/aws-sns';
 import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import type { Construct } from 'constructs';
 import { names, type EnvironmentName } from '@bmg/config';
 import { channelFor, parseVersion, releaseLabel } from '@bmg/config/release';
-import { BmgStack, type BmgStackProps } from './common.ts';
+import { acknowledge, BmgStack, type BmgStackProps } from './common.ts';
 
 export interface EnvFoundationStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   readonly envName: EnvironmentName;
@@ -79,5 +80,20 @@ export class EnvFoundationStack extends BmgStack {
       parameterName: names.ssm(cfg, env, 'foundation/alarm-topic-arn'),
       stringValue: this.alarmTopic.topicArn,
     });
+    // Security review M1: CloudFront sends this value in x-bmg-origin-verify,
+    // so the API WAFs rate limit only direct calls (CloudFront's own WAF limits
+    // each visitor at the edge). The web, API and enquiries stacks read it by
+    // name at deploy; nothing reads it at run time, so it isn't rotated.
+    const originVerify = new Secret(this, 'OriginVerify', {
+      secretName: names.originVerifySecret(cfg, env),
+      description: `BMG ${env}: header value CloudFront sends to the APIs (origin verify)`,
+      generateSecretString: { excludePunctuation: true, passwordLength: 40 },
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    acknowledge(
+      originVerify,
+      'A marker CloudFront and the WAFs read at deploy; rotating it needs a redeploy of both, so it is not rotated.',
+      'AwsSolutions-SMG4',
+    );
   }
 }
