@@ -915,3 +915,12 @@ The API and enquiries WAFs are regional and sit behind CloudFront, so the addres
 - **Origin verify header:** the foundation stack holds a generated secret (`bmg/<env>/origin-verify`). CloudFront sends it as `x-bmg-origin-verify` to the API origins, and the regional `RateLimitPerIp` rules now only count requests without it, so direct calls to the API Gateway URL are still limited. The regional WAFs keep their managed rules, body limits and the enquiries CAPTCHA. The value is read at deploy, so it isn't rotated (SMG4 acknowledged); rotating means updating the secret and redeploying web, api and enquiries.
 - **Rollout:** nothing special. The pipeline deploys foundation (secret) before api, enquiries, edge and web. The edge stack uses the environment bootstrap in us-east-1, which `blueprint bootstrap` already creates (home and edge regions), and the `bmg-<env>-*` deploy glob picks it up.
 - **Tests:** infra `edge WAF (security review M1)`; the load test's `--waf-check` now proves the edge rule.
+
+## App authenticator enrolment for social sign-in (25 Nov 2026, security review M2)
+
+Social sign-in (Google, Apple, Facebook) is built but off in both environments. The review found that, once on, a social sign-in could add the first app authenticator for any account that hadn't got one, so whoever held someone's Google account could skip their real second factor. Fixed before it's switched on:
+
+- **Who may enrol from a social sign-in:** only an account that has never signed in another way (Cognito status `FORCE_CHANGE_PASSWORD`: an invited artist who joined with Google). Everyone else gets a 403 and adds the authenticator from a password or passkey sign-in, which already passed Cognito MFA: Profile › Security › **Authenticator for social sign-in** (shown only when social providers are on). `POST /step-up/totp/setup` and `/verify` now accept native sessions for this; a native verify confirms the authenticator and marks no session.
+- **Wrong codes are counted per person**, on `USER#<sub> / TOTP` (5 an hour, across every session), as well as per session.
+- **Each code works once:** the accepted TOTP time step is stored (`lastStep`) with a conditional write, so a code can't be replayed inside its window or sent twice at once.
+- The step-up function gains `cognito-idp:ListUsers` on the pool (to read the account's status) and `USER_POOL_ID`.
