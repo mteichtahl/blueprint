@@ -211,6 +211,13 @@ export const names = {
     `/aws/codebuild/${cfg.project}-${kind}`,
   agentRepository: (cfg: BmgConfig) => `${cfg.project}-agent`,
   mailerRole: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}-${env}-mailer`,
+  /**
+   * Secrets Manager id of the value CloudFront sends to the APIs in
+   * `x-bmg-origin-verify` (security review M1), so their regional WAFs can
+   * tell CloudFront traffic from direct calls.
+   */
+  originVerifySecret: (cfg: BmgConfig, env: EnvironmentName) =>
+    `${cfg.project}/${env}/origin-verify`,
   /** Secrets Manager id of the Gmail SMTP credentials for an environment. */
   smtpSecret: (cfg: BmgConfig, env: EnvironmentName) => `${cfg.project}/${env}/gmail-smtp`,
   /** One social sign-in provider's OAuth app (JSON: clientId and clientSecret, or Apple's teamId, keyId, privateKey). */

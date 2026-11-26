@@ -907,6 +907,15 @@ Marc asked that people and Blueprint staff can change names, and that an artist 
 - **Web:** Profile › About you › **Edit name**; Access & permissions team editor gets **Name**; the workspace header has **Artist details** (`EditArtistDetails`: the name, and for admins **Delete artist…** in the danger area) opening `pages/DeleteArtist.tsx`; Artists & applications shows **Deleted artists** (progress, Retry, mentions). Chats show a deleted artist as "Former artist".
 - **Tests:** `offboarding.test.ts` and `names.test.ts` (API), `delete-artist.test.tsx` (web), and the infra data-access trust test.
 
+## CloudFront's own WAF (25 Nov 2026, security review M1)
+
+The API and enquiries WAFs are regional and sit behind CloudFront, so the address they saw was a CloudFront edge server, not the visitor. Their per-IP rate limits lumped many people together (and could lock out everyone behind one edge), and the IP reputation list judged edge servers. Fixed:
+
+- **Edge WAF:** new stack `bmg-<env>-edge` in us-east-1 (CloudFront requires it) with a `CLOUDFRONT` web ACL on the distribution: Amazon IP reputation list, 100 POSTs to `/public/*` per visitor per 5 minutes (newsletter, recovery, enquiries), 1,000 API requests (`/v1/*`, `/public/*`), 3,000 requests of any kind, then known bad inputs. The web stack takes its ARN through `crossRegionReferences`.
+- **Origin verify header:** the foundation stack holds a generated secret (`bmg/<env>/origin-verify`). CloudFront sends it as `x-bmg-origin-verify` to the API origins, and the regional `RateLimitPerIp` rules now only count requests without it, so direct calls to the API Gateway URL are still limited. The regional WAFs keep their managed rules, body limits and the enquiries CAPTCHA. The value is read at deploy, so it isn't rotated (SMG4 acknowledged); rotating means updating the secret and redeploying web, api and enquiries.
+- **Rollout:** nothing special. The pipeline deploys foundation (secret) before api, enquiries, edge and web. The edge stack uses the environment bootstrap in us-east-1, which `blueprint bootstrap` already creates (home and edge regions), and the `bmg-<env>-*` deploy glob picks it up.
+- **Tests:** infra `edge WAF (security review M1)`; the load test's `--waf-check` now proves the edge rule.
+
 ## Deploy rights come from GitHub environments, not runners (25 Nov 2026, security review H1)
 
 The security review found that a workflow on any branch could ask for the deploy-prod runner by its `runs-on` label and get production deploy rights without the production approval. CodeBuild's webhook filters for runner jobs can't check the branch or tag, and the workflow name is chosen by the workflow itself, so the fix is on the AWS side.
