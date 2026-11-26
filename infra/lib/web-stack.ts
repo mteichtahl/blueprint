@@ -46,6 +46,7 @@ import type { Construct } from 'constructs';
 import { names, type EnvironmentName } from '@bmg/config';
 import { acknowledge, BmgStack, type BmgStackProps } from './common.ts';
 import { BmgFunction, REPO_ROOT } from './function.ts';
+import { ORIGIN_VERIFY_HEADER, originVerifyValue } from './origin-verify.ts';
 
 export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier'> {
   readonly envName: EnvironmentName;
@@ -74,6 +75,8 @@ export interface WebStackProps extends Omit<BmgStackProps, 'envTag' | 'qualifier
   readonly mainTable: ITable;
   readonly platformKey: IKey;
   readonly bus: IEventBus;
+  /** CloudFront's WAF (edge stack, us-east-1; security review M1). */
+  readonly webAclArn: string;
 }
 
 const WEB_DIST = resolve(REPO_ROOT, 'apps/web/dist');
@@ -196,6 +199,9 @@ export class WebStack extends BmgStack {
     const consultHeaders = securityHeaders('ConsultHeaders', `${p}-web-consult`, true);
 
     const apiDomain = `${props.restApiId}.execute-api.${this.region}.amazonaws.com`;
+    // Security review M1: tells the APIs' regional WAFs this came through
+    // CloudFront (whose own WAF has already rate limited the visitor).
+    const viaCloudFront = { [ORIGIN_VERIFY_HEADER]: originVerifyValue(cfg, env) };
     const enquiriesDomain = `${props.enquiriesApiId}.execute-api.${this.region}.amazonaws.com`;
     // Single-page app routing at the edge, for the site only: paths without a
     // file extension (e.g. /auth/callback) load index.html. Distribution-level
@@ -254,6 +260,7 @@ export class WebStack extends BmgStack {
     const distribution = new Distribution(this, 'Distribution', {
       comment: `BMG ${env} web app`,
       defaultRootObject: 'index.html',
+      webAclId: props.webAclArn,
       httpVersion: HttpVersion.HTTP2_AND_3,
       priceClass: PriceClass.PRICE_CLASS_ALL,
       enableLogging: true,
@@ -282,6 +289,7 @@ export class WebStack extends BmgStack {
         '/v1/enquiries*': {
           origin: new HttpOrigin(enquiriesDomain, {
             protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY,
+            customHeaders: viaCloudFront,
           }),
           viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
           allowedMethods: AllowedMethods.ALLOW_ALL,
@@ -294,6 +302,7 @@ export class WebStack extends BmgStack {
           origin: new HttpOrigin(enquiriesDomain, {
             protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY,
             originPath: '/v1',
+            customHeaders: viaCloudFront,
           }),
           viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
           allowedMethods: AllowedMethods.ALLOW_ALL,
@@ -312,7 +321,10 @@ export class WebStack extends BmgStack {
           ],
         },
         '/v1/*': {
-          origin: new HttpOrigin(apiDomain, { protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY }),
+          origin: new HttpOrigin(apiDomain, {
+            protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY,
+            customHeaders: viaCloudFront,
+          }),
           viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
           allowedMethods: AllowedMethods.ALLOW_ALL,
           cachePolicy: CachePolicy.CACHING_DISABLED,
@@ -515,9 +527,8 @@ export class WebStack extends BmgStack {
 
     acknowledge(
       distribution,
-      'The edge WAF (us-east-1) and geo rules are still to come; the API behind /v1 already has a regional WAF. Until the certificate is set (blueprint dns cert) the default CloudFront certificate is used.',
+      'Geo restriction is not used. The edge WAF is attached (edge stack, security review M1). Until the certificate is set (blueprint dns cert) the default CloudFront certificate is used.',
       'AwsSolutions-CFR1',
-      'AwsSolutions-CFR2',
       'AwsSolutions-CFR4',
     );
   }

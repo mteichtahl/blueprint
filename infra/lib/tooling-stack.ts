@@ -1,7 +1,13 @@
 import { Duration, RemovalPolicy, Tags } from 'aws-cdk-lib';
 import { CfnProject } from 'aws-cdk-lib/aws-codebuild';
 import { Repository, TagMutability } from 'aws-cdk-lib/aws-ecr';
-import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  OidcProviderNative,
+  PolicyStatement,
+  Role,
+  ServicePrincipal,
+  WebIdentityPrincipal,
+} from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import type { Construct } from 'constructs';
@@ -34,15 +40,32 @@ const RUNNERS: RunnerSpec[] = [
     kind: 'deploy-staging',
     computeType: 'BUILD_GENERAL1_LARGE',
     deployTarget: 'staging',
-    description: 'GitHub Actions runner: deploys staging and runs e2e tests.',
+    description:
+      'GitHub Actions runner for staging deploys and e2e tests. AWS rights come from the staging GitHub deploy role.',
   },
   {
     kind: 'deploy-prod',
     computeType: 'BUILD_GENERAL1_SMALL',
     deployTarget: 'prod',
-    description: 'GitHub Actions runner: deploys production (production environment only).',
+    description:
+      'GitHub Actions runner for production deploys. AWS rights come from the production GitHub deploy role.',
   },
 ];
+
+const GITHUB_OIDC_HOST = 'token.actions.githubusercontent.com';
+
+/** The GitHub environment whose deploy jobs may use a target's deploy role. */
+export function githubEnvironment(target: 'staging' | 'prod'): 'staging' | 'production' {
+  return target === 'prod' ? 'production' : 'staging';
+}
+
+/**
+ * The OIDC `sub` a deploy job's token carries: GitHub sets it to the
+ * environment only for a job that declared it and passed its rules.
+ */
+export function githubDeploySubject(cfg: BmgConfig, target: 'staging' | 'prod'): string {
+  return `repo:${cfg.github.owner}/${cfg.github.repo}:environment:${githubEnvironment(target)}`;
+}
 
 /**
  * CI/CD tooling (design section 16): CodeBuild projects that act as ephemeral,
@@ -84,6 +107,68 @@ export class ToolingStack extends BmgStack {
     });
 
     for (const spec of RUNNERS) this.addRunner(cfg, spec, connectionArn, key);
+
+    // Deploy rights (security review H1): a runner's own role can't deploy,
+    // because a workflow on any branch can ask for any runner by its label.
+    // Deploy jobs swap the job's GitHub OIDC token for a deploy role instead,
+    // and the token only names an environment when the job passed that
+    // environment's rules (production: v* tags and an approval).
+    const github = new OidcProviderNative(this, 'GitHubOidc', {
+      url: `https://${GITHUB_OIDC_HOST}`,
+      clientIds: ['sts.amazonaws.com'],
+    });
+    for (const target of ['staging', 'prod'] as const) {
+      this.addDeployRole(cfg, target, github, key);
+    }
+  }
+
+  private addDeployRole(
+    cfg: BmgConfig,
+    target: 'staging' | 'prod',
+    github: OidcProviderNative,
+    key: Key,
+  ): void {
+    const id = target === 'prod' ? 'GitHubDeployProd' : 'GitHubDeployStaging';
+    const role = new Role(this, id, {
+      roleName: names.githubDeployRole(cfg, target),
+      description: `GitHub Actions deploy jobs in the ${githubEnvironment(target)} environment: deploy ${target}`,
+      assumedBy: new WebIdentityPrincipal(github.oidcProviderArn, {
+        StringEquals: {
+          [`${GITHUB_OIDC_HOST}:aud`]: 'sts.amazonaws.com',
+          [`${GITHUB_OIDC_HOST}:sub`]: githubDeploySubject(cfg, target),
+        },
+      }),
+      maxSessionDuration: Duration.hours(2),
+    });
+    // The permission boundary uses this tag to decide which deploy roles may be assumed.
+    Tags.of(role).add('bmg:deploy-target', target);
+    const q =
+      target === 'prod' ? cfg.environments.prod.qualifier : cfg.environments.staging.qualifier;
+    role.addToPolicy(
+      new PolicyStatement({
+        sid: 'AssumeCdkBootstrapRoles',
+        actions: ['sts:AssumeRole', 'sts:TagSession'],
+        resources: cdkRoleArns(cfg, q, ['deploy', 'file-publishing', 'image-publishing', 'lookup']),
+      }),
+    );
+    if (target === 'staging') {
+      // The Staging E2E job signs in as the test accounts (docs/e2e.md). Their
+      // details live in Secrets Manager under the tooling key, never in GitHub.
+      const e2eSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.e2eSecret(cfg, 'staging')}-*`;
+      role.addToPolicy(
+        new PolicyStatement({
+          sid: 'ReadE2eAccounts',
+          actions: ['secretsmanager:GetSecretValue', 'secretsmanager:DescribeSecret'],
+          resources: [e2eSecretArn],
+        }),
+      );
+      key.grantDecrypt(role);
+      acknowledge(
+        role,
+        'One named secret; Secrets Manager appends a random suffix to every secret ARN.',
+        `AwsSolutions-IAM5[Resource::${e2eSecretArn}]`,
+      );
+    }
   }
 
   private addRunner(cfg: BmgConfig, spec: RunnerSpec, connectionArn: string, key: Key): void {
@@ -110,8 +195,10 @@ export class ToolingStack extends BmgStack {
       }),
       maxSessionDuration: Duration.hours(2),
     });
-    // The permission boundary uses these tags to decide which deploy roles may be assumed.
-    Tags.of(role).add('bmg:deploy-target', spec.deployTarget);
+    // No runner role can deploy (security review H1): deploy jobs use the
+    // GitHub deploy roles below. The boundary denies the bootstrap deploy
+    // roles to any principal without a matching tag.
+    Tags.of(role).add('bmg:deploy-target', 'none');
 
     logGroup.grantWrite(role);
     key.grantEncryptDecrypt(role);
@@ -132,37 +219,14 @@ export class ToolingStack extends BmgStack {
       }),
     );
 
-    const stagingQ = cfg.environments.staging.qualifier;
-    const prodQ = cfg.environments.prod.qualifier;
-    const assumable =
-      spec.deployTarget === 'staging'
-        ? cdkRoleArns(cfg, stagingQ, ['deploy', 'file-publishing', 'image-publishing', 'lookup'])
-        : spec.deployTarget === 'prod'
-          ? cdkRoleArns(cfg, prodQ, ['deploy', 'file-publishing', 'image-publishing', 'lookup'])
-          : cdkRoleArns(cfg, stagingQ, ['lookup']); // ci: read-only `cdk diff` against staging
-    role.addToPolicy(
-      new PolicyStatement({
-        sid: 'AssumeCdkBootstrapRoles',
-        actions: ['sts:AssumeRole', 'sts:TagSession'],
-        resources: assumable,
-      }),
-    );
-
-    if (spec.deployTarget === 'staging') {
-      // The Staging E2E job signs in as the test accounts (docs/e2e.md). Their
-      // details live in Secrets Manager under this stack's key, never in GitHub.
-      const e2eSecretArn = `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${names.e2eSecret(cfg, 'staging')}-*`;
+    if (spec.deployTarget === 'none') {
+      // CI: read-only `cdk diff` against staging.
       role.addToPolicy(
         new PolicyStatement({
-          sid: 'ReadE2eAccounts',
-          actions: ['secretsmanager:GetSecretValue', 'secretsmanager:DescribeSecret'],
-          resources: [e2eSecretArn],
+          sid: 'AssumeCdkLookupRole',
+          actions: ['sts:AssumeRole', 'sts:TagSession'],
+          resources: cdkRoleArns(cfg, cfg.environments.staging.qualifier, ['lookup']),
         }),
-      );
-      acknowledge(
-        role,
-        'One named secret; Secrets Manager appends a random suffix to every secret ARN.',
-        `AwsSolutions-IAM5[Resource::${e2eSecretArn}]`,
       );
     }
 

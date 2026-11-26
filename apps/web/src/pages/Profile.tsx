@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
+  ApiError,
   MAX_OPEN_LIMIT,
   needsFreshSignIn,
   type ArtistSummary,
@@ -372,7 +373,100 @@ function Security({
         {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       </div>
       {cfg.smsMfa && <TextCodes cfg={cfg} token={token} />}
+      {(cfg.socialProviders?.length ?? 0) > 0 && <SocialAuthenticator cfg={cfg} token={token} />}
     </Card>
+  );
+}
+
+/**
+ * The app authenticator for Google, Apple or Facebook sign-ins (design 6.2).
+ * Security review M2: anyone with their own password or passkey adds it here,
+ * from that sign-in, never from a social sign-in.
+ */
+function SocialAuthenticator({ cfg, token }: { cfg: AppConfig; token: string }) {
+  const [uri, setUri] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const secret = uri ? new URL(uri).searchParams.get('secret') : null;
+
+  async function setup() {
+    setMsg(null);
+    try {
+      const r = await api<{ otpauthUri: string }>(cfg, token, 'POST', '/step-up/totp/setup', {});
+      setUri(r.otpauthUri);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setMsg({
+          tone: 'success',
+          text: 'Already set up. Use it when you sign in with Google, Apple or Facebook.',
+        });
+      } else setMsg({ tone: 'error', text: (e as Error).message });
+    }
+  }
+
+  async function verify() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api(cfg, token, 'POST', '/step-up/totp/verify', { code });
+      setUri(null);
+      setCode('');
+      setMsg({
+        tone: 'success',
+        text: 'Done. Use it when you sign in with Google, Apple or Facebook.',
+      });
+    } catch (e) {
+      setMsg({ tone: 'error', text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-input pt-3">
+      <b className="text-[15px]">Authenticator for social sign-in</b>
+      <span className="src">
+        Signing in with Google, Apple or Facebook asks for a code from an authenticator app. Set it
+        up here first.
+      </span>
+      {uri && secret ? (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void verify();
+          }}
+        >
+          <span className="text-sm">
+            On your phone,{' '}
+            <a className="font-semibold underline" href={uri}>
+              open this in your authenticator
+            </a>
+            , or add this key by hand:
+          </span>
+          <code className="block break-all font-mono text-xs">{secret}</code>
+          <Field
+            label="6-digit code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="\d{6}"
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            required
+          />
+          <Button type="submit" size="sm" variant="cta" disabled={busy || code.length !== 6}>
+            Confirm
+          </Button>
+        </form>
+      ) : (
+        <Button size="sm" variant="ghost" className="self-start" onClick={() => void setup()}>
+          Set up an authenticator
+        </Button>
+      )}
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+    </div>
   );
 }
 

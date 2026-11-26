@@ -10,6 +10,6 @@ Please do **not** open a public issue. Report it privately through GitHub's **Re
 
 - Artist data. Each artist has their own KMS key, and items they mark private are refused to Blueprint by KMS itself. AI features only read an artist's data while they have opted in: their knowledge base exists only then, and consent is checked again before every read and every transcription.
 - The AWS account. A permission boundary sits on every role; GuardDuty, Security Hub, CloudTrail and Config are always on.
-- The pipeline. Ephemeral CodeBuild runners, actor-ID webhook filters, fork-PR approval, SHA-pinned actions, and no secrets in GitHub.
+- The pipeline. Ephemeral CodeBuild runners with no deploy rights of their own, actor-ID webhook filters, fork-PR approval, SHA-pinned actions, and no secrets in GitHub. Deploy jobs get AWS rights only through a GitHub OIDC token issued to the staging or production environment.
 
 Never commit secrets. `bmg.config.json` holds non-secret settings only. Secrets live in AWS Secrets Manager (`blueprint secrets set`).
